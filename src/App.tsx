@@ -12,6 +12,7 @@ import { MedicoFormModal } from "./components/MedicoFormModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
 import { fechaHoyIso } from "./lib/fechas";
 import { abrirPdfEnPestana } from "./lib/pdfViewer";
+import { resumenPrestaciones } from "./lib/prestaciones";
 import { generarPdfRecetas, pdfBlobFromDoc } from "./pdf/generarRecetaPdf";
 import {
   loadMedicoSeleccionadoId,
@@ -353,8 +354,11 @@ export default function App() {
                             <td>{p.obraSocial || "—"}</td>
                             <td>{p.afiliado || "—"}</td>
                             <td>
-                              <span className="fl-texto-truncado" title={p.prestacion}>
-                                {p.prestacion || "—"}
+                              <span
+                                className="fl-texto-truncado"
+                                title={p.prestacion}
+                              >
+                                {resumenPrestaciones(p.prestacion) || "—"}
                               </span>
                             </td>
                             <td className="fl-col-actions">

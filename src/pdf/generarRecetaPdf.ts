@@ -5,6 +5,7 @@ import {
   LOGO_INECO_HEIGHT,
   LOGO_INECO_WIDTH,
 } from "../assets/logoIneco";
+import { parsePrestaciones } from "../lib/prestaciones";
 import type { ConfigMedico, Paciente } from "../types";
 
 const MARGIN = 42;
@@ -119,16 +120,27 @@ function dibujarReceta(doc: jsPDF, paciente: Paciente, medico: ConfigMedico, fec
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
   doc.setTextColor(...TEXT);
-  doc.text("Rp./", MARGIN, y);
-  y += 20;
+  doc.text("Rp//", MARGIN, y);
+  y += 28; // un poco más de aire antes del primer ítem (~medio renglón extra)
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
   doc.setTextColor(...TEXT);
-  const prestacion = paciente.prestacion?.trim() || "—";
-  const lines = doc.splitTextToSize(`- ${prestacion}`, CONTENT_W - 8);
-  doc.text(lines, MARGIN + 4, y);
-  y += lines.length * 15 + 8;
+  const lineH = 15;
+  const gapEntreItems = 8; // medio renglón entre prestaciones
+  const prestaciones = parsePrestaciones(paciente.prestacion);
+  if (prestaciones.length === 0) {
+    doc.text("- —", MARGIN + 4, y);
+    y += lineH + 8;
+  } else {
+    prestaciones.forEach((item, index) => {
+      const lines = doc.splitTextToSize(`- ${item}`, CONTENT_W - 8);
+      doc.text(lines, MARGIN + 4, y);
+      y += lines.length * lineH;
+      if (index < prestaciones.length - 1) y += gapEntreItems;
+    });
+    y += 8;
+  }
 
   // —— Firma (solo imagen + datos del médico) ——
   const firmaTop = Math.max(y + 48, PAGE_H - 230);

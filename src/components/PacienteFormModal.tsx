@@ -112,14 +112,17 @@ export function PacienteFormModal({
         </div>
 
         <div className="form-group">
-          <label htmlFor="prestacion">Prestación</label>
+          <label htmlFor="prestacion">Prestaciones</label>
           <textarea
             id="prestacion"
             rows={5}
             value={form.prestacion}
             onChange={(e) => set("prestacion", e.target.value)}
-            placeholder="Ej.: Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador: 272152"
+            placeholder={
+              "Una prestación por línea (Enter = nueva).\nEj.: Solicito Programa de Rehabilitación Integral (leve)…"
+            }
           />
+          <p className="form-hint">Enter agrega otra prestación. Las líneas vacías no se imprimen.</p>
         </div>
       </div>
     </ModalShell>
