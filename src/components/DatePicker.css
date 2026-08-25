@@ -1,0 +1,305 @@
+.fl-date-picker {
+  width: 100%;
+}
+
+.fl-date-picker__trigger {
+  display: flex;
+  align-items: stretch;
+  min-height: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.fl-date-picker__trigger:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-muted);
+}
+
+.fl-date-picker__field:focus,
+.fl-date-picker__field:focus-visible {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+
+.fl-date-picker.is-disabled .fl-date-picker__trigger {
+  opacity: 0.55;
+  cursor: default;
+  background: var(--bg-subtle);
+}
+
+.fl-date-picker__field {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.5rem 0.55rem 0.85rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.fl-date-picker__field::placeholder {
+  color: var(--text-muted);
+}
+
+.fl-date-picker__field:disabled {
+  cursor: default;
+}
+
+.fl-date-picker.is-invalid .fl-date-picker__trigger {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
+}
+
+.fl-date-picker__actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding-right: 0.25rem;
+  gap: 0.1rem;
+}
+
+.fl-date-picker__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin: auto 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.fl-date-picker__icon-btn:focus,
+.fl-date-picker__icon-btn:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.fl-date-picker__icon-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.fl-date-picker__icon-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.fl-date-picker__clear:hover:not(:disabled) {
+  color: var(--primary);
+  background: var(--primary-muted);
+}
+
+.fl-date-picker__popover {
+  padding: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.fl-date-picker__popover--portal {
+  position: fixed;
+  z-index: 1200;
+}
+
+.fl-date-picker__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.fl-date-picker__selects {
+  flex: 1;
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.fl-date-picker__select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 1.55rem 0.35rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fl-date-picker__select:first-child {
+  flex: 1.35;
+  text-transform: capitalize;
+}
+
+.fl-date-picker__select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-muted);
+}
+
+.fl-date-picker__nav {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fl-date-picker__nav:hover:not(:disabled) {
+  background: var(--primary-muted);
+  color: var(--primary);
+}
+
+.fl-date-picker__nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.fl-date-picker__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.fl-date-picker__weekday {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fl-date-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.15rem;
+}
+
+.fl-date-picker__day {
+  aspect-ratio: 1;
+  min-height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.fl-date-picker__day:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+.fl-date-picker__day.is-outside {
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.fl-date-picker__day.is-today {
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.fl-date-picker__day.is-selected {
+  background: var(--primary);
+  color: #fff;
+}
+
+.fl-date-picker__day.is-selected:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.fl-date-picker__day:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+/* Compacto — filtros densos (tipografía fluida vía --text-ui en desktop) */
+.fl-date-picker--compact .fl-date-picker__field {
+  padding: 0 clamp(0.2rem, 0.18rem + 0.05vw, 0.35rem) 0
+    clamp(0.42rem, 0.38rem + 0.08vw, 0.55rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.fl-date-picker--compact .fl-date-picker__actions {
+  padding-right: 0.12rem;
+  gap: 0;
+}
+
+.fl-date-picker--compact .fl-date-picker__icon-btn {
+  width: clamp(1.15rem, 1.1rem + 0.1vw, 1.35rem);
+  height: clamp(1.15rem, 1.1rem + 0.1vw, 1.35rem);
+  font-size: clamp(0.78rem, 0.74rem + 0.07vw, 0.88rem);
+}
+
+.fl-date-picker--compact .fl-date-picker__icon-btn svg {
+  width: clamp(0.68rem, 0.64rem + 0.07vw, 0.78rem);
+  height: clamp(0.68rem, 0.64rem + 0.07vw, 0.78rem);
+}
+
+.fl-date-picker__popover--compact {
+  padding: clamp(0.48rem, 0.42rem + 0.2vh, 0.68rem);
+  font-size: clamp(0.625rem, 0.58rem + 0.09vw, 0.8125rem);
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__header {
+  gap: clamp(0.28rem, 0.24rem + 0.12vw, 0.42rem);
+  margin-bottom: clamp(0.4rem, 0.35rem + 0.15vh, 0.58rem);
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__select {
+  padding: clamp(0.18rem, 0.16rem + 0.08vh, 0.28rem) 1.25rem
+    clamp(0.18rem, 0.16rem + 0.08vh, 0.28rem) clamp(0.28rem, 0.24rem + 0.08vw, 0.38rem);
+  font-size: inherit;
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__nav {
+  width: clamp(1.4rem, 1.32rem + 0.12vw, 1.6rem);
+  height: clamp(1.4rem, 1.32rem + 0.12vw, 1.6rem);
+  font-size: clamp(0.88rem, 0.82rem + 0.1vw, 0.98rem);
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__weekdays {
+  gap: 0.1rem;
+  margin-bottom: clamp(0.22rem, 0.18rem + 0.1vh, 0.32rem);
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__weekday {
+  font-size: clamp(0.56rem, 0.52rem + 0.06vw, 0.66rem);
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__grid {
+  gap: 0.1rem;
+}
+
+.fl-date-picker__popover--compact .fl-date-picker__day {
+  min-height: clamp(1.48rem, 1.4rem + 0.22vh, 1.78rem);
+  font-size: inherit;
+  border-radius: 6px;
+}
