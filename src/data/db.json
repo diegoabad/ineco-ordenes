@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "medicoSeleccionadoId": "medico-seed-009",
   "medicos": [
     {
@@ -107,6 +107,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060416365 02 1002",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TEA.TDAH",
       "medicoId": "medico-seed-007",
       "id": "seed-001"
     },
@@ -115,6 +116,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061467417 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-002"
     },
@@ -123,6 +125,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061730641 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TEA.TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-003"
     },
@@ -131,6 +134,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061159132 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-004"
     },
@@ -139,6 +143,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061878399 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-005"
     },
@@ -147,6 +152,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061991434 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-006"
     },
@@ -155,6 +161,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061991434 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-007"
     },
@@ -163,6 +170,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060333760 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "F43",
       "medicoId": "medico-seed-006",
       "id": "seed-008"
     },
@@ -171,6 +179,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061936541 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-009"
     },
@@ -179,6 +188,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061912093 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DEPRESION",
       "medicoId": "medico-seed-006",
       "id": "seed-010"
     },
@@ -187,6 +197,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061453353 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-011"
     },
@@ -195,6 +206,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062133725 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-006",
       "id": "seed-012"
     },
@@ -203,6 +215,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000067213506 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "F25.0",
       "medicoId": "medico-seed-004",
       "id": "seed-013"
     },
@@ -211,6 +224,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061117427 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "F32.0",
       "medicoId": "medico-seed-004",
       "id": "seed-014"
     },
@@ -219,6 +233,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061610628 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-001",
       "id": "seed-015"
     },
@@ -227,6 +242,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060175558 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-001",
       "id": "seed-016"
     },
@@ -235,6 +251,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062160087 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-001",
       "id": "seed-017"
     },
@@ -243,6 +260,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061376363 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-001",
       "id": "seed-018"
     },
@@ -251,6 +269,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060470102 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-001",
       "id": "seed-019"
     },
@@ -259,6 +278,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060924457 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-020"
     },
@@ -267,6 +287,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061884950 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-021"
     },
@@ -275,6 +296,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062312693 01 1005",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-022"
     },
@@ -283,6 +305,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060533595 04 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-023"
     },
@@ -291,6 +314,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062161061 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-024"
     },
@@ -299,6 +323,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "800006 0587372 01 1044",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-025"
     },
@@ -307,6 +332,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061623915 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TAG",
       "medicoId": "medico-seed-005",
       "id": "seed-026"
     },
@@ -315,6 +341,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061958278 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-027"
     },
@@ -323,6 +350,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061003313 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "F43",
       "medicoId": "medico-seed-005",
       "id": "seed-028"
     },
@@ -331,6 +359,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060216163 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-029"
     },
@@ -339,6 +368,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000067278348 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-030"
     },
@@ -347,6 +377,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062029068 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-031"
     },
@@ -355,6 +386,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060840063 03 1031",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TAG",
       "medicoId": "medico-seed-005",
       "id": "seed-032"
     },
@@ -363,6 +395,7 @@
       "obraSocial": "Prevencion Salud",
       "afiliado": "8323502053",
       "prestacion": "SOLICITO PRI 8 Prestador: 189789",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-005",
       "id": "seed-033"
     },
@@ -371,6 +404,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000065001060 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TAG",
       "medicoId": "medico-seed-002",
       "id": "seed-034"
     },
@@ -379,6 +413,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000067420307 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TRAST. PANICO",
       "medicoId": "medico-seed-002",
       "id": "seed-035"
     },
@@ -387,6 +422,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060471017 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-002",
       "id": "seed-036"
     },
@@ -395,6 +431,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "800061385643 02 1000",
       "prestacion": "Solicito Programa de rehabilitacion Severa Codigo: 29010630 Prestador:272152",
+      "diagnostico": "TRAST. BIPOLAR",
       "medicoId": "medico-seed-002",
       "id": "seed-037"
     },
@@ -403,6 +440,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061637804 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-038"
     },
@@ -411,6 +449,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061789326 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "F43",
       "medicoId": "medico-seed-003",
       "id": "seed-039"
     },
@@ -419,6 +458,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061806855 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-040"
     },
@@ -427,6 +467,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060075168 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-041"
     },
@@ -435,6 +476,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061040351 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-042"
     },
@@ -443,6 +485,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060444835 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-043"
     },
@@ -451,6 +494,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061666061 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-044"
     },
@@ -459,6 +503,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061536940 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-045"
     },
@@ -467,6 +512,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062157990 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-046"
     },
@@ -475,6 +521,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060107732 03 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-047"
     },
@@ -483,6 +530,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060216163 03 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-048"
     },
@@ -491,6 +539,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062035939 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-049"
     },
@@ -499,6 +548,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060533595 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-003",
       "id": "seed-050"
     },
@@ -507,6 +557,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060049881 03 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "ESCLEROSIS MULTIPLE",
       "medicoId": "medico-seed-012",
       "id": "seed-051"
     },
@@ -515,6 +566,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000067261504 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": "medico-seed-012",
       "id": "seed-052"
     },
@@ -523,6 +575,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061923451 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TRAST. COGNOSCITIVO LEVE",
       "medicoId": "medico-seed-012",
       "id": "seed-053"
     },
@@ -531,6 +584,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060394821 01 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-014",
       "id": "seed-054"
     },
@@ -539,6 +593,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060771129 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "F41.2",
       "medicoId": "medico-seed-014",
       "id": "seed-055"
     },
@@ -547,6 +602,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "800006083551 501 1045",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-014",
       "id": "seed-056"
     },
@@ -555,6 +611,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060031929 02 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-014",
       "id": "seed-057"
     },
@@ -563,6 +620,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060152930 01 1083",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-014",
       "id": "seed-058"
     },
@@ -571,6 +629,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060557972 00 0077",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-008",
       "id": "seed-059"
     },
@@ -579,6 +638,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000066007061 02 0077",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-009",
       "id": "seed-060"
     },
@@ -587,6 +647,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060713127 02 0052",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-009",
       "id": "seed-061"
     },
@@ -595,6 +656,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060309047 04 0021",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DEMENCIA",
       "medicoId": "medico-seed-009",
       "id": "seed-062"
     },
@@ -603,6 +665,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061967716 01 1018",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "EPILEPSIA",
       "medicoId": "medico-seed-010",
       "id": "seed-063"
     },
@@ -611,6 +674,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060197670 04 0040",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "EPILEPSIA",
       "medicoId": "medico-seed-010",
       "id": "seed-064"
     },
@@ -619,6 +683,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000062144664 03 0007",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "EPILEPSIA",
       "medicoId": "medico-seed-010",
       "id": "seed-065"
     },
@@ -627,6 +692,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060533595 03 0000",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "ALTERACIONES DEL LENGUAJE",
       "medicoId": "medico-seed-011",
       "id": "seed-066"
     },
@@ -635,6 +701,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060837615 02 1049",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "ACV",
       "medicoId": "medico-seed-013",
       "id": "seed-067"
     },
@@ -643,6 +710,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061212057 01 1016",
       "prestacion": "Solicito Programa de rehabilitacion Severa Codigo: 29010630 Prestador:272152",
+      "diagnostico": "ENCEFALITIS HERPETICA",
       "medicoId": null,
       "id": "seed-068"
     },
@@ -651,6 +719,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "800006 2011075 01 0011",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TAG",
       "medicoId": null,
       "id": "seed-069"
     },
@@ -659,6 +728,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061263210 01 0007",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": null,
       "id": "seed-070"
     },
@@ -667,6 +737,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000063153891 01 0012",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": "medico-seed-009",
       "id": "seed-071"
     },
@@ -675,6 +746,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000060925960 02 1001",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": null,
       "id": "seed-072"
     },
@@ -683,6 +755,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061936541 01 1006",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": null,
       "id": "seed-073"
     },
@@ -691,6 +764,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "8000061719696 01 1009",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "TDAH",
       "medicoId": null,
       "id": "seed-074"
     },
@@ -699,6 +773,7 @@
       "obraSocial": "Swiss Medical",
       "afiliado": "800006 3270355 01 0070",
       "prestacion": "Solicito Programa de Rehabilitación Integral (leve) Codigo: 29010628 Prestador:  272152",
+      "diagnostico": "DET COGNITIVO LEVE",
       "medicoId": null,
       "id": "seed-075"
     }

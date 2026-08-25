@@ -18,6 +18,7 @@ function toFormData(p: Paciente): PacienteFormData {
     obraSocial: p.obraSocial,
     afiliado: p.afiliado,
     prestacion: p.prestacion,
+    diagnostico: p.diagnostico,
     medicoId: p.medicoId,
   };
 }
@@ -123,6 +124,17 @@ export function PacienteFormModal({
             }
           />
           <p className="form-hint">Enter agrega otra prestación. Las líneas vacías no se imprimen.</p>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="diagnostico">Diagnóstico</label>
+          <input
+            id="diagnostico"
+            value={form.diagnostico}
+            onChange={(e) => set("diagnostico", e.target.value)}
+            placeholder="Ej.: TDAH"
+          />
+          <p className="form-hint">Aparece en la orden como DX: … debajo de las prestaciones.</p>
         </div>
       </div>
     </ModalShell>

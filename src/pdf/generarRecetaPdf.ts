@@ -142,6 +142,17 @@ function dibujarReceta(doc: jsPDF, paciente: Paciente, medico: ConfigMedico, fec
     y += 8;
   }
 
+  const diagnostico = paciente.diagnostico?.trim();
+  if (diagnostico) {
+    y += 10;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(...TEXT);
+    const dxLines = doc.splitTextToSize(`DX: ${diagnostico}`, CONTENT_W - 8);
+    doc.text(dxLines, MARGIN + 4, y);
+    y += dxLines.length * lineH;
+  }
+
   // —— Firma (solo imagen + datos del médico) ——
   const firmaTop = Math.max(y + 48, PAGE_H - 230);
   drawFirma(doc, medico, firmaTop);

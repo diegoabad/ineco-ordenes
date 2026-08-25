@@ -71,7 +71,7 @@ export default function App() {
   const qPacientes = busquedaPacientes.trim().toLowerCase();
   const pacientesFiltrados = qPacientes
     ? pacientes.filter((p) =>
-        [p.paciente, p.obraSocial, p.afiliado, p.prestacion, nombreMedico(p.medicoId)]
+        [p.paciente, p.obraSocial, p.afiliado, p.prestacion, p.diagnostico, nombreMedico(p.medicoId)]
           .join(" ")
           .toLowerCase()
           .includes(qPacientes),
@@ -309,7 +309,7 @@ export default function App() {
                     type="search"
                     value={busquedaPacientes}
                     onChange={(e) => setBusquedaPacientes(e.target.value)}
-                    placeholder="Buscar paciente, médico, obra social…"
+                    placeholder="Buscar paciente, médico, diagnóstico…"
                     aria-label="Buscar pacientes"
                   />
                 </div>
@@ -328,6 +328,7 @@ export default function App() {
                         <th className="fl-col-medico">Médico</th>
                         <th>Obra Social</th>
                         <th>Afiliado</th>
+                        <th className="fl-col-diagnostico">Diagnóstico</th>
                         <th>Prestación</th>
                         <th className="fl-col-actions">Acciones</th>
                       </tr>
@@ -353,6 +354,11 @@ export default function App() {
                             </td>
                             <td>{p.obraSocial || "—"}</td>
                             <td>{p.afiliado || "—"}</td>
+                            <td className="fl-col-diagnostico">
+                              <span className="fl-texto-truncado" title={p.diagnostico}>
+                                {p.diagnostico || "—"}
+                              </span>
+                            </td>
                             <td>
                               <span
                                 className="fl-texto-truncado"

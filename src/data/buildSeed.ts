@@ -1,3 +1,4 @@
+import { lookupDiagnostico } from "./pacienteDiagnostico";
 import { MEDICOS_SEED } from "./medicosSeed";
 import {
   isSinMedicoRef,
@@ -44,6 +45,7 @@ export function buildSeedMedicos(): Medico[] {
 export function buildSeedPacientes(medicos: Medico[] = buildSeedMedicos()): Paciente[] {
   return PACIENTES_SEED.map((p, i) => ({
     ...p,
+    diagnostico: lookupDiagnostico(p.paciente),
     medicoId: medicoIdParaPacienteNombre(p.paciente, medicos),
     id: `seed-${String(i + 1).padStart(3, "0")}`,
   }));
@@ -57,7 +59,7 @@ export function buildDeployDb() {
   const medicos = buildSeedMedicos();
   const pacientes = buildSeedPacientes(medicos);
   return {
-    version: 1 as const,
+    version: 2 as const,
     medicoSeleccionadoId: defaultMedicoId(medicos),
     medicos,
     pacientes,

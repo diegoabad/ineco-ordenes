@@ -4,6 +4,7 @@ export type Paciente = {
   obraSocial: string;
   afiliado: string;
   prestacion: string;
+  diagnostico: string;
   /** Médico habitual del paciente; null = usar el médico por defecto al imprimir. */
   medicoId: string | null;
 };
@@ -27,6 +28,7 @@ export const EMPTY_PACIENTE: PacienteFormData = {
   obraSocial: "",
   afiliado: "",
   prestacion: "",
+  diagnostico: "",
   medicoId: null,
 };
 

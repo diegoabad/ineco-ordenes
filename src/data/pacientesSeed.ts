@@ -1,7 +1,7 @@
 import type { PacienteFormData } from "../types";
 
-/** Pacientes iniciales (planilla Ineco). Sin médico: usan el por defecto al imprimir. */
-export const PACIENTES_SEED: Omit<PacienteFormData, "medicoId">[] = [
+/** Pacientes iniciales (planilla Ineco). Médico y diagnóstico se resuelven al generar el seed. */
+export const PACIENTES_SEED: Omit<PacienteFormData, "medicoId" | "diagnostico">[] = [
   {
     paciente: "Lluch Joaquin",
     obraSocial: "Swiss Medical",

@@ -1,5 +1,6 @@
 import deployDb from "./data/db.json";
 import { buildDeployDb, buildSeedMedicos, buildSeedPacientes, defaultMedicoId } from "./data/buildSeed";
+import { lookupDiagnostico } from "./data/pacienteDiagnostico";
 import type { Medico, Paciente } from "./types";
 
 const PACIENTES_KEY = "ordenes-ineco:pacientes";
@@ -21,12 +22,16 @@ function normalizePaciente(raw: Record<string, unknown>): Paciente | null {
   const id = typeof raw.id === "string" ? raw.id : crypto.randomUUID();
   const medicoId =
     typeof raw.medicoId === "string" && raw.medicoId.trim() ? raw.medicoId.trim() : null;
+  const paciente = String(raw.paciente ?? "");
+  const diagnosticoRaw = String(raw.diagnostico ?? "").trim();
+  const diagnostico = diagnosticoRaw || lookupDiagnostico(paciente);
   return {
     id,
-    paciente: String(raw.paciente ?? ""),
+    paciente,
     obraSocial: String(raw.obraSocial ?? ""),
     afiliado: String(raw.afiliado ?? ""),
     prestacion: String(raw.prestacion ?? ""),
+    diagnostico,
     medicoId,
   };
 }

@@ -516,6 +516,10 @@ tbody tr:hover td {
   width: 12rem;
 }
 
+.fl-col-diagnostico {
+  width: 9rem;
+}
+
 .fl-col-matricula {
   width: 7.5rem;
 }
