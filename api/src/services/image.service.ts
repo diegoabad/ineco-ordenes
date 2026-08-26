@@ -27,6 +27,7 @@ export async function optimizeAndSaveFirma(
   const outputPath = firmaFilePath(medicoId);
   const optimized = await sharp(input)
     .rotate()
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
     .resize({
       width: MAX_WIDTH,
       height: MAX_WIDTH,

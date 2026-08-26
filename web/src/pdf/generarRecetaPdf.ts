@@ -170,7 +170,10 @@ function drawFirma(doc: jsPDF, medico: ConfigMedico, y: number) {
 
   if (medico.firmaDataUrl) {
     try {
-      const fmt = medico.firmaDataUrl.includes("image/jpeg") ? "JPEG" : "PNG";
+      const fmt =
+        medico.firmaDataUrl.includes("image/jpeg") || medico.firmaDataUrl.includes("image/jpg")
+          ? "JPEG"
+          : "PNG";
       const props = doc.getImageProperties(medico.firmaDataUrl);
       const naturalW = props.width || 1;
       const naturalH = props.height || 1;

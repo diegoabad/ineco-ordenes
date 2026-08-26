@@ -28,3 +28,39 @@ export async function firmaToDataUrl(firmaUrl: string | null | undefined): Promi
     reader.readAsDataURL(blob);
   });
 }
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("No se pudo cargar la firma"));
+    img.src = src;
+  });
+}
+
+/** Firma lista para PDF: fondo blanco sólido (evita negro por transparencia/WebP en jsPDF). */
+export async function firmaToDataUrlForPdf(
+  firmaUrl: string | null | undefined,
+): Promise<string | null> {
+  const raw = await firmaToDataUrl(firmaUrl);
+  if (!raw) return null;
+
+  const img = await loadImage(raw);
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  if (width < 1 || height < 1) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No se pudo preparar la firma");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+
+  return canvas.toDataURL("image/jpeg", 0.92);
+}

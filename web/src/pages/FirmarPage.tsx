@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import SignatureCanvas from "react-signature-canvas";
 import { toast } from "react-toastify";
@@ -16,10 +16,13 @@ type MedicoFirmaInfo = {
 export default function FirmarPage() {
   const { medicoId } = useParams<{ medicoId: string }>();
   const padRef = useRef<SignatureCanvas>(null);
+  const padWrapRef = useRef<HTMLDivElement>(null);
+  const padSizeRef = useRef({ w: 0, h: 0 });
   const [medico, setMedico] = useState<MedicoFirmaInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [firmaVaciaError, setFirmaVaciaError] = useState(false);
   const [ok, setOk] = useState(false);
 
   useEffect(() => {
@@ -50,14 +53,63 @@ export default function FirmarPage() {
     };
   }, [medicoId]);
 
+  const resizePad = useCallback(() => {
+    const pad = padRef.current;
+    const wrap = padWrapRef.current;
+    if (!pad || !wrap) return;
+
+    const width = wrap.clientWidth;
+    const height = wrap.clientHeight;
+    if (width < 1 || height < 1) return;
+    if (padSizeRef.current.w === width && padSizeRef.current.h === height) return;
+    padSizeRef.current = { w: width, h: height };
+
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+    const canvas = pad.getCanvas();
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(ratio, ratio);
+    }
+
+    pad.clear();
+  }, []);
+
+  useEffect(() => {
+    if (!medico || loading || ok) return;
+
+    const run = () => requestAnimationFrame(() => resizePad());
+    run();
+
+    const wrap = padWrapRef.current;
+    const ro = new ResizeObserver(run);
+    if (wrap) ro.observe(wrap);
+
+    window.addEventListener("resize", run);
+    window.addEventListener("orientationchange", run);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", run);
+      window.removeEventListener("orientationchange", run);
+    };
+  }, [medico, loading, ok, resizePad]);
+
   async function guardar() {
     if (!medicoId || !padRef.current || padRef.current.isEmpty()) {
-      toast.warning("Dibujá tu firma antes de guardar.");
+      setFirmaVaciaError(true);
+      toast.warning("No se puede guardar una firma vacía. Dibujá tu firma en el recuadro.");
       return;
     }
 
     setSaving(true);
     setError("");
+    setFirmaVaciaError(false);
 
     try {
       const canvas = padRef.current.getCanvas();
@@ -118,10 +170,9 @@ export default function FirmarPage() {
   }
 
   return (
-    <div className="firmar-page">
-      <div className="firmar-card">
+    <div className="firmar-page firmar-page--sign">
+      <div className="firmar-card firmar-card--sign">
         <header className="firmar-card__header">
-          <span className="app-logo">INECO</span>
           <div>
             <h1>Firma digital</h1>
             <p className="text-muted">
@@ -137,27 +188,49 @@ export default function FirmarPage() {
           </p>
         ) : null}
 
-        <div className="signature-pad-wrap">
+        <div
+          className={`signature-pad-wrap${firmaVaciaError ? " signature-pad-wrap--error" : ""}`}
+          ref={padWrapRef}
+        >
           <SignatureCanvas
             ref={padRef}
             penColor="#111827"
+            minWidth={1.2}
+            maxWidth={2.8}
+            velocityFilterWeight={0.7}
+            onBegin={() => setFirmaVaciaError(false)}
             canvasProps={{
               className: "signature-pad",
               "aria-label": "Área para dibujar la firma",
+              "aria-invalid": firmaVaciaError,
             }}
           />
         </div>
 
+        {firmaVaciaError ? (
+          <p className="firmar-error firmar-error--inline" role="alert">
+            No se puede guardar una firma vacía. Dibujá tu firma en el recuadro de arriba.
+          </p>
+        ) : null}
+
         <div className="firmar-actions">
           <button
             type="button"
-            className="btn btn-secondary"
-            onClick={() => padRef.current?.clear()}
+            className="btn btn-secondary btn-firmar"
+            onClick={() => {
+              padRef.current?.clear();
+              setFirmaVaciaError(false);
+            }}
             disabled={saving}
           >
             Borrar
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => void guardar()} disabled={saving}>
+          <button
+            type="button"
+            className="btn btn-primary btn-firmar"
+            onClick={() => void guardar()}
+            disabled={saving}
+          >
             {saving ? "Guardando…" : "Guardar firma"}
           </button>
         </div>

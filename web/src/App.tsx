@@ -13,7 +13,7 @@ import {
 } from "./components/Icons";
 import { MedicoFormModal } from "./components/MedicoFormModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
-import { firmaSrc, firmaToDataUrl } from "./lib/firma";
+import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
 import { subscribeFirmaActualizada } from "./lib/firmaSync";
 import { fechaHoyIso } from "./lib/fechas";
@@ -289,7 +289,7 @@ export default function App() {
         );
         return;
       }
-      const firmaDataUrl = await firmaToDataUrl(medico.firmaUrl);
+      const firmaDataUrl = await firmaToDataUrlForPdf(medico.firmaUrl);
       items.push({ paciente: p, medico: toConfigMedico(medico, firmaDataUrl) });
     }
 
@@ -327,7 +327,6 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header__brand">
-          <span className="app-logo">INECO</span>
           <div>
             <h1>Órdenes Ineco</h1>
             <p>Pacientes y médicos para generar órdenes</p>

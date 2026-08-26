@@ -167,7 +167,7 @@ export function MedicoFormModal({
                     setRemoveFirma(true);
                   }}
                 >
-                  Quitar
+                  Quitar firma
                 </button>
               ) : (
                 <span className="text-muted">Sin firma cargada</span>
