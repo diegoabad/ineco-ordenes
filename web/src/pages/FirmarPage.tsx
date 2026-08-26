@@ -179,73 +179,75 @@ export default function FirmarPage() {
     <div className="firmar-page firmar-page--sign">
       <div className="firmar-card firmar-card--sign">
         <header className="firmar-card__header">
-          <div>
-            <h1>Firma digital</h1>
-            <p className="text-muted">
-              {medico?.nombre}
-              {medico?.especialidad ? ` · ${medico.especialidad}` : ""}
-            </p>
-          </div>
+          <p className="firmar-card__eyebrow">Firma digital</p>
+          <h1 className="firmar-medico-nombre">{medico?.nombre}</h1>
+          {medico?.especialidad ? (
+            <p className="firmar-medico-esp">{medico.especialidad}</p>
+          ) : null}
         </header>
 
-        {medico?.tieneFirma ? (
-          <p className="firmar-hint">
-            Ya hay una firma cargada. Si guardás de nuevo, se reemplaza.
-          </p>
-        ) : null}
+        <div className="firmar-sign-body">
+          {medico?.tieneFirma ? (
+            <p className="firmar-hint">
+              Ya hay una firma cargada. Si guardás de nuevo, se reemplaza.
+            </p>
+          ) : null}
 
-        <div
-          className={`signature-pad-wrap${firmaVaciaError ? " signature-pad-wrap--error" : ""}`}
-          ref={padWrapRef}
-        >
-          <SignatureCanvas
-            ref={padRef}
-            penColor="#111827"
-            minWidth={1.2}
-            maxWidth={2.8}
-            velocityFilterWeight={0.7}
-            onBegin={() => setFirmaVaciaError(false)}
-            canvasProps={{
-              className: "signature-pad",
-              "aria-label": "Área para dibujar la firma",
-              "aria-invalid": firmaVaciaError,
-            }}
-          />
+          <div
+            className={`signature-pad-wrap${firmaVaciaError ? " signature-pad-wrap--error" : ""}`}
+            ref={padWrapRef}
+          >
+            <SignatureCanvas
+              ref={padRef}
+              penColor="#111827"
+              minWidth={1.2}
+              maxWidth={2.8}
+              velocityFilterWeight={0.7}
+              onBegin={() => setFirmaVaciaError(false)}
+              canvasProps={{
+                className: "signature-pad",
+                "aria-label": "Área para dibujar la firma",
+                "aria-invalid": firmaVaciaError,
+              }}
+            />
+          </div>
+
+          {firmaVaciaError ? (
+            <p className="firmar-error firmar-error--inline" role="alert">
+              No se puede guardar una firma vacía. Dibujá tu firma en el recuadro de arriba.
+            </p>
+          ) : null}
+
+          {error ? <p className="firmar-error">{error}</p> : null}
         </div>
 
-        {firmaVaciaError ? (
-          <p className="firmar-error firmar-error--inline" role="alert">
-            No se puede guardar una firma vacía. Dibujá tu firma en el recuadro de arriba.
+        <div className="firmar-sign-footer">
+          <p className="firmar-footnote text-muted">
+            Usá el mouse, el dedo o un lápiz sobre la pantalla táctil.
           </p>
-        ) : null}
 
-        <div className="firmar-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-firmar"
-            onClick={() => {
-              padRef.current?.clear();
-              setFirmaVaciaError(false);
-            }}
-            disabled={saving}
-          >
-            Borrar
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-firmar"
-            onClick={() => void guardar()}
-            disabled={saving}
-          >
-            {saving ? "Guardando…" : "Guardar firma"}
-          </button>
+          <div className="firmar-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-firmar"
+              onClick={() => {
+                padRef.current?.clear();
+                setFirmaVaciaError(false);
+              }}
+              disabled={saving}
+            >
+              Borrar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-firmar"
+              onClick={() => void guardar()}
+              disabled={saving}
+            >
+              {saving ? "Guardando…" : "Guardar firma"}
+            </button>
+          </div>
         </div>
-
-        {error ? <p className="firmar-error">{error}</p> : null}
-
-        <p className="firmar-footnote text-muted">
-          Usá el mouse, el dedo o un lápiz sobre la pantalla táctil.
-        </p>
       </div>
     </div>
   );

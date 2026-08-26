@@ -878,10 +878,24 @@ tbody tr:hover td {
 }
 
 .firmar-card--sign {
-  width: min(100%, 40rem);
+  width: min(100%, 36rem);
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.firmar-sign-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.firmar-sign-footer {
+  margin-top: auto;
+  padding-top: 1rem;
+  flex-shrink: 0;
 }
 
 .firmar-card--success {
@@ -929,15 +943,37 @@ tbody tr:hover td {
 
 .firmar-card__header {
   display: flex;
-  gap: 1rem;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.35rem;
   margin-bottom: 1rem;
   flex-shrink: 0;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
 }
 
-.firmar-card__header h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.25rem;
+.firmar-card__eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.firmar-medico-nombre {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.firmar-medico-esp {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 .firmar-hint {
@@ -948,8 +984,10 @@ tbody tr:hover td {
 }
 
 .signature-pad-wrap {
-  flex: 1;
-  min-height: 18rem;
+  flex: none;
+  height: 14rem;
+  min-height: 14rem;
+  max-height: 14rem;
   border: 2px dashed var(--border);
   border-radius: var(--radius);
   background: #fff;
@@ -970,7 +1008,7 @@ tbody tr:hover td {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 18rem;
+  min-height: 0;
   cursor: crosshair;
   touch-action: none;
 }
@@ -978,9 +1016,13 @@ tbody tr:hover td {
 .firmar-actions {
   display: flex;
   gap: 0.75rem;
-  justify-content: flex-end;
-  margin-top: 1rem;
+  justify-content: stretch;
+  margin-top: 0.75rem;
   flex-shrink: 0;
+}
+
+.firmar-actions .btn-firmar {
+  flex: 1;
 }
 
 .btn-firmar {
@@ -1000,7 +1042,7 @@ tbody tr:hover td {
 }
 
 .firmar-footnote {
-  margin: 0.75rem 0 0;
+  margin: 0;
   font-size: 0.8125rem;
   text-align: center;
   flex-shrink: 0;
@@ -1018,7 +1060,7 @@ tbody tr:hover td {
 
   .firmar-card--sign {
     width: 100%;
-    min-height: auto;
+    min-height: calc(100svh - 2rem);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
@@ -1028,40 +1070,60 @@ tbody tr:hover td {
 
   .firmar-card__header {
     margin-bottom: 0.75rem;
+    padding-bottom: 0.85rem;
   }
 
-  .firmar-card__header h1 {
-    font-size: 1.125rem;
+  .firmar-medico-nombre {
+    font-size: 1.25rem;
+  }
+
+  .firmar-medico-esp {
+    font-size: 0.9375rem;
+  }
+
+  .firmar-sign-body {
+    justify-content: center;
+    align-items: center;
+  }
+
+  .firmar-hint,
+  .firmar-error--inline,
+  .firmar-sign-body > .firmar-error {
+    width: 100%;
   }
 
   .signature-pad-wrap {
-    flex: none;
-    height: 11rem;
-    min-height: 11rem;
-    max-height: 11rem;
+    width: min(100%, 22rem);
+    margin-inline: auto;
+    height: 13.2rem;
+    min-height: 13.2rem;
+    max-height: 13.2rem;
     border-width: 2px;
   }
 
-  .signature-pad {
-    min-height: 11rem;
-    height: 11rem;
+  .firmar-sign-footer {
+    padding-top: 0.75rem;
   }
 
   .firmar-actions {
-    flex-direction: column-reverse;
+    flex-direction: column;
     gap: 0.5rem;
     margin-top: 0.75rem;
   }
 
+  .firmar-actions .btn-primary {
+    order: -1;
+  }
+
   .firmar-actions .btn-firmar {
     width: 100%;
+    flex: none;
     justify-content: center;
     min-height: 3rem;
     font-size: 1rem;
   }
 
   .firmar-footnote {
-    margin-top: 0.5rem;
     font-size: 0.75rem;
   }
 }
@@ -1073,16 +1135,18 @@ tbody tr:hover td {
   }
 
   .firmar-card--sign {
-    min-height: 32rem;
+    min-height: auto;
     padding: 1.75rem;
   }
 
-  .signature-pad-wrap {
-    min-height: 22rem;
+  .firmar-medico-nombre {
+    font-size: 1.5rem;
   }
 
-  .signature-pad {
-    min-height: 22rem;
+  .signature-pad-wrap {
+    height: 13rem;
+    min-height: 13rem;
+    max-height: 13rem;
   }
 }
 
