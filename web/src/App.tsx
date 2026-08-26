@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "react-toastify";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DatePicker } from "./components/DatePicker";
 import {
   IconFile,
@@ -11,6 +13,7 @@ import {
 import { MedicoFormModal } from "./components/MedicoFormModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
 import { firmaSrc, firmaToDataUrl } from "./lib/firma";
+import { subscribeFirmaActualizada } from "./lib/firmaSync";
 import { fechaHoyIso } from "./lib/fechas";
 import { abrirPdfEnPestana } from "./lib/pdfViewer";
 import { resumenPrestaciones } from "./lib/prestaciones";
@@ -63,6 +66,13 @@ export default function App() {
   const [editingPaciente, setEditingPaciente] = useState<Paciente | null>(null);
   const [medicoFormOpen, setMedicoFormOpen] = useState(false);
   const [editingMedico, setEditingMedico] = useState<Medico | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+  const [firmaCacheBust, setFirmaCacheBust] = useState<Record<string, number>>({});
 
   const medicoPorDefecto =
     medicos.find((m) => m.id === medicoSeleccionadoId) ?? medicos[0] ?? null;
@@ -82,9 +92,50 @@ export default function App() {
     }
   }, []);
 
+  const refrescarMedicos = useCallback(async () => {
+    try {
+      const db = await fetchDb();
+      setMedicos(db.medicos);
+      setEditingMedico((prev) => {
+        if (!prev) return prev;
+        return db.medicos.find((m) => m.id === prev.id) ?? prev;
+      });
+    } catch {
+      // silencioso: el usuario puede seguir trabajando con datos en memoria
+    }
+  }, []);
+
+  const aplicarMedicoActualizado = useCallback((medico: Medico) => {
+    setMedicos((prev) => {
+      const exists = prev.some((m) => m.id === medico.id);
+      if (exists) return prev.map((m) => (m.id === medico.id ? medico : m));
+      return [...prev, medico];
+    });
+    setEditingMedico((prev) => (prev?.id === medico.id ? medico : prev));
+    if (medico.firmaUrl) {
+      setFirmaCacheBust((prev) => ({ ...prev, [medico.id]: Date.now() }));
+    }
+  }, []);
+
   useEffect(() => {
     void cargarDatos();
   }, [cargarDatos]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeFirmaActualizada(aplicarMedicoActualizado);
+
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        void refrescarMedicos();
+      }
+    }
+
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      unsubscribe();
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refrescarMedicos, aplicarMedicoActualizado]);
 
   function nombreMedico(medicoId: string | null): string {
     if (!medicoId) return "";
@@ -121,7 +172,7 @@ export default function App() {
     try {
       await saveMedicoSeleccionadoId(id);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "No se pudo guardar el médico por defecto");
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el médico por defecto");
       void cargarDatos();
     }
   }
@@ -131,25 +182,37 @@ export default function App() {
       if (id) {
         const paciente = await updatePaciente(id, data);
         setPacientes((prev) => prev.map((p) => (p.id === id ? paciente : p)));
+        toast.success("Paciente actualizado");
       } else {
         const paciente = await createPaciente(data);
         setPacientes((prev) => [...prev, paciente]);
+        toast.success("Paciente creado");
       }
       setPacienteFormOpen(false);
       setEditingPaciente(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "No se pudo guardar el paciente");
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el paciente");
     }
   }
 
-  async function handleDeletePaciente(id: string) {
-    if (!confirm("¿Eliminar este paciente?")) return;
-    try {
-      await deletePaciente(id);
-      setPacientes((prev) => prev.filter((p) => p.id !== id));
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "No se pudo eliminar el paciente");
-    }
+  function handleDeletePaciente(id: string) {
+    const paciente = pacientes.find((p) => p.id === id);
+    setConfirmDialog({
+      title: "Eliminar paciente",
+      message: paciente
+        ? `¿Eliminar a ${paciente.paciente}? Esta acción no se puede deshacer.`
+        : "¿Eliminar este paciente? Esta acción no se puede deshacer.",
+      confirmLabel: "Eliminar",
+      onConfirm: async () => {
+        try {
+          await deletePaciente(id);
+          setPacientes((prev) => prev.filter((p) => p.id !== id));
+          toast.success("Paciente eliminado");
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "No se pudo eliminar el paciente");
+        }
+      },
+    });
   }
 
   async function handleSaveMedico({ data, id, firmaFile, removeFirma }: MedicoSavePayload) {
@@ -165,11 +228,7 @@ export default function App() {
         medico = await uploadFirmaMedico(medico.id, firmaFile);
       }
 
-      setMedicos((prev) => {
-        const exists = prev.some((m) => m.id === medico.id);
-        if (exists) return prev.map((m) => (m.id === medico.id ? medico : m));
-        return [...prev, medico];
-      });
+      aplicarMedicoActualizado(medico);
 
       if (!medicoSeleccionadoId) {
         setMedicoSeleccionadoId(medico.id);
@@ -177,34 +236,45 @@ export default function App() {
 
       setMedicoFormOpen(false);
       setEditingMedico(null);
+      toast.success(id ? "Médico actualizado" : "Médico creado");
     } catch (error) {
-      alert(error instanceof Error ? error.message : "No se pudo guardar el médico");
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el médico");
     } finally {
       setSavingMedico(false);
     }
   }
 
-  async function handleDeleteMedico(id: string) {
-    if (!confirm("¿Eliminar este médico?")) return;
-    try {
-      await deleteMedico(id);
-      setMedicos((prev) => prev.filter((m) => m.id !== id));
-      setPacientes((prev) =>
-        prev.map((p) => (p.medicoId === id ? { ...p, medicoId: null } : p)),
-      );
-      if (medicoSeleccionadoId === id) {
-        const restante = medicos.find((m) => m.id !== id);
-        await handleMedicoSeleccionadoChange(restante?.id ?? null);
-      }
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "No se pudo eliminar el médico");
-    }
+  function handleDeleteMedico(id: string) {
+    const medico = medicos.find((m) => m.id === id);
+    setConfirmDialog({
+      title: "Eliminar médico",
+      message: medico
+        ? `¿Eliminar a ${medico.nombre}? Los pacientes asignados quedarán sin médico.`
+        : "¿Eliminar este médico?",
+      confirmLabel: "Eliminar",
+      onConfirm: async () => {
+        try {
+          await deleteMedico(id);
+          setMedicos((prev) => prev.filter((m) => m.id !== id));
+          setPacientes((prev) =>
+            prev.map((p) => (p.medicoId === id ? { ...p, medicoId: null } : p)),
+          );
+          if (medicoSeleccionadoId === id) {
+            const restante = medicos.find((m) => m.id !== id);
+            await handleMedicoSeleccionadoChange(restante?.id ?? null);
+          }
+          toast.success("Médico eliminado");
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "No se pudo eliminar el médico");
+        }
+      },
+    });
   }
 
   async function imprimirOrdenes(list: Paciente[]) {
     if (list.length === 0) return;
     if (!fechaOrden) {
-      alert("Indicá la fecha de la orden.");
+      toast.warning("Indicá la fecha de la orden.");
       return;
     }
 
@@ -212,7 +282,7 @@ export default function App() {
     for (const p of list) {
       const medico = medicoParaPaciente(p);
       if (!medico) {
-        alert(
+        toast.warning(
           `No hay médico para "${p.paciente}". Asignale uno en el paciente o elegí un médico por defecto.`,
         );
         return;
@@ -538,8 +608,12 @@ export default function App() {
                           </td>
                           <td className="fl-col-matricula">{m.matricula || "—"}</td>
                           <td className="fl-col-firma">
-                            {firmaSrc(m.firmaUrl) ? (
-                              <img src={firmaSrc(m.firmaUrl)!} alt="Firma" className="firma-preview" />
+                            {firmaSrc(m.firmaUrl, firmaCacheBust[m.id]) ? (
+                              <img
+                                src={firmaSrc(m.firmaUrl, firmaCacheBust[m.id])!}
+                                alt="Firma"
+                                className="firma-preview"
+                              />
                             ) : (
                               <span className="text-muted">Sin firma</span>
                             )}
@@ -595,12 +669,26 @@ export default function App() {
       <MedicoFormModal
         open={medicoFormOpen}
         initial={editingMedico}
+        firmaCacheBust={editingMedico ? firmaCacheBust[editingMedico.id] : undefined}
         saving={savingMedico}
         onClose={() => {
           setMedicoFormOpen(false);
           setEditingMedico(null);
         }}
         onSave={handleSaveMedico}
+      />
+
+      <ConfirmDialog
+        open={confirmDialog !== null}
+        title={confirmDialog?.title ?? ""}
+        message={confirmDialog?.message ?? ""}
+        confirmLabel={confirmDialog?.confirmLabel}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          const action = confirmDialog?.onConfirm;
+          setConfirmDialog(null);
+          void action?.();
+        }}
       />
     </div>
   );

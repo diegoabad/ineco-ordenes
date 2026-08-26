@@ -1,7 +1,13 @@
 import { resolveAssetUrl } from "../config/api";
 
-export function firmaSrc(firmaUrl: string | null | undefined): string | null {
-  return resolveAssetUrl(firmaUrl);
+export function firmaSrc(
+  firmaUrl: string | null | undefined,
+  cacheBust?: number | string,
+): string | null {
+  const src = resolveAssetUrl(firmaUrl);
+  if (!src || cacheBust === undefined) return src;
+  const sep = src.includes("?") ? "&" : "?";
+  return `${src}${sep}v=${cacheBust}`;
 }
 
 export async function firmaToDataUrl(firmaUrl: string | null | undefined): Promise<string | null> {

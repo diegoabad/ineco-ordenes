@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { toast } from "react-toastify";
+import { buildFirmaLink } from "../lib/firmaLink";
 import { firmaSrc } from "../lib/firma";
 import type { Medico, MedicoFormData, MedicoSavePayload } from "../types";
 import { EMPTY_MEDICO } from "../types";
-import { IconUpload, IconX } from "./Icons";
+import { IconLink, IconUpload, IconX } from "./Icons";
 
 type Props = {
   open: boolean;
   initial?: Medico | null;
+  firmaCacheBust?: number;
   saving?: boolean;
   onClose: () => void;
   onSave: (payload: MedicoSavePayload) => void | Promise<void>;
@@ -21,7 +24,14 @@ function toFormData(m: Medico): MedicoFormData {
   };
 }
 
-export function MedicoFormModal({ open, initial, saving = false, onClose, onSave }: Props) {
+export function MedicoFormModal({
+  open,
+  initial,
+  firmaCacheBust,
+  saving = false,
+  onClose,
+  onSave,
+}: Props) {
   const [form, setForm] = useState<MedicoFormData>(EMPTY_MEDICO);
   const [firmaFile, setFirmaFile] = useState<File | null>(null);
   const [removeFirma, setRemoveFirma] = useState(false);
@@ -53,7 +63,7 @@ export function MedicoFormModal({ open, initial, saving = false, onClose, onSave
   function handleFirmaChange(file: File | null) {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      alert("Seleccioná una imagen (PNG o JPG).");
+      toast.warning("Seleccioná una imagen (PNG o JPG).");
       return;
     }
     setFirmaFile(file);
@@ -72,7 +82,20 @@ export function MedicoFormModal({ open, initial, saving = false, onClose, onSave
   }
 
   const editing = Boolean(initial);
-  const firmaVisible = previewUrl ?? (removeFirma ? null : firmaSrc(form.firmaUrl));
+  const firmaVisible =
+    previewUrl ?? (removeFirma ? null : firmaSrc(form.firmaUrl, firmaCacheBust));
+
+  async function copiarLinkFirma() {
+    if (!initial?.id) return;
+    const link = buildFirmaLink(initial.id);
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success("Link copiado. Enviáselo al médico para que firme.");
+    } catch {
+      toast.info(link, { autoClose: 8000 });
+      toast.warning("No se pudo copiar automáticamente. Copiá el link del mensaje anterior.");
+    }
+  }
 
   return (
     <ModalShell
@@ -123,8 +146,18 @@ export function MedicoFormModal({ open, initial, saving = false, onClose, onSave
                 onClick={() => firmaInputRef.current?.click()}
               >
                 <IconUpload size={14} />
-                {firmaVisible ? "Cambiar firma" : "Cargar firma"}
+                Subir archivo
               </button>
+              {initial?.id ? (
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => void copiarLinkFirma()}
+                >
+                  <IconLink size={14} />
+                  Copiar link
+                </button>
+              ) : null}
               <input
                 ref={firmaInputRef}
                 type="file"

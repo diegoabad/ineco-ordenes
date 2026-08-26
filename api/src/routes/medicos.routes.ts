@@ -71,6 +71,31 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+router.get("/:id/firma-info", async (req, res) => {
+  try {
+    const medico = await getMedicoById(paramId(req));
+    if (!medico) {
+      res.status(404).json({ ok: false, message: "Médico no encontrado" });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        id: medico.id,
+        nombre: medico.nombre,
+        especialidad: medico.especialidad,
+        tieneFirma: Boolean(medico.firmaUrl),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al obtener médico",
+    });
+  }
+});
+
 router.delete("/:id", async (req, res) => {
   try {
     const id = paramId(req);
