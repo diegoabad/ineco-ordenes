@@ -281,6 +281,7 @@ export default function App() {
     }
 
     const items: { paciente: Paciente; medico: ConfigMedico }[] = [];
+    const firmasFaltantes: string[] = [];
     for (const p of list) {
       const medico = medicoParaPaciente(p);
       if (!medico) {
@@ -290,7 +291,17 @@ export default function App() {
         return;
       }
       const firmaDataUrl = await firmaToDataUrlForPdf(medico.firmaUrl);
+      if (medico.firmaUrl && !firmaDataUrl) {
+        firmasFaltantes.push(medico.nombre);
+      }
       items.push({ paciente: p, medico: toConfigMedico(medico, firmaDataUrl) });
+    }
+
+    if (firmasFaltantes.length > 0) {
+      const unicos = [...new Set(firmasFaltantes)];
+      toast.warning(
+        `No se encontró la firma en el servidor para: ${unicos.join(", ")}. El PDF se generará sin firma.`,
+      );
     }
 
     const doc = generarPdfRecetas(items, fechaOrden);

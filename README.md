@@ -69,7 +69,8 @@ La app queda en `http://servidor:8081` (o el puerto definido en `APP_PORT`).
 ```
 nginx :80  →  /          → SPA (web/dist)
            →  /api/*     → Node :3000
-           →  /uploads/* → Node :3000 (firmas)
+           →  /uploads/firmas/* → nginx (archivos en disco)
+           →  /uploads/*     → Node :3000 (resto)
            →  /health    → Node :3000
 ```
 
@@ -78,9 +79,21 @@ nginx :80  →  /          → SPA (web/dist)
 | Dato | Dónde |
 |---|---|
 | Pacientes y médicos | Firebase Firestore |
-| Firmas (imágenes) | Volumen `./uploads` → `/app/api/uploads` |
+| Firmas (imágenes) | Volumen `./uploads` → `/app/api/uploads` (archivos en `./uploads/firmas/` del servidor) |
 
-**Importante:** hacer backup de la carpeta `uploads/` del servidor. Sin ese volumen, las firmas se pierden al recrear el contenedor.
+**Importante:** las firmas **no están en Firestore** ni en la imagen Docker. Hay que tener los `.webp` en el servidor:
+
+```text
+servidor/
+  uploads/
+    firmas/
+      20255f0b-6321-446e-bb89-201f64cda2b9.webp
+      ...
+```
+
+Si firmaste en local, copiá `api/uploads/firmas/` al servidor. Si migraste IDs de médicos, los archivos deben usar el **UUID nuevo** como nombre. Sin esos archivos, `/uploads/firmas/...` responde 404.
+
+Hacé backup de `uploads/` antes de recrear el contenedor.
 
 ### Verificación
 

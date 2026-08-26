@@ -43,24 +43,30 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export async function firmaToDataUrlForPdf(
   firmaUrl: string | null | undefined,
 ): Promise<string | null> {
-  const raw = await firmaToDataUrl(firmaUrl);
-  if (!raw) return null;
+  if (!firmaUrl) return null;
 
-  const img = await loadImage(raw);
-  const width = img.naturalWidth || img.width;
-  const height = img.naturalHeight || img.height;
-  if (width < 1 || height < 1) return null;
+  try {
+    const raw = await firmaToDataUrl(firmaUrl);
+    if (!raw) return null;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+    const img = await loadImage(raw);
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    if (width < 1 || height < 1) return null;
 
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("No se pudo preparar la firma");
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
 
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(img, 0, 0, width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
 
-  return canvas.toDataURL("image/jpeg", 0.92);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } catch {
+    return null;
+  }
 }

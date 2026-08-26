@@ -19,7 +19,7 @@ for var in $required_vars; do
 done
 
 export PORT="${PORT:-3000}"
-export UPLOADS_DIR="${UPLOADS_DIR:-uploads/firmas}"
+export UPLOADS_DIR="${UPLOADS_DIR:-/app/api/uploads/firmas}"
 
 mkdir -p /app/api/uploads/firmas
 

@@ -15,7 +15,7 @@ services:
       FIREBASE_MESSAGING_SENDER_ID: ${FIREBASE_MESSAGING_SENDER_ID}
       FIREBASE_APP_ID: ${FIREBASE_APP_ID}
       FIREBASE_MEASUREMENT_ID: ${FIREBASE_MEASUREMENT_ID:-}
-      UPLOADS_DIR: uploads/firmas
+      UPLOADS_DIR: /app/api/uploads/firmas
       MAX_FIRMA_BYTES: ${MAX_FIRMA_BYTES:-5242880}
     volumes:
       - ./uploads:/app/api/uploads
