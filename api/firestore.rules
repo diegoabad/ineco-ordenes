@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Órdenes Ineco — acceso desde la API (uso interno INECO)
+    match /ordenes_medicos/{docId} {
+      allow read, write: if true;
+    }
+
+    match /ordenes_pacientes/{docId} {
+      allow read, write: if true;
+    }
+
+    match /ordenes_config/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

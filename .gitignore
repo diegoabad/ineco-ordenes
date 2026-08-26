@@ -12,6 +12,24 @@ dist
 dist-ssr
 *.local
 
+# API runtime
+api/uploads/firmas/*
+!api/uploads/firmas/.gitkeep
+api/.env
+api/firebase-service-account.json
+
+# Web
+web/.env
+web/node_modules
+web/dist
+
+# Legacy root node_modules
+/node_modules
+
+# Deploy (servidor)
+.env
+uploads/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
