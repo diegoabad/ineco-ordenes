@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import SignatureCanvas from "react-signature-canvas";
 import { toast } from "react-toastify";
+import { IconCheck } from "../components/Icons";
 import { apiFetch } from "../config/api";
 import { notificarFirmaActualizada } from "../lib/firmaSync";
 import type { Medico } from "../types";
@@ -146,7 +147,7 @@ export default function FirmarPage() {
 
   if (error && !medico) {
     return (
-      <div className="firmar-page">
+      <div className="firmar-page firmar-page--centered">
         <div className="firmar-card">
           <h1>No se pudo abrir</h1>
           <p className="text-muted">{error}</p>
@@ -160,10 +161,15 @@ export default function FirmarPage() {
 
   if (ok) {
     return (
-      <div className="firmar-page">
+      <div className="firmar-page firmar-page--centered">
         <div className="firmar-card firmar-card--success">
+          <div className="firmar-success-icon" aria-hidden>
+            <IconCheck size={48} />
+          </div>
           <h1>Firma guardada</h1>
-          <p>Gracias, {medico?.nombre}. Tu firma quedó registrada correctamente.</p>
+          <p>
+            Gracias, <strong>{medico?.nombre}</strong>. Tu firma quedó registrada correctamente.
+          </p>
         </div>
       </div>
     );
