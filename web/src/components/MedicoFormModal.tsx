@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "react-toastify";
-import { buildFirmaLink } from "../lib/firmaLink";
+import { copiarLinkFirma } from "../lib/firmaLink";
 import { firmaSrc } from "../lib/firma";
 import type { Medico, MedicoFormData, MedicoSavePayload } from "../types";
 import { EMPTY_MEDICO } from "../types";
@@ -85,16 +85,9 @@ export function MedicoFormModal({
   const firmaVisible =
     previewUrl ?? (removeFirma ? null : firmaSrc(form.firmaUrl, firmaCacheBust));
 
-  async function copiarLinkFirma() {
+  async function handleCopiarLinkFirma() {
     if (!initial?.id) return;
-    const link = buildFirmaLink(initial.id);
-    try {
-      await navigator.clipboard.writeText(link);
-      toast.success("Link copiado. Enviáselo al médico para que firme.");
-    } catch {
-      toast.info(link, { autoClose: 8000 });
-      toast.warning("No se pudo copiar automáticamente. Copiá el link del mensaje anterior.");
-    }
+    await copiarLinkFirma(initial.id);
   }
 
   return (
@@ -152,7 +145,7 @@ export function MedicoFormModal({
                 <button
                   type="button"
                   className="btn btn-outline btn-sm"
-                  onClick={() => void copiarLinkFirma()}
+                  onClick={() => void handleCopiarLinkFirma()}
                 >
                   <IconLink size={14} />
                   Copiar link

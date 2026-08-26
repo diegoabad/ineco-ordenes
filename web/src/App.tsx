@@ -4,6 +4,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DatePicker } from "./components/DatePicker";
 import {
   IconFile,
+  IconLink,
   IconPencil,
   IconPlus,
   IconPrinter,
@@ -13,6 +14,7 @@ import {
 import { MedicoFormModal } from "./components/MedicoFormModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
 import { firmaSrc, firmaToDataUrl } from "./lib/firma";
+import { copiarLinkFirma } from "./lib/firmaLink";
 import { subscribeFirmaActualizada } from "./lib/firmaSync";
 import { fechaHoyIso } from "./lib/fechas";
 import { abrirPdfEnPestana } from "./lib/pdfViewer";
@@ -620,6 +622,15 @@ export default function App() {
                           </td>
                           <td className="fl-col-actions">
                             <div className="fl-table-actions">
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--accent"
+                                title="Copiar link para firmar"
+                                aria-label="Copiar link para firmar"
+                                onClick={() => void copiarLinkFirma(m.id)}
+                              >
+                                <IconLink size={16} />
+                              </button>
                               <button
                                 type="button"
                                 className="fl-icon-btn"
