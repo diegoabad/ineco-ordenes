@@ -37,7 +37,7 @@ Colecciones: `ordenes_medicos`, `ordenes_pacientes`, `ordenes_config`.
 
 ### 1. GitLab — build de imagen
 
-1. Subir el repo a GitLab (ej. `gitlab.com/ineco/ordenes-ineco`)
+1. El repo está en GitLab: `gitlab.com/ineco/administracion`
 2. Habilitar Container Registry en el proyecto
 3. Crear tag de release:
 
