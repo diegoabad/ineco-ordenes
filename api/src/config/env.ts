@@ -2,6 +2,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// En Windows con antivirus/proxy a veces falla el TLS hacia Firebase.
+// Solo para desarrollo local: ALLOW_INSECURE_TLS=1 en api/.env
+if (process.env.ALLOW_INSECURE_TLS === "1") {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -22,5 +28,10 @@ export const env = {
     messagingSenderId: requireEnv("FIREBASE_MESSAGING_SENDER_ID"),
     appId: requireEnv("FIREBASE_APP_ID"),
     measurementId: process.env.FIREBASE_MEASUREMENT_ID,
+  },
+  sendgrid: {
+    apiKey: process.env.SENDGRID_API_KEY?.trim() || "",
+    fromEmail: process.env.SENDGRID_FROM_EMAIL?.trim() || "informes@ineco.ar",
+    fromName: process.env.SENDGRID_FROM_NAME?.trim() || "Órdenes Ineco",
   },
 };

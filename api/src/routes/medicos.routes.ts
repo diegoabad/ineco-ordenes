@@ -2,9 +2,9 @@ import { Router } from "express";
 import { uploadFirma } from "../middleware/upload.js";
 import {
   createMedico,
-  deleteMedico,
   getMedicoById,
   listMedicos,
+  setMedicoActivo,
   setMedicoFirmaUrl,
   updateMedico,
 } from "../services/db.service.js";
@@ -71,6 +71,32 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+router.patch("/:id/activo", async (req, res) => {
+  try {
+    const activo = (req.body as { activo?: unknown })?.activo;
+    if (typeof activo !== "boolean") {
+      res.status(400).json({ ok: false, message: "Indicá activo: true o false" });
+      return;
+    }
+    const result = await setMedicoActivo(paramId(req), activo);
+    res.json({
+      ok: true,
+      data: result.medico,
+      meta: { pacientesReasignados: result.pacientesReasignados },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Error al actualizar estado del médico";
+    const status =
+      message === "Médico no encontrado"
+        ? 404
+        : message.includes("médico por defecto")
+          ? 400
+          : 400;
+    res.status(status).json({ ok: false, message });
+  }
+});
+
 router.get("/:id/firma-info", async (req, res) => {
   try {
     const medico = await getMedicoById(paramId(req));
@@ -93,18 +119,6 @@ router.get("/:id/firma-info", async (req, res) => {
       ok: false,
       message: error instanceof Error ? error.message : "Error al obtener médico",
     });
-  }
-});
-
-router.delete("/:id", async (req, res) => {
-  try {
-    const id = paramId(req);
-    const medico = await deleteMedico(id);
-    await deleteFirmaFile(id);
-    res.json({ ok: true, data: medico });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Error al eliminar médico";
-    res.status(message === "Médico no encontrado" ? 404 : 400).json({ ok: false, message });
   }
 });
 

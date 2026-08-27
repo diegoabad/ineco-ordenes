@@ -1,46 +1,71 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { DatePicker } from "./components/DatePicker";
 import {
+  IconActivate,
+  IconEye,
   IconFile,
   IconLink,
+  IconMail,
+  IconPdf,
   IconPencil,
   IconPlus,
-  IconPrinter,
   IconSearch,
+  IconStar,
   IconTrash,
 } from "./components/Icons";
+import { EmailConfigPanel } from "./components/EmailConfigPanel";
+import {
+  EnvioResultadoModal,
+  type EnvioResultadoItem,
+} from "./components/EnvioResultadoModal";
+import { FechaOrdenModal } from "./components/FechaOrdenModal";
+import { HistorialEnviosPanel } from "./components/HistorialEnviosPanel";
 import { MedicoFormModal } from "./components/MedicoFormModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
+import { ViewDetailModal } from "./components/ViewDetailModal";
 import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
 import { subscribeFirmaActualizada } from "./lib/firmaSync";
-import { fechaHoyIso } from "./lib/fechas";
 import { abrirPdfEnPestana } from "./lib/pdfViewer";
-import { resumenPrestaciones } from "./lib/prestaciones";
 import { generarPdfRecetas, pdfBlobFromDoc } from "./pdf/generarRecetaPdf";
 import {
   createMedico,
   createPaciente,
   deleteFirmaMedico,
-  deleteMedico,
-  deletePaciente,
+  enviarOrdenEmail,
   fetchDb,
   saveMedicoSeleccionadoId,
+  setMedicoActivo,
+  setPacienteActivo,
   updateMedico,
   updatePaciente,
   uploadFirmaMedico,
 } from "./services/dataService";
 import type {
   ConfigMedico,
+  FiltroActivo,
   Medico,
   MedicoSavePayload,
   Paciente,
   PacienteFormData,
 } from "./types";
 
-type Tab = "pacientes" | "medicos";
+type Tab = "pacientes" | "medicos" | "historial" | "config";
+
+type FechaPending =
+  | { kind: "imprimir"; list: Paciente[] }
+  | { kind: "enviar"; list: Paciente[] };
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
+}
 
 function toConfigMedico(m: Medico, firmaDataUrl?: string | null): ConfigMedico {
   return {
@@ -57,17 +82,21 @@ export default function App() {
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [medicos, setMedicos] = useState<Medico[]>([]);
   const [medicoSeleccionadoId, setMedicoSeleccionadoId] = useState<string | null>(null);
-  const [fechaOrden, setFechaOrden] = useState(fechaHoyIso);
   const [busquedaPacientes, setBusquedaPacientes] = useState("");
   const [busquedaMedicos, setBusquedaMedicos] = useState("");
+  const [filtroPacientes, setFiltroPacientes] = useState<FiltroActivo>("activos");
+  const [filtroMedicos, setFiltroMedicos] = useState<FiltroActivo>("activos");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [savingMedico, setSavingMedico] = useState(false);
+  const [fechaPending, setFechaPending] = useState<FechaPending | null>(null);
 
   const [pacienteFormOpen, setPacienteFormOpen] = useState(false);
   const [editingPaciente, setEditingPaciente] = useState<Paciente | null>(null);
+  const [viewingPaciente, setViewingPaciente] = useState<Paciente | null>(null);
   const [medicoFormOpen, setMedicoFormOpen] = useState(false);
   const [editingMedico, setEditingMedico] = useState<Medico | null>(null);
+  const [viewingMedico, setViewingMedico] = useState<Medico | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
     message: string;
@@ -75,9 +104,19 @@ export default function App() {
     onConfirm: () => void | Promise<void>;
   } | null>(null);
   const [firmaCacheBust, setFirmaCacheBust] = useState<Record<string, number>>({});
+  const [enviandoTodas, setEnviandoTodas] = useState(false);
+  const [historialRefresh, setHistorialRefresh] = useState(0);
+  const [envioResultado, setEnvioResultado] = useState<{
+    items: EnvioResultadoItem[];
+    omitidosSinEmail: number;
+  } | null>(null);
 
   const medicoPorDefecto =
-    medicos.find((m) => m.id === medicoSeleccionadoId) ?? medicos[0] ?? null;
+    medicos.find((m) => m.id === medicoSeleccionadoId && m.activo) ??
+    medicos.find((m) => m.activo) ??
+    null;
+
+  const pacientesActivos = pacientes.filter((p) => p.activo);
 
   const cargarDatos = useCallback(async () => {
     setLoading(true);
@@ -146,38 +185,51 @@ export default function App() {
 
   function medicoParaPaciente(p: Paciente): Medico | null {
     if (p.medicoId) {
-      const asignado = medicos.find((m) => m.id === p.medicoId);
+      const asignado = medicos.find((m) => m.id === p.medicoId && m.activo);
       if (asignado) return asignado;
     }
     return medicoPorDefecto;
   }
 
   const qPacientes = busquedaPacientes.trim().toLowerCase();
-  const pacientesFiltrados = qPacientes
-    ? pacientes.filter((p) =>
-        [p.paciente, p.obraSocial, p.afiliado, p.prestacion, p.diagnostico, nombreMedico(p.medicoId)]
-          .join(" ")
-          .toLowerCase()
-          .includes(qPacientes),
-      )
-    : pacientes;
+  const pacientesFiltrados = pacientes.filter((p) => {
+    if (filtroPacientes === "activos" && !p.activo) return false;
+    if (filtroPacientes === "inactivos" && p.activo) return false;
+    if (!qPacientes) return true;
+    return [p.paciente, p.email, p.diagnostico, nombreMedico(p.medicoId)]
+      .join(" ")
+      .toLowerCase()
+      .includes(qPacientes);
+  });
 
-  const qMedicos = busquedaMedicos.trim().toLowerCase();
-  const medicosFiltrados = qMedicos
-    ? medicos.filter((m) =>
-        [m.nombre, m.especialidad, m.matricula].join(" ").toLowerCase().includes(qMedicos),
-      )
-    : medicos;
-
-  async function handleMedicoSeleccionadoChange(id: string | null) {
+  async function handleMedicoSeleccionadoChange(
+    id: string | null,
+    opts?: { silent?: boolean },
+  ) {
     setMedicoSeleccionadoId(id);
     try {
       await saveMedicoSeleccionadoId(id);
+      if (id && !opts?.silent) toast.success("Médico por defecto actualizado");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo guardar el médico por defecto");
       void cargarDatos();
     }
   }
+
+  const qMedicos = busquedaMedicos.trim().toLowerCase();
+  const medicosFiltrados = medicos
+    .filter((m) => {
+      if (filtroMedicos === "activos" && !m.activo) return false;
+      if (filtroMedicos === "inactivos" && m.activo) return false;
+      if (!qMedicos) return true;
+      return [m.nombre, m.especialidad, m.matricula].join(" ").toLowerCase().includes(qMedicos);
+    })
+    .slice()
+    .sort((a, b) => {
+      if (a.id === medicoSeleccionadoId) return -1;
+      if (b.id === medicoSeleccionadoId) return 1;
+      return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
+    });
 
   async function handleSavePaciente(data: PacienteFormData, id?: string) {
     try {
@@ -197,24 +249,34 @@ export default function App() {
     }
   }
 
-  function handleDeletePaciente(id: string) {
+  function handleDesactivarPaciente(id: string) {
     const paciente = pacientes.find((p) => p.id === id);
     setConfirmDialog({
-      title: "Eliminar paciente",
+      title: "Desactivar paciente",
       message: paciente
-        ? `¿Eliminar a ${paciente.paciente}? Esta acción no se puede deshacer.`
-        : "¿Eliminar este paciente? Esta acción no se puede deshacer.",
-      confirmLabel: "Eliminar",
+        ? `¿Desactivar a ${paciente.paciente}? Va a salir de la lista de activos, pero el historial se conserva.`
+        : "¿Desactivar este paciente?",
+      confirmLabel: "Desactivar",
       onConfirm: async () => {
         try {
-          await deletePaciente(id);
-          setPacientes((prev) => prev.filter((p) => p.id !== id));
-          toast.success("Paciente eliminado");
+          const actualizado = await setPacienteActivo(id, false);
+          setPacientes((prev) => prev.map((p) => (p.id === id ? actualizado : p)));
+          toast.success("Paciente desactivado");
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : "No se pudo eliminar el paciente");
+          toast.error(error instanceof Error ? error.message : "No se pudo desactivar");
         }
       },
     });
+  }
+
+  async function handleActivarPaciente(id: string) {
+    try {
+      const actualizado = await setPacienteActivo(id, true);
+      setPacientes((prev) => prev.map((p) => (p.id === id ? actualizado : p)));
+      toast.success("Paciente activado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo activar");
+    }
   }
 
   async function handleSaveMedico({ data, id, firmaFile, removeFirma }: MedicoSavePayload) {
@@ -246,36 +308,63 @@ export default function App() {
     }
   }
 
-  function handleDeleteMedico(id: string) {
+  function handleDesactivarMedico(id: string) {
     const medico = medicos.find((m) => m.id === id);
+    if (!medico) return;
+
+    if (medicoSeleccionadoId === id) {
+      toast.warning(
+        "No se puede desactivar el médico por defecto. Primero elegí otro médico por defecto (estrella).",
+      );
+      return;
+    }
+
+    const afectados = pacientes.filter((p) => p.medicoId === id);
+    const avisoPacientes =
+      afectados.length === 0
+        ? "Ningún paciente lo tiene asignado."
+        : afectados.length === 1
+          ? `El paciente ${afectados[0]!.paciente} pasará a usar el médico por defecto.`
+          : `${afectados.length} pacientes que lo tienen asignado pasarán a usar el médico por defecto.`;
+
     setConfirmDialog({
-      title: "Eliminar médico",
-      message: medico
-        ? `¿Eliminar a ${medico.nombre}? Los pacientes asignados quedarán sin médico.`
-        : "¿Eliminar este médico?",
-      confirmLabel: "Eliminar",
+      title: "Desactivar médico",
+      message: `¿Desactivar a ${medico.nombre}? ${avisoPacientes}`,
+      confirmLabel: "Desactivar",
       onConfirm: async () => {
         try {
-          await deleteMedico(id);
-          setMedicos((prev) => prev.filter((m) => m.id !== id));
-          setPacientes((prev) =>
-            prev.map((p) => (p.medicoId === id ? { ...p, medicoId: null } : p)),
-          );
-          if (medicoSeleccionadoId === id) {
-            const restante = medicos.find((m) => m.id !== id);
-            await handleMedicoSeleccionadoChange(restante?.id ?? null);
+          const { medico: actualizado, pacientesReasignados } = await setMedicoActivo(id, false);
+          setMedicos((prev) => prev.map((m) => (m.id === id ? actualizado : m)));
+          if (pacientesReasignados > 0) {
+            setPacientes((prev) =>
+              prev.map((p) => (p.medicoId === id ? { ...p, medicoId: null } : p)),
+            );
           }
-          toast.success("Médico eliminado");
+          toast.success(
+            pacientesReasignados > 0
+              ? `Médico desactivado. ${pacientesReasignados} paciente${pacientesReasignados === 1 ? "" : "s"} pasó${pacientesReasignados === 1 ? "" : "ron"} al por defecto.`
+              : "Médico desactivado",
+          );
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : "No se pudo eliminar el médico");
+          toast.error(error instanceof Error ? error.message : "No se pudo desactivar");
         }
       },
     });
   }
 
-  async function imprimirOrdenes(list: Paciente[]) {
+  async function handleActivarMedico(id: string) {
+    try {
+      const { medico: actualizado } = await setMedicoActivo(id, true);
+      setMedicos((prev) => prev.map((m) => (m.id === id ? actualizado : m)));
+      toast.success("Médico activado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo activar");
+    }
+  }
+
+  async function imprimirOrdenes(list: Paciente[], fecha: string) {
     if (list.length === 0) return;
-    if (!fechaOrden) {
+    if (!fecha) {
       toast.warning("Indicá la fecha de la orden.");
       return;
     }
@@ -304,11 +393,206 @@ export default function App() {
       );
     }
 
-    const doc = generarPdfRecetas(items, fechaOrden);
+    const doc = generarPdfRecetas(items, fecha);
     abrirPdfEnPestana(pdfBlobFromDoc(doc));
   }
 
-  const puedeImprimir = Boolean(medicoPorDefecto || pacientes.some((p) => p.medicoId));
+  async function generarYEnviarOrden(paciente: Paciente, fecha: string): Promise<string> {
+    if (!paciente.email?.trim()) {
+      throw new Error("Este paciente no tiene email cargado");
+    }
+    if (!fecha) {
+      throw new Error("Indicá la fecha de la orden.");
+    }
+
+    const medico = medicoParaPaciente(paciente);
+    if (!medico) {
+      throw new Error(
+        `No hay médico para "${paciente.paciente}". Asignale uno o elegí un médico por defecto.`,
+      );
+    }
+
+    const firmaDataUrl = await firmaToDataUrlForPdf(medico.firmaUrl);
+    if (medico.firmaUrl && !firmaDataUrl) {
+      toast.warning(
+        `No se encontró la firma de ${medico.nombre}. El PDF se enviará sin firma.`,
+      );
+    }
+
+    const doc = generarPdfRecetas(
+      [{ paciente, medico: toConfigMedico(medico, firmaDataUrl) }],
+      fecha,
+    );
+    const blob = pdfBlobFromDoc(doc);
+    const pdfBase64 = await blobToBase64(blob);
+    const filename = `orden-${paciente.paciente.replace(/\s+/g, "-") || "paciente"}-${fecha}.pdf`;
+
+    const result = await enviarOrdenEmail({
+      pacienteId: paciente.id,
+      pdfBase64,
+      filename,
+      fecha,
+      medicoNombre: medico.nombre,
+    });
+    return result.to;
+  }
+
+  function solicitarImprimir(list: Paciente[]) {
+    if (list.length === 0) return;
+    setFechaPending({ kind: "imprimir", list });
+  }
+
+  function solicitarEnviar(list: Paciente[]) {
+    if (enviandoTodas) {
+      toast.info("Ya hay un envío en curso. Esperá a que termine.");
+      return;
+    }
+    const conEmail = list.filter((p) => p.email?.trim());
+    if (conEmail.length === 0) {
+      toast.warning(
+        list.length === 1
+          ? "Este paciente no tiene email. Cargalo antes de enviar."
+          : "Ningún paciente tiene email cargado.",
+      );
+      return;
+    }
+    setFechaPending({ kind: "enviar", list: conEmail });
+  }
+
+  async function enviarOrdenPorMail(paciente: Paciente, fecha: string) {
+    const toastId = toast.loading("Enviando mail…");
+    try {
+      const to = await generarYEnviarOrden(paciente, fecha);
+      toast.update(toastId, {
+        render: `El mail se envió correctamente a ${to}`,
+        type: "success",
+        isLoading: false,
+        autoClose: 4000,
+      });
+      setHistorialRefresh((n) => n + 1);
+    } catch {
+      toast.update(toastId, {
+        render: "No se pudo enviar el mail. Revisá el historial para ver el detalle.",
+        type: "error",
+        isLoading: false,
+        autoClose: 6000,
+      });
+      setHistorialRefresh((n) => n + 1);
+    }
+  }
+
+  async function enviarTodasPorMail(list: Paciente[], fecha: string) {
+    const conEmail = list.filter((p) => p.email?.trim());
+    const sinEmail = list.length - conEmail.length;
+
+    if (conEmail.length === 0) {
+      toast.warning("Ningún paciente tiene email cargado.");
+      return;
+    }
+
+    setEnviandoTodas(true);
+    const total = conEmail.length;
+    const toastId = toast.loading(`Enviando mails… (0/${total}) · OK 0 · Falló 0`);
+    const resultados: EnvioResultadoItem[] = [];
+
+    try {
+      for (let i = 0; i < conEmail.length; i += 1) {
+        const paciente = conEmail[i]!;
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 0);
+        });
+
+        try {
+          await generarYEnviarOrden(paciente, fecha);
+          resultados.push({
+            pacienteNombre: paciente.paciente,
+            email: paciente.email.trim(),
+            ok: true,
+          });
+        } catch (error) {
+          resultados.push({
+            pacienteNombre: paciente.paciente,
+            email: paciente.email.trim(),
+            ok: false,
+            errorMessage:
+              error instanceof Error ? error.message : "No se pudo enviar el mail",
+          });
+        }
+
+        const enviados = resultados.filter((r) => r.ok).length;
+        const fallidos = resultados.length - enviados;
+        toast.update(toastId, {
+          render: `Enviando mails… (${resultados.length}/${total}) · OK ${enviados} · Falló ${fallidos}`,
+          isLoading: true,
+        });
+      }
+
+      const enviados = resultados.filter((r) => r.ok).length;
+      const fallidos = resultados.length - enviados;
+
+      if (enviados > 0 && fallidos === 0) {
+        toast.update(toastId, {
+          render:
+            `Se enviaron correctamente los ${enviados} mail${enviados === 1 ? "" : "s"}` +
+            (sinEmail > 0 ? ` (${sinEmail} sin email, omitidos)` : ""),
+          type: "success",
+          isLoading: false,
+          autoClose: 4000,
+        });
+      } else if (enviados > 0) {
+        toast.update(toastId, {
+          render: `Listo: ${enviados} enviados, ${fallidos} fallaron. Mirá el detalle.`,
+          type: "warning",
+          isLoading: false,
+          autoClose: 5000,
+        });
+      } else {
+        toast.update(toastId, {
+          render: `No se pudo enviar ningún mail (${fallidos} fallaron). Mirá el detalle.`,
+          type: "error",
+          isLoading: false,
+          autoClose: 5000,
+        });
+      }
+
+      setEnvioResultado({ items: resultados, omitidosSinEmail: sinEmail });
+    } catch {
+      toast.update(toastId, {
+        render: "No se pudieron enviar los mails. Revisá el historial para ver el detalle.",
+        type: "error",
+        isLoading: false,
+        autoClose: 7000,
+      });
+    } finally {
+      setEnviandoTodas(false);
+      setHistorialRefresh((n) => n + 1);
+    }
+  }
+
+  async function handleFechaConfirm(fecha: string) {
+    const pending = fechaPending;
+    setFechaPending(null);
+    if (!pending) return;
+
+    if (pending.kind === "imprimir") {
+      await imprimirOrdenes(pending.list, fecha);
+      return;
+    }
+
+    // El envío corre en segundo plano para no bloquear la pantalla.
+    if (pending.list.length === 1) {
+      void enviarOrdenPorMail(pending.list[0]!, fecha);
+      return;
+    }
+
+    void enviarTodasPorMail(pending.list, fecha);
+  }
+
+  const puedeImprimir = Boolean(
+    medicoPorDefecto || pacientesActivos.some((p) => p.medicoId),
+  );
+  const pacientesConEmail = pacientesActivos.filter((p) => p.email?.trim()).length;
+  const puedeEnviarTodas = pacientesConEmail > 0 && puedeImprimir && !enviandoTodas;
 
   if (loading) {
     return (
@@ -357,7 +641,8 @@ export default function App() {
               <IconPlus size={16} />
               Agregar paciente
             </button>
-          ) : (
+          ) : null}
+          {tab === "medicos" ? (
             <button
               type="button"
               className="btn btn-secondary"
@@ -369,53 +654,34 @@ export default function App() {
               <IconPlus size={16} />
               Agregar médico
             </button>
-          )}
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-print"
+            disabled={pacientesActivos.length === 0 || !puedeImprimir}
+            onClick={() => solicitarImprimir(pacientesActivos)}
+          >
+            <IconPdf size={16} />
+            Generar PDFs
+          </button>
           <button
             type="button"
             className="btn btn-primary"
-            disabled={pacientes.length === 0 || !puedeImprimir || !fechaOrden}
-            onClick={() => void imprimirOrdenes(pacientes)}
+            disabled={!puedeEnviarTodas}
+            title={
+              pacientesConEmail === 0
+                ? "Ningún paciente tiene email"
+                : enviandoTodas
+                  ? "Enviando…"
+                  : `Enviar órdenes por mail (${pacientesConEmail})`
+            }
+            onClick={() => solicitarEnviar(pacientesActivos)}
           >
-            <IconPrinter size={16} />
-            Imprimir todas
+            <IconMail size={16} />
+            {enviandoTodas ? "Enviando…" : "Enviar todas"}
           </button>
         </div>
       </header>
-
-      <section className="card app-controls-row">
-        <div className="app-controls-row__medico form-group">
-          <label htmlFor="medico-seleccionado">Médico por defecto</label>
-          <select
-            id="medico-seleccionado"
-            value={medicoSeleccionadoId ?? ""}
-            onChange={(e) => void handleMedicoSeleccionadoChange(e.target.value || null)}
-            disabled={medicos.length === 0}
-          >
-            {medicos.length === 0 ? (
-              <option value="">Sin médicos — cargá uno en la pestaña Médicos</option>
-            ) : (
-              medicos.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.nombre}
-                  {m.especialidad ? ` · ${m.especialidad}` : ""}
-                  {m.matricula ? ` · MN ${m.matricula}` : ""}
-                </option>
-              ))
-            )}
-          </select>
-        </div>
-
-        <div className="app-controls-row__fecha form-group">
-          <label htmlFor="fecha-orden">Fecha de la orden</label>
-          <DatePicker
-            id="fecha-orden"
-            value={fechaOrden}
-            onChange={setFechaOrden}
-            compact
-            aria-label="Fecha de la orden"
-          />
-        </div>
-      </section>
 
       <nav className="app-tabs app-tabs--full" aria-label="Secciones">
         <button
@@ -432,246 +698,436 @@ export default function App() {
         >
           Médicos
         </button>
+        <button
+          type="button"
+          className={`app-tabs__btn${tab === "historial" ? " is-active" : ""}`}
+          onClick={() => setTab("historial")}
+        >
+          Historial
+        </button>
+        <button
+          type="button"
+          className={`app-tabs__btn${tab === "config" ? " is-active" : ""}`}
+          onClick={() => setTab("config")}
+        >
+          Configuración
+        </button>
       </nav>
 
       {tab === "pacientes" ? (
         <section className="fl-table-card">
-          {pacientes.length === 0 ? (
-            <div className="fl-table-empty fl-table-empty--fill">
-              <div className="fl-table-empty__art">
-                <IconFile size={32} />
-              </div>
-              <p className="fl-table-empty__title">No hay pacientes todavía</p>
-              <p className="fl-table-empty__hint">
-                Agregá el primero con el botón Agregar paciente.
-              </p>
+          <div className="table-toolbar table-toolbar--filters">
+            <div className="table-search">
+              <span className="table-search__icon" aria-hidden>
+                <IconSearch size={16} />
+              </span>
+              <input
+                type="search"
+                value={busquedaPacientes}
+                onChange={(e) => setBusquedaPacientes(e.target.value)}
+                placeholder="Buscar paciente, médico, email, diagnóstico…"
+                aria-label="Buscar pacientes"
+              />
             </div>
-          ) : (
-            <>
-              <div className="table-toolbar">
-                <div className="table-search">
-                  <span className="table-search__icon" aria-hidden>
-                    <IconSearch size={16} />
-                  </span>
-                  <input
-                    type="search"
-                    value={busquedaPacientes}
-                    onChange={(e) => setBusquedaPacientes(e.target.value)}
-                    placeholder="Buscar paciente, médico, diagnóstico…"
-                    aria-label="Buscar pacientes"
-                  />
-                </div>
-              </div>
-              {pacientesFiltrados.length === 0 ? (
-                <div className="fl-table-empty">
-                  <p className="fl-table-empty__title">Sin resultados</p>
-                  <p className="fl-table-empty__hint">Proba con otro término de búsqueda.</p>
-                </div>
-              ) : (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Paciente</th>
-                        <th className="fl-col-medico">Médico</th>
-                        <th>Obra Social</th>
-                        <th>Afiliado</th>
-                        <th className="fl-col-diagnostico">Diagnóstico</th>
-                        <th>Prestación</th>
-                        <th className="fl-col-actions">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pacientesFiltrados.map((p) => {
-                        const medicoNombre = nombreMedico(p.medicoId);
-                        return (
-                          <tr key={p.id}>
-                            <td>
-                              <span className="fl-texto-principal">{p.paciente}</span>
-                            </td>
-                            <td className="fl-col-medico">
-                              {medicoNombre ? (
-                                <span className="fl-texto-truncado" title={medicoNombre}>
-                                  {medicoNombre}
-                                </span>
-                              ) : (
-                                <span className="text-muted" title="Usa el médico por defecto">
-                                  Por defecto
-                                </span>
-                              )}
-                            </td>
-                            <td>{p.obraSocial || "—"}</td>
-                            <td>{p.afiliado || "—"}</td>
-                            <td className="fl-col-diagnostico">
-                              <span className="fl-texto-truncado" title={p.diagnostico}>
-                                {p.diagnostico || "—"}
-                              </span>
-                            </td>
-                            <td>
-                              <span className="fl-texto-truncado" title={p.prestacion}>
-                                {resumenPrestaciones(p.prestacion) || "—"}
-                              </span>
-                            </td>
-                            <td className="fl-col-actions">
-                              <div className="fl-table-actions">
-                                <button
-                                  type="button"
-                                  className="fl-icon-btn fl-icon-btn--accent"
-                                  title="Imprimir orden"
-                                  aria-label="Imprimir orden"
-                                  disabled={!medicoParaPaciente(p) || !fechaOrden}
-                                  onClick={() => void imprimirOrdenes([p])}
-                                >
-                                  <IconPrinter size={16} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="fl-icon-btn"
-                                  title="Editar"
-                                  aria-label="Editar"
-                                  onClick={() => {
-                                    setEditingPaciente(p);
-                                    setPacienteFormOpen(true);
-                                  }}
-                                >
-                                  <IconPencil size={16} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="fl-icon-btn fl-icon-btn--danger"
-                                  title="Eliminar"
-                                  aria-label="Eliminar"
-                                  onClick={() => void handleDeletePaciente(p.id)}
-                                >
-                                  <IconTrash size={16} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-        </section>
-      ) : (
-        <section className="fl-table-card">
-          {medicos.length === 0 ? (
-            <div className="fl-table-empty fl-table-empty--fill">
-              <div className="fl-table-empty__art">
-                <IconFile size={32} />
-              </div>
-              <p className="fl-table-empty__title">No hay médicos todavía</p>
-              <p className="fl-table-empty__hint">
-                Agregá el primero con el botón Agregar médico.
-              </p>
+            <div className="table-toolbar__month form-group">
+              <label htmlFor="filtro-pacientes">Estado</label>
+              <select
+                id="filtro-pacientes"
+                value={filtroPacientes}
+                onChange={(e) => setFiltroPacientes(e.target.value as FiltroActivo)}
+                aria-label="Filtrar pacientes por estado"
+              >
+                <option value="activos">Activos</option>
+                <option value="inactivos">No activos</option>
+                <option value="todos">Todos</option>
+              </select>
             </div>
-          ) : (
-            <>
-              <div className="table-toolbar">
-                <div className="table-search">
-                  <span className="table-search__icon" aria-hidden>
-                    <IconSearch size={16} />
-                  </span>
-                  <input
-                    type="search"
-                    value={busquedaMedicos}
-                    onChange={(e) => setBusquedaMedicos(e.target.value)}
-                    placeholder="Buscar médico, especialidad o matrícula…"
-                    aria-label="Buscar médicos"
-                  />
-                </div>
-              </div>
-              {medicosFiltrados.length === 0 ? (
-                <div className="fl-table-empty">
-                  <p className="fl-table-empty__title">Sin resultados</p>
-                  <p className="fl-table-empty__hint">Proba con otro término de búsqueda.</p>
-                </div>
-              ) : (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th className="fl-col-nombre">Nombre</th>
-                        <th className="fl-col-especialidad">Especialidad</th>
-                        <th className="fl-col-matricula">Matrícula</th>
-                        <th className="fl-col-firma">Firma</th>
-                        <th className="fl-col-actions">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {medicosFiltrados.map((m) => (
-                        <tr
-                          key={m.id}
-                          className={m.id === medicoSeleccionadoId ? "is-selected-row" : undefined}
-                        >
-                          <td className="fl-col-nombre">
-                            <span className="fl-texto-principal fl-texto-truncado" title={m.nombre}>
-                              {m.nombre}
+          </div>
+          <div className="table-wrap">
+            <table>
+              <colgroup>
+                <col className="col-nombre" />
+                <col className="col-email" />
+                <col className="col-medico" />
+                <col className="col-actions" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Email</th>
+                  <th>Médico</th>
+                  <th className="fl-col-actions">Acciones</th>
+                </tr>
+              </thead>
+              {pacientesFiltrados.length > 0 ? (
+                <tbody>
+                  {pacientesFiltrados.map((p) => {
+                    const medicoNombre = nombreMedico(p.medicoId);
+                    return (
+                      <tr key={p.id} className={p.activo ? undefined : "is-inactive"}>
+                        <td>
+                          <span className="fl-texto-principal">{p.paciente}</span>
+                          {!p.activo ? (
+                            <span className="chip chip--muted" style={{ marginLeft: "0.4rem" }}>
+                              Inactivo
                             </span>
-                          </td>
-                          <td className="fl-col-especialidad">
-                            <span className="fl-texto-truncado" title={m.especialidad}>
-                              {m.especialidad || "—"}
+                          ) : null}
+                        </td>
+                        <td className="fl-col-email">
+                          {p.email?.trim() ? (
+                            <span className="fl-texto-truncado" title={p.email}>
+                              {p.email}
                             </span>
-                          </td>
-                          <td className="fl-col-matricula">{m.matricula || "—"}</td>
-                          <td className="fl-col-firma">
-                            {firmaSrc(m.firmaUrl, firmaCacheBust[m.id]) ? (
-                              <img
-                                src={firmaSrc(m.firmaUrl, firmaCacheBust[m.id])!}
-                                alt="Firma"
-                                className="firma-preview"
-                              />
-                            ) : (
-                              <span className="text-muted">Sin firma</span>
-                            )}
-                          </td>
-                          <td className="fl-col-actions">
-                            <div className="fl-table-actions">
-                              <button
-                                type="button"
-                                className="fl-icon-btn fl-icon-btn--accent"
-                                title="Copiar link para firmar"
-                                aria-label="Copiar link para firmar"
-                                onClick={() => void copiarLinkFirma(m.id)}
-                              >
-                                <IconLink size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="fl-icon-btn"
-                                title="Editar"
-                                aria-label="Editar"
-                                onClick={() => {
-                                  setEditingMedico(m);
-                                  setMedicoFormOpen(true);
-                                }}
-                              >
-                                <IconPencil size={16} />
-                              </button>
+                          ) : (
+                            <span className="chip chip--muted">No tiene</span>
+                          )}
+                        </td>
+                        <td className="fl-col-medico">
+                          {medicoNombre ? (
+                            <span className="fl-texto-truncado" title={medicoNombre}>
+                              {medicoNombre}
+                            </span>
+                          ) : (
+                            <span
+                              className="chip chip--default"
+                              title={
+                                medicoPorDefecto?.nombre
+                                  ? `Médico por defecto: ${medicoPorDefecto.nombre}`
+                                  : "Sin médico por defecto"
+                              }
+                            >
+                              Por defecto
+                            </span>
+                          )}
+                        </td>
+                        <td className="fl-col-actions">
+                          <div className="fl-table-actions">
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--mail"
+                              title={
+                                !p.activo
+                                  ? "Paciente inactivo"
+                                  : p.email?.trim()
+                                    ? "Enviar orden por email"
+                                    : "Sin email — cargalo en el paciente"
+                              }
+                              aria-label="Enviar orden por email"
+                              disabled={
+                                !p.activo ||
+                                enviandoTodas ||
+                                !p.email?.trim() ||
+                                !medicoParaPaciente(p)
+                              }
+                              onClick={() => solicitarEnviar([p])}
+                            >
+                              <IconMail size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--print"
+                              title={p.activo ? "Generar PDF" : "Paciente inactivo"}
+                              aria-label="Generar PDF"
+                              disabled={!p.activo || !medicoParaPaciente(p)}
+                              onClick={() => solicitarImprimir([p])}
+                            >
+                              <IconPdf size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--view"
+                              title="Ver"
+                              aria-label="Ver"
+                              onClick={() => setViewingPaciente(p)}
+                            >
+                              <IconEye size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--edit"
+                              title="Editar"
+                              aria-label="Editar"
+                              onClick={() => {
+                                setEditingPaciente(p);
+                                setPacienteFormOpen(true);
+                              }}
+                            >
+                              <IconPencil size={16} />
+                            </button>
+                            {p.activo ? (
                               <button
                                 type="button"
                                 className="fl-icon-btn fl-icon-btn--danger"
-                                title="Eliminar"
-                                aria-label="Eliminar"
-                                onClick={() => void handleDeleteMedico(m.id)}
+                                title="Desactivar"
+                                aria-label="Desactivar paciente"
+                                onClick={() => handleDesactivarPaciente(p.id)}
                               >
                                 <IconTrash size={16} />
                               </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
+                            ) : (
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--success"
+                                title="Activar"
+                                aria-label="Activar paciente"
+                                onClick={() => void handleActivarPaciente(p.id)}
+                              >
+                                <IconActivate size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              ) : null}
+            </table>
+            {pacientesFiltrados.length === 0 ? (
+              <div className="fl-table-empty fl-table-empty--fill">
+                {pacientes.length === 0 ? (
+                  <>
+                    <div className="fl-table-empty__art">
+                      <IconFile size={32} />
+                    </div>
+                    <p className="fl-table-empty__title">No hay pacientes todavía</p>
+                    <p className="fl-table-empty__hint">
+                      Agregá el primero con el botón Agregar paciente.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="fl-table-empty__title">Sin resultados</p>
+                    <p className="fl-table-empty__hint">
+                      Proba con otra búsqueda o cambiá el filtro de estado.
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : tab === "historial" ? (
+        <HistorialEnviosPanel
+          pacientes={pacientes}
+          refreshKey={historialRefresh}
+          onRetry={(paciente) => {
+            if (!paciente.activo) {
+              toast.warning("Este paciente está desactivado. Activalo para reintentar el envío.");
+              return;
+            }
+            solicitarEnviar([paciente]);
+          }}
+        />
+      ) : tab === "config" ? (
+        <EmailConfigPanel />
+      ) : (
+        <section className="fl-table-card">
+          <div className="table-toolbar table-toolbar--filters">
+            <div className="table-search">
+              <span className="table-search__icon" aria-hidden>
+                <IconSearch size={16} />
+              </span>
+              <input
+                type="search"
+                value={busquedaMedicos}
+                onChange={(e) => setBusquedaMedicos(e.target.value)}
+                placeholder="Buscar médico, especialidad o matrícula…"
+                aria-label="Buscar médicos"
+              />
+            </div>
+            <div className="table-toolbar__month form-group">
+              <label htmlFor="filtro-medicos">Estado</label>
+              <select
+                id="filtro-medicos"
+                value={filtroMedicos}
+                onChange={(e) => setFiltroMedicos(e.target.value as FiltroActivo)}
+                aria-label="Filtrar médicos por estado"
+              >
+                <option value="activos">Activos</option>
+                <option value="inactivos">No activos</option>
+                <option value="todos">Todos</option>
+              </select>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <colgroup>
+                <col className="col-nombre" />
+                <col className="col-especialidad" />
+                <col className="col-matricula" />
+                <col className="col-firma" />
+                <col className="col-actions" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Especialidad</th>
+                  <th>Matrícula</th>
+                  <th>Firma</th>
+                  <th className="fl-col-actions">Acciones</th>
+                </tr>
+              </thead>
+              {medicosFiltrados.length > 0 ? (
+                <tbody>
+                  {medicosFiltrados.map((m) => {
+                    const esPorDefecto = m.id === medicoSeleccionadoId;
+                    return (
+                      <tr
+                        key={m.id}
+                        className={[
+                          esPorDefecto ? "is-default-medico" : "",
+                          m.activo ? "" : "is-inactive",
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined}
+                      >
+                        <td>
+                          <span
+                            className={`medico-nombre${esPorDefecto ? " medico-nombre--default" : ""}`}
+                            title={m.nombre}
+                          >
+                            <span className="fl-texto-truncado">{m.nombre}</span>
+                            {esPorDefecto ? (
+                              <span
+                                className="medico-default-icon"
+                                title="Médico por defecto"
+                                aria-label="Médico por defecto"
+                              >
+                                <IconStar size={14} filled />
+                              </span>
+                            ) : null}
+                            {!m.activo ? (
+                              <span className="chip chip--muted">Inactivo</span>
+                            ) : null}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="fl-texto-truncado" title={m.especialidad}>
+                            {m.especialidad || "—"}
+                          </span>
+                        </td>
+                        <td>{m.matricula || "—"}</td>
+                        <td className="fl-col-firma">
+                          {firmaSrc(m.firmaUrl, firmaCacheBust[m.id]) ? (
+                            <img
+                              src={firmaSrc(m.firmaUrl, firmaCacheBust[m.id])!}
+                              alt="Firma"
+                              className="firma-preview"
+                            />
+                          ) : (
+                            <span className="text-muted">Sin firma</span>
+                          )}
+                        </td>
+                        <td className="fl-col-actions">
+                          <div className="fl-table-actions">
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--default"
+                              title={
+                                !m.activo
+                                  ? "Médico inactivo"
+                                  : esPorDefecto
+                                    ? "Ya es el médico por defecto"
+                                    : "Poner por defecto"
+                              }
+                              aria-label={
+                                esPorDefecto
+                                  ? "Ya es el médico por defecto"
+                                  : "Poner por defecto"
+                              }
+                              disabled={!m.activo || esPorDefecto}
+                              onClick={() => void handleMedicoSeleccionadoChange(m.id)}
+                            >
+                              <IconStar size={16} filled={esPorDefecto} />
+                            </button>
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--link"
+                              title="Copiar link para firmar"
+                              aria-label="Copiar link para firmar"
+                              onClick={() => void copiarLinkFirma(m.id)}
+                            >
+                              <IconLink size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--view"
+                              title="Ver"
+                              aria-label="Ver"
+                              onClick={() => setViewingMedico(m)}
+                            >
+                              <IconEye size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--edit"
+                              title="Editar"
+                              aria-label="Editar"
+                              onClick={() => {
+                                setEditingMedico(m);
+                                setMedicoFormOpen(true);
+                              }}
+                            >
+                              <IconPencil size={16} />
+                            </button>
+                            {m.activo ? (
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--danger"
+                                title={
+                                  esPorDefecto
+                                    ? "No se puede desactivar el médico por defecto"
+                                    : "Desactivar"
+                                }
+                                aria-label="Desactivar médico"
+                                disabled={esPorDefecto}
+                                onClick={() => handleDesactivarMedico(m.id)}
+                              >
+                                <IconTrash size={16} />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--success"
+                                title="Activar"
+                                aria-label="Activar médico"
+                                onClick={() => void handleActivarMedico(m.id)}
+                              >
+                                <IconActivate size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              ) : null}
+            </table>
+            {medicosFiltrados.length === 0 ? (
+              <div className="fl-table-empty fl-table-empty--fill">
+                {medicos.length === 0 ? (
+                  <>
+                    <div className="fl-table-empty__art">
+                      <IconFile size={32} />
+                    </div>
+                    <p className="fl-table-empty__title">No hay médicos todavía</p>
+                    <p className="fl-table-empty__hint">
+                      Agregá el primero con el botón Agregar médico.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="fl-table-empty__title">Sin resultados</p>
+                    <p className="fl-table-empty__hint">
+                      Proba con otra búsqueda o cambiá el filtro de estado.
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
         </section>
       )}
 
@@ -687,6 +1143,51 @@ export default function App() {
         onSave={handleSavePaciente}
       />
 
+      <ViewDetailModal
+        open={viewingPaciente !== null}
+        title="Detalle del paciente"
+        onClose={() => setViewingPaciente(null)}
+        fields={
+          viewingPaciente
+            ? [
+                { label: "Nombre", value: viewingPaciente.paciente },
+                {
+                  label: "Email",
+                  value: viewingPaciente.email?.trim() ? (
+                    viewingPaciente.email
+                  ) : (
+                    <span className="chip chip--muted">No tiene</span>
+                  ),
+                },
+                {
+                  label: "Médico",
+                  value: nombreMedico(viewingPaciente.medicoId) || (
+                    <span
+                      className="chip chip--default"
+                      title={
+                        medicoPorDefecto?.nombre
+                          ? `Médico por defecto: ${medicoPorDefecto.nombre}`
+                          : "Sin médico por defecto"
+                      }
+                    >
+                      Por defecto
+                    </span>
+                  ),
+                },
+                { label: "Obra Social", value: viewingPaciente.obraSocial },
+                { label: "Afiliado", value: viewingPaciente.afiliado },
+                {
+                  label: "Prestaciones",
+                  value: viewingPaciente.prestacion?.trim() ? (
+                    <span className="detail-list__multiline">{viewingPaciente.prestacion}</span>
+                  ) : undefined,
+                },
+                { label: "Diagnóstico", value: viewingPaciente.diagnostico },
+              ]
+            : []
+        }
+      />
+
       <MedicoFormModal
         open={medicoFormOpen}
         initial={editingMedico}
@@ -697,6 +1198,51 @@ export default function App() {
           setEditingMedico(null);
         }}
         onSave={handleSaveMedico}
+      />
+
+      <ViewDetailModal
+        open={viewingMedico !== null}
+        title="Detalle del médico"
+        onClose={() => setViewingMedico(null)}
+        fields={
+          viewingMedico
+            ? [
+                { label: "Nombre", value: viewingMedico.nombre },
+                { label: "Especialidad", value: viewingMedico.especialidad },
+                { label: "Matrícula", value: viewingMedico.matricula },
+                {
+                  label: "Firma",
+                  value: firmaSrc(viewingMedico.firmaUrl, firmaCacheBust[viewingMedico.id]) ? (
+                    <img
+                      src={firmaSrc(viewingMedico.firmaUrl, firmaCacheBust[viewingMedico.id])!}
+                      alt="Firma"
+                      className="firma-preview firma-preview--modal"
+                    />
+                  ) : (
+                    <span className="text-muted">Sin firma</span>
+                  ),
+                },
+              ]
+            : []
+        }
+      />
+
+      <FechaOrdenModal
+        open={fechaPending !== null}
+        title="Fecha de la orden"
+        confirmLabel={
+          fechaPending?.kind === "enviar" ? "Continuar y enviar" : "Continuar y generar"
+        }
+        onClose={() => setFechaPending(null)}
+        onConfirm={(fecha) => void handleFechaConfirm(fecha)}
+      />
+
+      <EnvioResultadoModal
+        open={envioResultado !== null}
+        items={envioResultado?.items ?? []}
+        omitidosSinEmail={envioResultado?.omitidosSinEmail ?? 0}
+        onClose={() => setEnvioResultado(null)}
+        onVerHistorial={() => setTab("historial")}
       />
 
       <ConfirmDialog

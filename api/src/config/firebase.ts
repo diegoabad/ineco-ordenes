@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore } from "firebase/firestore";
 import { env } from "./env.js";
 
 const firebaseConfig = {
@@ -13,6 +13,10 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const firestore = getFirestore(app);
+
+/** Long polling evita gRPC, que suele fallar detrás de proxies/antivirus en Windows. */
+export const firestore = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+});
 
 export default app;

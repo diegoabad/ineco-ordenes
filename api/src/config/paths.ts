@@ -10,3 +10,8 @@ export function uploadsFirmasDir(): string {
     ? env.uploadsDir
     : path.join(API_ROOT, env.uploadsDir);
 }
+
+/** PDFs adjuntos de envíos (éxito o fallo), hermano de firmas. */
+export function uploadsEnviosDir(): string {
+  return path.join(path.dirname(uploadsFirmasDir()), "envios");
+}

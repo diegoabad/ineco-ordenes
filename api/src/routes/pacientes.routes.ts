@@ -1,8 +1,8 @@
 import { Router } from "express";
 import {
   createPaciente,
-  deletePaciente,
   listPacientes,
+  setPacienteActivo,
   updatePaciente,
 } from "../services/db.service.js";
 import type { PacienteInput } from "../types.js";
@@ -16,6 +16,7 @@ function parsePacienteInput(body: unknown): PacienteInput {
 
   return {
     paciente: String(raw.paciente ?? "").trim(),
+    email: String(raw.email ?? "").trim(),
     obraSocial: String(raw.obraSocial ?? "").trim(),
     afiliado: String(raw.afiliado ?? "").trim(),
     prestacion: String(raw.prestacion ?? "").trim(),
@@ -73,12 +74,18 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.patch("/:id/activo", async (req, res) => {
   try {
-    await deletePaciente(paramId(req));
-    res.json({ ok: true });
+    const activo = (req.body as { activo?: unknown })?.activo;
+    if (typeof activo !== "boolean") {
+      res.status(400).json({ ok: false, message: "Indicá activo: true o false" });
+      return;
+    }
+    const paciente = await setPacienteActivo(paramId(req), activo);
+    res.json({ ok: true, data: paciente });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error al eliminar paciente";
+    const message =
+      error instanceof Error ? error.message : "Error al actualizar estado del paciente";
     res.status(message === "Paciente no encontrado" ? 404 : 400).json({ ok: false, message });
   }
 });

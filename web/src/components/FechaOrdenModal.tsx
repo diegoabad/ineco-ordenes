@@ -6,12 +6,21 @@ import { Modal } from "./Modal";
 type Props = {
   open: boolean;
   title?: string;
+  confirmLabel?: string;
+  hint?: string;
   onClose: () => void;
   onConfirm: (fecha: string) => void;
 };
 
-export function FechaPrintModal({ open, title = "Fecha de la orden", onClose, onConfirm }: Props) {
-  const [fecha, setFecha] = useState(fechaHoyIso);
+export function FechaOrdenModal({
+  open,
+  title = "Fecha de la orden",
+  confirmLabel = "Continuar",
+  hint,
+  onClose,
+  onConfirm,
+}: Props) {
+  const [fecha, setFecha] = useState(() => fechaHoyIso());
 
   useEffect(() => {
     if (open) setFecha(fechaHoyIso());
@@ -35,23 +44,21 @@ export function FechaPrintModal({ open, title = "Fecha de la orden", onClose, on
           </button>
           <button
             type="submit"
-            form="fecha-print-form"
+            form="fecha-orden-form"
             className="btn btn-primary"
             disabled={!fecha}
           >
-            Continuar e imprimir
+            {confirmLabel}
           </button>
         </>
       }
     >
-      <form id="fecha-print-form" onSubmit={handleSubmit}>
-        <p className="modal-hint">
-          Indicá la fecha que figurará en la orden (Creada). Se pide siempre antes de imprimir.
-        </p>
+      <form id="fecha-orden-form" onSubmit={handleSubmit}>
+        {hint ? <p className="modal-hint">{hint}</p> : null}
         <div className="form-group">
-          <label htmlFor="fecha-print">Fecha *</label>
+          <label htmlFor="fecha-orden-modal">Fecha *</label>
           <DatePicker
-            id="fecha-print"
+            id="fecha-orden-modal"
             value={fecha}
             onChange={setFecha}
             aria-label="Fecha de la orden"

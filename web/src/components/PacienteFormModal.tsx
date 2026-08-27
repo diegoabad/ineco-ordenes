@@ -15,6 +15,7 @@ type Props = {
 function toFormData(p: Paciente): PacienteFormData {
   return {
     paciente: p.paciente,
+    email: p.email ?? "",
     obraSocial: p.obraSocial,
     afiliado: p.afiliado,
     prestacion: p.prestacion,
@@ -66,50 +67,77 @@ export function PacienteFormModal({
       submitLabel={editing ? "Guardar cambios" : "Agregar"}
     >
       <div className="form-stack">
-        <div className="form-group">
-          <label htmlFor="paciente">Paciente *</label>
-          <input
-            id="paciente"
-            value={form.paciente}
-            onChange={(e) => set("paciente", e.target.value)}
-            required
-            autoFocus
-          />
+        <div className="form-grid">
+          <div className="form-group">
+            <label htmlFor="paciente">Nombre *</label>
+            <input
+              id="paciente"
+              value={form.paciente}
+              onChange={(e) => set("paciente", e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              value={form.email}
+              onChange={(e) => set("email", e.target.value)}
+              placeholder="opcional"
+            />
+          </div>
         </div>
 
-        <div className="form-group">
-          <label htmlFor="medicoId">Médico</label>
-          <select
-            id="medicoId"
-            value={form.medicoId ?? ""}
-            onChange={(e) => set("medicoId", e.target.value || null)}
-          >
-            <option value="">Sin médico (usar por defecto al imprimir)</option>
-            {medicos.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.nombre}
-                {m.especialidad ? ` · ${m.especialidad}` : ""}
-              </option>
-            ))}
-          </select>
+        <div className="form-grid">
+          <div className="form-group">
+            <label htmlFor="obraSocial">Obra Social</label>
+            <input
+              id="obraSocial"
+              value={form.obraSocial}
+              onChange={(e) => set("obraSocial", e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="afiliado">Afiliado</label>
+            <input
+              id="afiliado"
+              value={form.afiliado}
+              onChange={(e) => set("afiliado", e.target.value)}
+            />
+          </div>
         </div>
 
-        <div className="form-group">
-          <label htmlFor="obraSocial">Obra Social</label>
-          <input
-            id="obraSocial"
-            value={form.obraSocial}
-            onChange={(e) => set("obraSocial", e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="afiliado">Afiliado</label>
-          <input
-            id="afiliado"
-            value={form.afiliado}
-            onChange={(e) => set("afiliado", e.target.value)}
-          />
+        <div className="form-grid">
+          <div className="form-group">
+            <label htmlFor="medicoId">Médico</label>
+            <select
+              id="medicoId"
+              value={form.medicoId ?? ""}
+              onChange={(e) => set("medicoId", e.target.value || null)}
+            >
+              <option value="">Sin médico (usar por defecto al generar PDF)</option>
+              {medicos
+                .filter((m) => m.activo || m.id === form.medicoId)
+                .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nombre}
+                  {m.especialidad ? ` · ${m.especialidad}` : ""}
+                  {!m.activo ? " (inactivo)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="diagnostico">Diagnóstico</label>
+            <input
+              id="diagnostico"
+              value={form.diagnostico}
+              onChange={(e) => set("diagnostico", e.target.value)}
+              placeholder="Ej.: TDAH"
+            />
+          </div>
         </div>
 
         <div className="form-group">
@@ -124,16 +152,6 @@ export function PacienteFormModal({
             }
           />
           <p className="form-hint">Enter agrega otra prestación. Las líneas vacías no se imprimen.</p>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="diagnostico">Diagnóstico</label>
-          <input
-            id="diagnostico"
-            value={form.diagnostico}
-            onChange={(e) => set("diagnostico", e.target.value)}
-            placeholder="Ej.: TDAH"
-          />
         </div>
       </div>
     </ModalShell>
