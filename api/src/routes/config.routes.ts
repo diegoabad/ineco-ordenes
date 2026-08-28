@@ -2,17 +2,33 @@ import { Router } from "express";
 import {
   getDb,
   getEmailConfig,
+  getPresupuestoEmailConfig,
   listEmailEnvios,
   deleteEmailEnvio,
   saveEmailConfig,
+  savePresupuestoEmailConfig,
   setMedicoSeleccionadoId,
 } from "../services/db.service.js";
 import { EMAIL_TEMPLATE_VARS, type EmailConfig } from "../services/email-templates.js";
+import {
+  PRESUPUESTO_EMAIL_TEMPLATE_VARS,
+  type PresupuestoEmailConfig,
+} from "../services/presupuesto-email-templates.js";
 import { sendOrdenEmail } from "../services/email.service.js";
 
 const router = Router();
 
 function parseEmailConfig(body: unknown): EmailConfig {
+  const raw = body as Record<string, unknown>;
+  return {
+    fromEmail: String(raw.fromEmail ?? "").trim(),
+    fromName: String(raw.fromName ?? "").trim(),
+    subject: String(raw.subject ?? "").trim(),
+    body: String(raw.body ?? "").trim(),
+  };
+}
+
+function parsePresupuestoEmailConfig(body: unknown): PresupuestoEmailConfig {
   const raw = body as Record<string, unknown>;
   return {
     fromEmail: String(raw.fromEmail ?? "").trim(),
@@ -78,6 +94,30 @@ router.put("/config/email", async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : "Error al guardar config de email",
+    });
+  }
+});
+
+router.get("/config/presupuesto-email", async (_req, res) => {
+  try {
+    const data = await getPresupuestoEmailConfig();
+    res.json({ ok: true, data, variables: PRESUPUESTO_EMAIL_TEMPLATE_VARS });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al leer plantilla de presupuesto",
+    });
+  }
+});
+
+router.put("/config/presupuesto-email", async (req, res) => {
+  try {
+    const data = await savePresupuestoEmailConfig(parsePresupuestoEmailConfig(req.body));
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al guardar plantilla de presupuesto",
     });
   }
 });

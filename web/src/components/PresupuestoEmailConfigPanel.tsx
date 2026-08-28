@@ -5,24 +5,29 @@ import {
   type FormEvent,
 } from "react";
 import { toast } from "react-toastify";
-import { fetchEmailConfig, saveEmailConfig } from "../services/dataService";
 import { canonicalRichHtml, normalizeRichHtml, richHtmlEquivalent } from "../lib/richText";
 import {
   refreshTemplateVarDecorations,
   stripTemplateVarDecorations,
   TEMPLATE_VAR_TOKEN_RE,
-  normalizeTemplateVarKey,
 } from "../lib/templateVars";
-import type { EmailConfig, EmailTemplateVar } from "../types/email";
 import {
-  EMAIL_TEMPLATE_VAR_LABELS,
-  EMPTY_EMAIL_CONFIG,
-} from "../types/email";
+  fetchPresupuestoEmailConfig,
+  savePresupuestoEmailConfig,
+} from "../services/dataService";
+import type {
+  PresupuestoEmailConfig,
+  PresupuestoEmailTemplateVar,
+} from "../types/presupuestoEmail";
+import {
+  EMPTY_PRESUPUESTO_EMAIL_CONFIG,
+  PRESUPUESTO_EMAIL_TEMPLATE_VAR_LABELS,
+} from "../types/presupuestoEmail";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
 import { TemplateVarTextField, type TemplateVarTextFieldHandle } from "./TemplateVarTextField";
 import { IconAlert, IconCheck } from "./Icons";
 
-function sameConfig(a: EmailConfig, b: EmailConfig): boolean {
+function sameConfig(a: PresupuestoEmailConfig, b: PresupuestoEmailConfig): boolean {
   return (
     a.fromEmail === b.fromEmail &&
     a.fromName === b.fromName &&
@@ -31,7 +36,7 @@ function sameConfig(a: EmailConfig, b: EmailConfig): boolean {
   );
 }
 
-function normalizeEmailConfig(config: EmailConfig): EmailConfig {
+function normalizeConfig(config: PresupuestoEmailConfig): PresupuestoEmailConfig {
   return {
     ...config,
     body: canonicalRichHtml(config.body),
@@ -40,26 +45,24 @@ function normalizeEmailConfig(config: EmailConfig): EmailConfig {
 
 type InsertTarget = "subject" | "body";
 
-const VAR_GROUPS: { title: string; keys: readonly EmailTemplateVar[] }[] = [
+const VAR_GROUPS: { title: string; keys: readonly PresupuestoEmailTemplateVar[] }[] = [
   {
     title: "Paciente",
-    keys: ["nombrePaciente", "email", "obraSocial", "afiliado", "diagnostico", "prestacion"],
+    keys: ["nombrePaciente", "email"],
   },
   {
     title: "Profesional",
-    keys: ["nombreMedico", "especialidad", "matricula"],
+    keys: ["nombreProfesional"],
   },
   {
-    title: "Orden",
-    keys: ["fechaOrden"],
+    title: "Presupuesto",
+    keys: ["fechaPresupuesto", "totalEfectivo", "total3Cuotas"],
+  },
+  {
+    title: "Prestaciones",
+    keys: ["cantidadPrestaciones", "listaPrestaciones"],
   },
 ];
-
-const VAR_ALIASES: Record<string, EmailTemplateVar> = {
-  nombre: "nombrePaciente",
-  medico: "nombreMedico",
-  fecha: "fechaOrden",
-};
 
 function collectUsedVars(subject: string, body: string): Set<string> {
   const used = new Set<string>();
@@ -67,14 +70,14 @@ function collectUsedVars(subject: string, body: string): Set<string> {
   const re = new RegExp(TEMPLATE_VAR_TOKEN_RE.source, "g");
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
-    used.add(normalizeTemplateVarKey(match[1]!, VAR_ALIASES));
+    used.add(match[1]!);
   }
   return used;
 }
 
-export function EmailConfigPanel() {
-  const [form, setForm] = useState<EmailConfig>(EMPTY_EMAIL_CONFIG);
-  const [saved, setSaved] = useState<EmailConfig>(EMPTY_EMAIL_CONFIG);
+export function PresupuestoEmailConfigPanel() {
+  const [form, setForm] = useState<PresupuestoEmailConfig>(EMPTY_PRESUPUESTO_EMAIL_CONFIG);
+  const [saved, setSaved] = useState<PresupuestoEmailConfig>(EMPTY_PRESUPUESTO_EMAIL_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editorResetKey, setEditorResetKey] = useState(0);
@@ -88,21 +91,20 @@ export function EmailConfigPanel() {
   const usedInBody = collectUsedVars("", form.body);
   const usedVars = new Set<string>([...usedInSubject, ...usedInBody]);
 
-  // Siempre las agrupaciones fijas (no depender de lo que devuelva la API).
-  const groupedVars = VAR_GROUPS;
-
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoading(true);
       try {
-        const res = await fetchEmailConfig();
+        const res = await fetchPresupuestoEmailConfig();
         if (cancelled) return;
-        const data = normalizeEmailConfig(res.data);
+        const data = normalizeConfig(res.data);
         setForm(data);
         setSaved(data);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "No se pudo cargar la config de email");
+        toast.error(
+          error instanceof Error ? error.message : "No se pudo cargar la config de email",
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -112,7 +114,7 @@ export function EmailConfigPanel() {
     };
   }, []);
 
-  function set<K extends keyof EmailConfig>(key: K, value: EmailConfig[K]) {
+  function set<K extends keyof PresupuestoEmailConfig>(key: K, value: PresupuestoEmailConfig[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -153,7 +155,7 @@ export function EmailConfigPanel() {
   }
 
   function varLabel(key: string): string {
-    return EMAIL_TEMPLATE_VAR_LABELS[key as EmailTemplateVar] ?? key;
+    return PRESUPUESTO_EMAIL_TEMPLATE_VAR_LABELS[key as PresupuestoEmailTemplateVar] ?? key;
   }
 
   function handleRestore() {
@@ -170,8 +172,8 @@ export function EmailConfigPanel() {
     }
     setSaving(true);
     try {
-      const payload = normalizeEmailConfig({ ...form, body: normalizeRichHtml(form.body) });
-      const next = normalizeEmailConfig(await saveEmailConfig(payload));
+      const payload = normalizeConfig({ ...form, body: normalizeRichHtml(form.body) });
+      const next = normalizeConfig(await savePresupuestoEmailConfig(payload));
       setForm(next);
       setSaved(next);
       toast.success("Configuración de email guardada");
@@ -204,9 +206,9 @@ export function EmailConfigPanel() {
                 </header>
                 <div className="form-grid config-panel__grid">
                   <div className="form-group">
-                    <label htmlFor="fromEmail">Email remitente</label>
+                    <label htmlFor="presup-fromEmail">Email remitente</label>
                     <input
-                      id="fromEmail"
+                      id="presup-fromEmail"
                       type="email"
                       value={form.fromEmail}
                       onChange={(e) => set("fromEmail", e.target.value)}
@@ -214,9 +216,9 @@ export function EmailConfigPanel() {
                     />
                   </div>
                   <div className="form-group">
-                    <label htmlFor="fromName">Nombre remitente</label>
+                    <label htmlFor="presup-fromName">Nombre remitente</label>
                     <input
-                      id="fromName"
+                      id="presup-fromName"
                       value={form.fromName}
                       onChange={(e) => set("fromName", e.target.value)}
                       required
@@ -230,9 +232,9 @@ export function EmailConfigPanel() {
                   <h3 className="config-section__title">Plantilla del mail</h3>
                 </header>
                 <div className="form-group">
-                  <label htmlFor="subject">Asunto</label>
+                  <label htmlFor="presup-subject">Asunto</label>
                   <TemplateVarTextField
-                    id="subject"
+                    id="presup-subject"
                     ref={subjectRef}
                     value={form.subject}
                     onChange={(v) => set("subject", v)}
@@ -240,15 +242,15 @@ export function EmailConfigPanel() {
                       activeFieldRef.current = "subject";
                     }}
                     required
-                    placeholder="Orden médica - {{nombrePaciente}}"
+                    placeholder="Presupuesto - {{nombrePaciente}}"
                   />
                 </div>
                 <div className="form-group form-group--last">
-                  <label htmlFor="body">Cuerpo del mail</label>
+                  <label htmlFor="presup-body">Cuerpo del mail</label>
                   <BasicRichTextEditor
-                    id="body"
+                    id="presup-body"
                     className="config-panel__body-editor"
-                    resetKey={`email-ordenes-${editorResetKey}`}
+                    resetKey={`email-presup-${editorResetKey}`}
                     value={form.body}
                     highlightTemplateVars
                     onChange={(html) => set("body", canonicalRichHtml(html))}
@@ -267,7 +269,7 @@ export function EmailConfigPanel() {
                 <h3 className="config-section__title">Variables</h3>
               </header>
               <div className="config-vars-groups">
-                {groupedVars.map((group) => (
+                {VAR_GROUPS.map((group) => (
                   <div key={group.title} className="config-vars-group">
                     <p className="config-vars-group__title">{group.title}</p>
                     <div className="config-vars__list">

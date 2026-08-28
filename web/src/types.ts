@@ -9,6 +9,7 @@ export type Paciente = {
   /** Médico habitual del paciente; null = usar el médico por defecto al imprimir. */
   medicoId: string | null;
   activo: boolean;
+  creadoAt?: string;
 };
 
 export type Medico = {
@@ -18,6 +19,7 @@ export type Medico = {
   matricula: string;
   firmaUrl: string | null;
   activo: boolean;
+  creadoAt?: string;
 };
 
 /** Datos del médico usados al dibujar el PDF. */
@@ -79,3 +81,102 @@ export type EmailEnvio = {
 };
 
 export type FiltroActivo = "activos" | "inactivos" | "todos";
+
+/** Prestación del módulo presupuestos. */
+export type Prestacion = {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  tipo: string;
+  duracionMinutos: number;
+  /** Precio efectivo / transferencia (mismo valor). */
+  precioEfectivo: number;
+  precio3Cuotas: number;
+  creadoAt?: string;
+};
+
+export type TipoPrestacion = {
+  nombre: string;
+  /** Color hex (#rrggbb) para chips en la UI. */
+  color: string;
+};
+
+export type PresupuestosConfig = {
+  tiposPrestacion: TipoPrestacion[];
+  profesionales: ProfesionalPresupuesto[];
+};
+
+export type ProfesionalPresupuesto = {
+  id: string;
+  /** Ej.: Dr., Dra., Lic. */
+  titulo: string;
+  nombreApellido: string;
+};
+
+export const TIPO_COLOR_PALETTE = [
+  "#2563eb",
+  "#059669",
+  "#7c3aed",
+  "#d97706",
+  "#dc2626",
+  "#0891b2",
+  "#db2777",
+  "#4f46e5",
+] as const;
+
+export const DEFAULT_TIPOS_PRESTACION: TipoPrestacion[] = [
+  { nombre: "Evaluación", color: TIPO_COLOR_PALETTE[0]! },
+  { nombre: "Tratamiento", color: TIPO_COLOR_PALETTE[1]! },
+];
+
+export type PrestacionFormData = Omit<Prestacion, "id">;
+
+export const EMPTY_PRESTACION: PrestacionFormData = {
+  titulo: "",
+  descripcion: "",
+  tipo: DEFAULT_TIPOS_PRESTACION[0]!.nombre,
+  duracionMinutos: 0,
+  precioEfectivo: 0,
+  precio3Cuotas: 0,
+};
+
+export type PresupuestoEstado = "pendiente" | "enviado" | "aceptado" | "rechazado" | "fallido";
+
+export type PresupuestoItem = {
+  prestacionId: string;
+  titulo: string;
+  descripcion: string;
+  tipo: string;
+  duracionMinutos: number;
+  precioEfectivo: number;
+  precio3Cuotas: number;
+};
+
+export type Presupuesto = {
+  id: string;
+  fecha: string;
+  nombrePaciente: string;
+  profesional: string;
+  email: string;
+  items: PresupuestoItem[];
+  totalEfectivo: number;
+  total3Cuotas: number;
+  estado: PresupuestoEstado;
+  pdfUrl: string | null;
+  creadoAt?: string;
+};
+
+export type PresupuestoFormData = {
+  nombrePaciente: string;
+  profesional: string;
+  email: string;
+  prestacionIds: string[];
+};
+
+export const PRESUPUESTO_ESTADO_LABEL: Record<PresupuestoEstado, string> = {
+  pendiente: "Pendiente",
+  enviado: "Enviado",
+  aceptado: "Aceptado",
+  rechazado: "Rechazado",
+  fallido: "Fallido",
+};

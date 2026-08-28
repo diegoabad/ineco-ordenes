@@ -1,13 +1,20 @@
 import sgMail from "@sendgrid/mail";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
+import { formatListaPrestaciones } from "../lib/presupuestoPrestacionesList.js";
 import { applyEmailTemplate } from "./email-templates.js";
+import {
+  applyPresupuestoEmailTemplate,
+} from "./presupuesto-email-templates.js";
+import { emailBodyToHtml, emailBodyToPlainText } from "../lib/richText.js";
+import type { PresupuestoItem } from "../types.js";
 import {
   createEmailEnvio,
   getDb,
   getEmailConfig,
   getMedicoById,
   getPacienteById,
+  getPresupuestoEmailConfig,
 } from "./db.service.js";
 import { saveEnvioPdf } from "./envio-pdf.service.js";
 
@@ -129,11 +136,9 @@ export async function sendOrdenEmail(
   };
 
   const subject = applyEmailTemplate(config.subject, vars).trim() || "Orden médica";
-  const bodyText = applyEmailTemplate(config.body, vars);
-  const bodyHtml = bodyText
-    .split(/\r?\n/)
-    .map((line) => (line.trim() ? line : "&nbsp;"))
-    .join("<br/>");
+  const bodyRaw = applyEmailTemplate(config.body, vars);
+  const bodyText = emailBodyToPlainText(bodyRaw);
+  const bodyHtml = emailBodyToHtml(bodyRaw);
 
   const filename =
     input.filename?.trim() ||
@@ -210,5 +215,91 @@ export async function sendOrdenEmail(
       console.error("[email-historial] No se pudo guardar el fallo", logError);
     }
     throw new Error(clear);
+  }
+}
+
+export type SendPresupuestoEmailInput = {
+  toEmail: string;
+  nombrePaciente: string;
+  profesional?: string;
+  pdfBase64: string;
+  filename?: string;
+  fechaPresupuesto?: string;
+  totalEfectivo?: number;
+  total3Cuotas?: number;
+  cantidadPrestaciones?: number;
+  items?: PresupuestoItem[];
+};
+
+const moneyFormatter = new Intl.NumberFormat("es-AR", {
+  style: "currency",
+  currency: "ARS",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+function formatPresupuestoMoney(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  return moneyFormatter.format(value);
+}
+
+export async function sendPresupuestoEmail(
+  input: SendPresupuestoEmailInput,
+): Promise<{ to: string }> {
+  const to = input.toEmail.trim();
+  if (!to) throw new Error("El email es obligatorio para enviar el presupuesto");
+
+  const nombrePaciente = input.nombrePaciente.trim() || "paciente";
+  const config = await getPresupuestoEmailConfig();
+  const vars = {
+    nombrePaciente,
+    email: to,
+    nombreProfesional: input.profesional?.trim() || "—",
+    fechaPresupuesto: input.fechaPresupuesto?.trim() || "—",
+    totalEfectivo: formatPresupuestoMoney(input.totalEfectivo),
+    total3Cuotas: formatPresupuestoMoney(input.total3Cuotas),
+    cantidadPrestaciones:
+      input.cantidadPrestaciones !== undefined ? String(input.cantidadPrestaciones) : "—",
+    listaPrestaciones: formatListaPrestaciones(input.items ?? []),
+  };
+
+  const subject =
+    applyPresupuestoEmailTemplate(config.subject, vars).trim() ||
+    `Presupuesto - ${nombrePaciente}`;
+  const bodyRaw = applyPresupuestoEmailTemplate(config.body, vars);
+  const bodyText = emailBodyToPlainText(bodyRaw);
+  const bodyHtml = emailBodyToHtml(bodyRaw);
+
+  const filename =
+    input.filename?.trim() ||
+    `presupuesto-${nombrePaciente.replace(/\s+/g, "-").toLowerCase() || "paciente"}.pdf`;
+
+  const pdfContent = stripDataUrlPrefix(input.pdfBase64);
+  if (!pdfContent) throw new Error("PDF inválido");
+
+  try {
+    ensureSendGrid();
+    await sgMail.send({
+      to,
+      from: {
+        email: config.fromEmail,
+        name: config.fromName,
+      },
+      subject,
+      text: bodyText,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111">${bodyHtml}</div>`,
+      attachments: [
+        {
+          content: pdfContent,
+          filename: filename.endsWith(".pdf") ? filename : `${filename}.pdf`,
+          type: "application/pdf",
+          disposition: "attachment",
+        },
+      ],
+    });
+
+    return { to };
+  } catch (error) {
+    throw new Error(clearEmailErrorMessage(error));
   }
 }

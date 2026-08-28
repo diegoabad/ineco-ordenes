@@ -111,13 +111,13 @@ export function PacienteFormModal({
 
         <div className="form-grid">
           <div className="form-group">
-            <label htmlFor="medicoId">Médico</label>
+            <label htmlFor="medicoId">Profesional</label>
             <select
               id="medicoId"
               value={form.medicoId ?? ""}
               onChange={(e) => set("medicoId", e.target.value || null)}
             >
-              <option value="">Sin médico (usar por defecto al generar PDF)</option>
+              <option value="">Sin profesional (usar por defecto al generar PDF)</option>
               {medicos
                 .filter((m) => m.activo || m.id === form.medicoId)
                 .map((m) => (
@@ -175,7 +175,7 @@ function ModalShell({
 }) {
   if (!open) return null;
   return (
-    <div className="fl-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="fl-modal-backdrop" role="presentation">
       <form
         className="fl-modal fl-modal--wide"
         role="dialog"

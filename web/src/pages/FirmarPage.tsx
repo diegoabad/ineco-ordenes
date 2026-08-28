@@ -43,7 +43,7 @@ export default function FirmarPage() {
         setMedico(res.data);
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "No se encontró el médico");
+        setError(err instanceof Error ? err.message : "No se encontró el profesional");
       } finally {
         if (!cancelled) setLoading(false);
       }

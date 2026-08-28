@@ -3,6 +3,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { uploadsFirmasDir } from "../config/paths.js";
 import { ensureEnviosUploadsDir } from "./envio-pdf.service.js";
+import { ensurePresupuestosUploadsDir } from "./presupuesto-pdf.service.js";
 
 const MAX_WIDTH = 600;
 const WEBP_QUALITY = 82;
@@ -18,6 +19,7 @@ export function firmaPublicUrl(medicoId: string): string {
 export async function ensureUploadsDir(): Promise<void> {
   await fs.mkdir(uploadsFirmasDir(), { recursive: true });
   await ensureEnviosUploadsDir();
+  await ensurePresupuestosUploadsDir();
 }
 
 export async function optimizeAndSaveFirma(

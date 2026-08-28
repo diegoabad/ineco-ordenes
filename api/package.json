@@ -8,6 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "node scripts/seed-firestore.mjs",
+    "seed:prestaciones": "node scripts/seed-prestaciones.mjs",
+    "seed:prestaciones:force": "node scripts/seed-prestaciones.mjs --force",
     "migrate:medico-ids": "node scripts/migrate-medico-ids.mjs",
     "migrate:medico-ids:dry": "node scripts/migrate-medico-ids.mjs --dry-run",
     "migrate:paciente-ids": "node scripts/migrate-paciente-ids.mjs",

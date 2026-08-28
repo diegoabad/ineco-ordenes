@@ -14,7 +14,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: ModalPro
   if (!open) return null;
 
   return (
-    <div className="fl-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="fl-modal-backdrop" role="presentation">
       <div
         className={`fl-modal${wide ? " fl-modal--wide" : ""}`}
         role="dialog"

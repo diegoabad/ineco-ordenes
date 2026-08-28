@@ -1,9 +1,11 @@
 import cors from "cors";
 import express from "express";
-import { uploadsEnviosDir, uploadsFirmasDir } from "./config/paths.js";
+import { uploadsEnviosDir, uploadsFirmasDir, uploadsPresupuestosDir } from "./config/paths.js";
 import configRoutes from "./routes/config.routes.js";
 import medicosRoutes from "./routes/medicos.routes.js";
 import pacientesRoutes from "./routes/pacientes.routes.js";
+import prestacionesRoutes from "./routes/prestaciones.routes.js";
+import presupuestosRoutes from "./routes/presupuestos.routes.js";
 import { ensureUploadsDir } from "./services/image.service.js";
 
 const app = express();
@@ -17,10 +19,13 @@ app.get("/health", (_req, res) => {
 
 app.use("/uploads/firmas", express.static(uploadsFirmasDir()));
 app.use("/uploads/envios", express.static(uploadsEnviosDir()));
+app.use("/uploads/presupuestos", express.static(uploadsPresupuestosDir()));
 
 app.use("/api", configRoutes);
 app.use("/api/pacientes", pacientesRoutes);
 app.use("/api/medicos", medicosRoutes);
+app.use("/api/prestaciones", prestacionesRoutes);
+app.use("/api/presupuestos", presupuestosRoutes);
 
 app.use(
   (

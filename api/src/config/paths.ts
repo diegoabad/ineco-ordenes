@@ -15,3 +15,8 @@ export function uploadsFirmasDir(): string {
 export function uploadsEnviosDir(): string {
   return path.join(path.dirname(uploadsFirmasDir()), "envios");
 }
+
+/** PDFs de presupuestos emitidos. */
+export function uploadsPresupuestosDir(): string {
+  return path.join(path.dirname(uploadsFirmasDir()), "presupuestos");
+}

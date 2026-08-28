@@ -159,7 +159,7 @@ export function PdfViewerModal({ open, blob, title, onClose }: PdfViewerModalPro
   const zoomAlMinimo = zoom <= PDF_ZOOM_MIN + 0.001;
 
   return (
-    <div className="fl-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="fl-modal-backdrop" role="presentation">
       <div
         className="fl-modal fl-modal--pdf-mobile"
         role="dialog"

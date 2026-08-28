@@ -1,3 +1,5 @@
+import { stripRichHtml } from "../lib/richText.js";
+
 export type EmailConfig = {
   fromEmail: string;
   fromName: string;
@@ -10,13 +12,19 @@ export const DEFAULT_EMAIL_CONFIG: EmailConfig = {
   fromName: "Órdenes Ineco",
   subject: "Orden médica - {{nombrePaciente}}",
   body:
-    "Hola {{nombrePaciente}},\n\nAdjuntamos tu orden médica correspondiente a la fecha {{fechaOrden}}.\n\nMédico: {{nombreMedico}}\nEspecialidad: {{especialidad}}\nMatrícula: {{matricula}}\nDiagnóstico: {{diagnostico}}\n\nSaludos.",
+    "Estimado/a {{nombrePaciente}},\n\n" +
+    "Por medio de la presente le enviamos la orden médica emitida por {{nombreMedico}} con fecha {{fechaOrden}}.\n\n" +
+    "Adjuntamos el documento en PDF para su presentación ante la obra social o prestador correspondiente.\n\n" +
+    "Ante cualquier consulta, puede responder a este correo.\n\n" +
+    "Saludos cordiales,\n" +
+    "Equipo de INECO",
 };
 
 const LEGACY_DEFAULT_BODIES = [
   "Hola {{nombre}},\n\nAdjuntamos tu orden médica correspondiente a la fecha {{fecha}}.\n\nMédico: {{medico}}\nDiagnóstico: {{diagnostico}}\n\nSaludos.",
   "Hola {{nombre}},\n\nAdjuntamos tu orden médica correspondiente a la fecha {{fecha}}.\n\nMédico: {{medico}}\nEspecialidad: {{especialidad}}\nMatrícula: {{matricula}}\nDiagnóstico: {{diagnostico}}\n\nSaludos.",
   "Hola {{nombre}},\n\nAdjuntamos tu orden médica correspondiente a la fecha de la orden {{fecha}}.\n\nMédico: {{medico}}\nEspecialidad: {{especialidad}}\nMatrícula: {{matricula}}\nDiagnóstico: {{diagnostico}}\n\nSaludos.",
+  "Hola {{nombrePaciente}},\n\nAdjuntamos tu orden médica correspondiente a la fecha {{fechaOrden}}.\n\nMédico: {{nombreMedico}}\nEspecialidad: {{especialidad}}\nMatrícula: {{matricula}}\nDiagnóstico: {{diagnostico}}\n\nSaludos.",
 ];
 
 /** Variables del sistema (las que se insertan en {{...}}). */
@@ -49,6 +57,20 @@ export function migrateEmailTemplateText(text: string): string {
     .replace(/\{\{\s*fecha\s*\}\}/g, "{{fechaOrden}}");
 }
 
+function normalizeStoredTemplateText(text: string): string {
+  return migrateEmailTemplateText(stripRichHtml(text).trim());
+}
+
+function isLegacyDefaultBody(storedBody: string): boolean {
+  if (!storedBody.trim()) return true;
+  return LEGACY_DEFAULT_BODIES.includes(normalizeStoredTemplateText(storedBody));
+}
+
+export function emailConfigNeedsLegacyBodyUpgrade(stored: Partial<EmailConfig> | null): boolean {
+  const storedBody = stored?.body?.trim() || "";
+  return Boolean(storedBody) && isLegacyDefaultBody(storedBody);
+}
+
 export function applyEmailTemplate(
   template: string,
   vars: Partial<Record<EmailTemplateVar, string>>,
@@ -64,10 +86,9 @@ export function emailConfigWithEnvDefaults(stored: Partial<EmailConfig> | null):
   const storedBody = stored?.body?.trim() || "";
   const storedSubject = stored?.subject?.trim() || "";
 
-  const body =
-    !storedBody || LEGACY_DEFAULT_BODIES.includes(storedBody)
-      ? DEFAULT_EMAIL_CONFIG.body
-      : migrateEmailTemplateText(storedBody);
+  const body = isLegacyDefaultBody(storedBody)
+    ? DEFAULT_EMAIL_CONFIG.body
+    : migrateEmailTemplateText(storedBody);
 
   const subject = !storedSubject
     ? DEFAULT_EMAIL_CONFIG.subject

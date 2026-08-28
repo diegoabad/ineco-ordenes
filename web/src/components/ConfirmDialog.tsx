@@ -22,7 +22,7 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="fl-modal-backdrop" role="presentation" onClick={onCancel}>
+    <div className="fl-modal-backdrop" role="presentation">
       <div
         className="fl-modal fl-modal--confirm"
         role="alertdialog"

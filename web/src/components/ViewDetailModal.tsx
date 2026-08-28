@@ -25,7 +25,7 @@ export function ViewDetailModal({ open, title, fields, onClose }: Props) {
   if (!open) return null;
 
   return (
-    <div className="fl-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="fl-modal-backdrop" role="presentation">
       <div
         className="fl-modal fl-modal--wide"
         role="dialog"

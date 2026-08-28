@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "react-toastify";
+import { AppSidebar, type AppModule } from "./components/AppSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import {
   IconActivate,
@@ -19,10 +20,12 @@ import {
   EnvioResultadoModal,
   type EnvioResultadoItem,
 } from "./components/EnvioResultadoModal";
+import { creadoAtMs } from "./lib/sortRecientes";
 import { FechaOrdenModal } from "./components/FechaOrdenModal";
 import { HistorialEnviosPanel } from "./components/HistorialEnviosPanel";
 import { MedicoFormModal } from "./components/MedicoFormModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
+import { PresupuestosModule } from "./components/PresupuestosModule";
 import { ViewDetailModal } from "./components/ViewDetailModal";
 import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
@@ -78,6 +81,7 @@ function toConfigMedico(m: Medico, firmaDataUrl?: string | null): ConfigMedico {
 }
 
 export default function App() {
+  const [module, setModule] = useState<AppModule>("ordenes");
   const [tab, setTab] = useState<Tab>("pacientes");
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [medicos, setMedicos] = useState<Medico[]>([]);
@@ -150,7 +154,7 @@ export default function App() {
     setMedicos((prev) => {
       const exists = prev.some((m) => m.id === medico.id);
       if (exists) return prev.map((m) => (m.id === medico.id ? medico : m));
-      return [...prev, medico];
+      return [medico, ...prev];
     });
     setEditingMedico((prev) => (prev?.id === medico.id ? medico : prev));
     if (medico.firmaUrl) {
@@ -209,9 +213,9 @@ export default function App() {
     setMedicoSeleccionadoId(id);
     try {
       await saveMedicoSeleccionadoId(id);
-      if (id && !opts?.silent) toast.success("Médico por defecto actualizado");
+      if (id && !opts?.silent) toast.success("Profesional por defecto actualizado");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo guardar el médico por defecto");
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el profesional por defecto");
       void cargarDatos();
     }
   }
@@ -228,6 +232,8 @@ export default function App() {
     .sort((a, b) => {
       if (a.id === medicoSeleccionadoId) return -1;
       if (b.id === medicoSeleccionadoId) return 1;
+      const diff = creadoAtMs(b.creadoAt) - creadoAtMs(a.creadoAt);
+      if (diff !== 0) return diff;
       return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
     });
 
@@ -239,7 +245,7 @@ export default function App() {
         toast.success("Paciente actualizado");
       } else {
         const paciente = await createPaciente(data);
-        setPacientes((prev) => [...prev, paciente]);
+        setPacientes((prev) => [paciente, ...prev]);
         toast.success("Paciente creado");
       }
       setPacienteFormOpen(false);
@@ -300,9 +306,9 @@ export default function App() {
 
       setMedicoFormOpen(false);
       setEditingMedico(null);
-      toast.success(id ? "Médico actualizado" : "Médico creado");
+      toast.success(id ? "Profesional actualizado" : "Profesional creado");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo guardar el médico");
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el profesional");
     } finally {
       setSavingMedico(false);
     }
@@ -314,7 +320,7 @@ export default function App() {
 
     if (medicoSeleccionadoId === id) {
       toast.warning(
-        "No se puede desactivar el médico por defecto. Primero elegí otro médico por defecto (estrella).",
+        "No se puede desactivar el profesional por defecto. Primero elegí otro profesional por defecto (estrella).",
       );
       return;
     }
@@ -324,11 +330,11 @@ export default function App() {
       afectados.length === 0
         ? "Ningún paciente lo tiene asignado."
         : afectados.length === 1
-          ? `El paciente ${afectados[0]!.paciente} pasará a usar el médico por defecto.`
-          : `${afectados.length} pacientes que lo tienen asignado pasarán a usar el médico por defecto.`;
+          ? `El paciente ${afectados[0]!.paciente} pasará a usar el profesional por defecto.`
+          : `${afectados.length} pacientes que lo tienen asignado pasarán a usar el profesional por defecto.`;
 
     setConfirmDialog({
-      title: "Desactivar médico",
+      title: "Desactivar profesional",
       message: `¿Desactivar a ${medico.nombre}? ${avisoPacientes}`,
       confirmLabel: "Desactivar",
       onConfirm: async () => {
@@ -342,8 +348,8 @@ export default function App() {
           }
           toast.success(
             pacientesReasignados > 0
-              ? `Médico desactivado. ${pacientesReasignados} paciente${pacientesReasignados === 1 ? "" : "s"} pasó${pacientesReasignados === 1 ? "" : "ron"} al por defecto.`
-              : "Médico desactivado",
+              ? `Profesional desactivado. ${pacientesReasignados} paciente${pacientesReasignados === 1 ? "" : "s"} pasó${pacientesReasignados === 1 ? "" : "ron"} al por defecto.`
+              : "Profesional desactivado",
           );
         } catch (error) {
           toast.error(error instanceof Error ? error.message : "No se pudo desactivar");
@@ -356,7 +362,7 @@ export default function App() {
     try {
       const { medico: actualizado } = await setMedicoActivo(id, true);
       setMedicos((prev) => prev.map((m) => (m.id === id ? actualizado : m)));
-      toast.success("Médico activado");
+      toast.success("Profesional activado");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo activar");
     }
@@ -375,7 +381,7 @@ export default function App() {
       const medico = medicoParaPaciente(p);
       if (!medico) {
         toast.warning(
-          `No hay médico para "${p.paciente}". Asignale uno en el paciente o elegí un médico por defecto.`,
+          `No hay profesional para "${p.paciente}". Asignale uno en el paciente o elegí un profesional por defecto.`,
         );
         return;
       }
@@ -408,7 +414,7 @@ export default function App() {
     const medico = medicoParaPaciente(paciente);
     if (!medico) {
       throw new Error(
-        `No hay médico para "${paciente.paciente}". Asignale uno o elegí un médico por defecto.`,
+        `No hay profesional para "${paciente.paciente}". Asignale uno o elegí un profesional por defecto.`,
       );
     }
 
@@ -596,9 +602,14 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="app-shell">
-        <div className="fl-table-empty fl-table-empty--fill">
-          <p className="fl-table-empty__title">Cargando datos…</p>
+      <div className="app-layout">
+        <AppSidebar module={module} onModuleChange={setModule} />
+        <div className="app-main">
+          <div className="app-shell">
+            <div className="fl-table-empty">
+              <p className="fl-table-empty__title">Cargando datos…</p>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -606,25 +617,36 @@ export default function App() {
 
   if (loadError) {
     return (
-      <div className="app-shell">
-        <div className="fl-table-empty fl-table-empty--fill">
-          <p className="fl-table-empty__title">No se pudo conectar con la API</p>
-          <p className="fl-table-empty__hint">{loadError}</p>
-          <button type="button" className="btn btn-primary" onClick={() => void cargarDatos()}>
-            Reintentar
-          </button>
+      <div className="app-layout">
+        <AppSidebar module={module} onModuleChange={setModule} />
+        <div className="app-main">
+          <div className="app-shell">
+            <div className="fl-table-empty">
+              <p className="fl-table-empty__title">No se pudo conectar con la API</p>
+              <p className="fl-table-empty__hint">{loadError}</p>
+              <button type="button" className="btn btn-primary" onClick={() => void cargarDatos()}>
+                Reintentar
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-layout">
+      <AppSidebar module={module} onModuleChange={setModule} />
+      <div className="app-main">
+        {module === "presupuestos" ? (
+          <PresupuestosModule />
+        ) : (
+          <div className="app-shell">
       <header className="app-header">
         <div className="app-header__brand">
           <div>
-            <h1>Órdenes Ineco</h1>
-            <p>Pacientes y médicos para generar órdenes</p>
+            <h1>Órdenes</h1>
+            <p>Pacientes y profesionales para generar órdenes</p>
           </div>
         </div>
 
@@ -652,7 +674,7 @@ export default function App() {
               }}
             >
               <IconPlus size={16} />
-              Agregar médico
+              Agregar profesional
             </button>
           ) : null}
           <button
@@ -696,7 +718,7 @@ export default function App() {
           className={`app-tabs__btn${tab === "medicos" ? " is-active" : ""}`}
           onClick={() => setTab("medicos")}
         >
-          Médicos
+          Profesionales
         </button>
         <button
           type="button"
@@ -710,7 +732,7 @@ export default function App() {
           className={`app-tabs__btn${tab === "config" ? " is-active" : ""}`}
           onClick={() => setTab("config")}
         >
-          Configuración
+          Plantilla email
         </button>
       </nav>
 
@@ -725,7 +747,7 @@ export default function App() {
                 type="search"
                 value={busquedaPacientes}
                 onChange={(e) => setBusquedaPacientes(e.target.value)}
-                placeholder="Buscar paciente, médico, email, diagnóstico…"
+                placeholder="Buscar paciente, profesional, email, diagnóstico…"
                 aria-label="Buscar pacientes"
               />
             </div>
@@ -755,7 +777,7 @@ export default function App() {
                 <tr>
                   <th>Nombre</th>
                   <th>Email</th>
-                  <th>Médico</th>
+                  <th>Profesional</th>
                   <th className="fl-col-actions">Acciones</th>
                 </tr>
               </thead>
@@ -792,8 +814,8 @@ export default function App() {
                               className="chip chip--default"
                               title={
                                 medicoPorDefecto?.nombre
-                                  ? `Médico por defecto: ${medicoPorDefecto.nombre}`
-                                  : "Sin médico por defecto"
+                                  ? `Profesional por defecto: ${medicoPorDefecto.nombre}`
+                                  : "Sin profesional por defecto"
                               }
                             >
                               Por defecto
@@ -932,8 +954,8 @@ export default function App() {
                 type="search"
                 value={busquedaMedicos}
                 onChange={(e) => setBusquedaMedicos(e.target.value)}
-                placeholder="Buscar médico, especialidad o matrícula…"
-                aria-label="Buscar médicos"
+                placeholder="Buscar profesional, especialidad o matrícula…"
+                aria-label="Buscar profesionales"
               />
             </div>
             <div className="table-toolbar__month form-group">
@@ -942,7 +964,7 @@ export default function App() {
                 id="filtro-medicos"
                 value={filtroMedicos}
                 onChange={(e) => setFiltroMedicos(e.target.value as FiltroActivo)}
-                aria-label="Filtrar médicos por estado"
+                aria-label="Filtrar profesionales por estado"
               >
                 <option value="activos">Activos</option>
                 <option value="inactivos">No activos</option>
@@ -991,8 +1013,8 @@ export default function App() {
                             {esPorDefecto ? (
                               <span
                                 className="medico-default-icon"
-                                title="Médico por defecto"
-                                aria-label="Médico por defecto"
+                                title="Profesional por defecto"
+                                aria-label="Profesional por defecto"
                               >
                                 <IconStar size={14} filled />
                               </span>
@@ -1026,14 +1048,14 @@ export default function App() {
                               className="fl-icon-btn fl-icon-btn--default"
                               title={
                                 !m.activo
-                                  ? "Médico inactivo"
+                                  ? "Profesional inactivo"
                                   : esPorDefecto
-                                    ? "Ya es el médico por defecto"
+                                    ? "Ya es el profesional por defecto"
                                     : "Poner por defecto"
                               }
                               aria-label={
                                 esPorDefecto
-                                  ? "Ya es el médico por defecto"
+                                  ? "Ya es el profesional por defecto"
                                   : "Poner por defecto"
                               }
                               disabled={!m.activo || esPorDefecto}
@@ -1077,10 +1099,10 @@ export default function App() {
                                 className="fl-icon-btn fl-icon-btn--danger"
                                 title={
                                   esPorDefecto
-                                    ? "No se puede desactivar el médico por defecto"
+                                    ? "No se puede desactivar el profesional por defecto"
                                     : "Desactivar"
                                 }
-                                aria-label="Desactivar médico"
+                                aria-label="Desactivar profesional"
                                 disabled={esPorDefecto}
                                 onClick={() => handleDesactivarMedico(m.id)}
                               >
@@ -1091,7 +1113,7 @@ export default function App() {
                                 type="button"
                                 className="fl-icon-btn fl-icon-btn--success"
                                 title="Activar"
-                                aria-label="Activar médico"
+                                aria-label="Activar profesional"
                                 onClick={() => void handleActivarMedico(m.id)}
                               >
                                 <IconActivate size={16} />
@@ -1112,9 +1134,9 @@ export default function App() {
                     <div className="fl-table-empty__art">
                       <IconFile size={32} />
                     </div>
-                    <p className="fl-table-empty__title">No hay médicos todavía</p>
+                    <p className="fl-table-empty__title">No hay profesionales todavía</p>
                     <p className="fl-table-empty__hint">
-                      Agregá el primero con el botón Agregar médico.
+                      Agregá el primero con el botón Agregar profesional.
                     </p>
                   </>
                 ) : (
@@ -1160,14 +1182,14 @@ export default function App() {
                   ),
                 },
                 {
-                  label: "Médico",
+                  label: "Profesional",
                   value: nombreMedico(viewingPaciente.medicoId) || (
                     <span
                       className="chip chip--default"
                       title={
                         medicoPorDefecto?.nombre
-                          ? `Médico por defecto: ${medicoPorDefecto.nombre}`
-                          : "Sin médico por defecto"
+                          ? `Profesional por defecto: ${medicoPorDefecto.nombre}`
+                          : "Sin profesional por defecto"
                       }
                     >
                       Por defecto
@@ -1202,7 +1224,7 @@ export default function App() {
 
       <ViewDetailModal
         open={viewingMedico !== null}
-        title="Detalle del médico"
+        title="Detalle del profesional"
         onClose={() => setViewingMedico(null)}
         fields={
           viewingMedico
@@ -1257,6 +1279,9 @@ export default function App() {
           void action?.();
         }}
       />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

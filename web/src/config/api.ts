@@ -40,10 +40,12 @@ export async function apiFetch<T>(
     headers,
   });
 
-  const data = (await response.json()) as T & { message?: string };
+  const data = (await response.json()) as T & { message?: string; data?: unknown };
 
   if (!response.ok) {
-    throw new Error(data.message || "Error en la solicitud");
+    const err = new Error(data.message || "Error en la solicitud") as Error & { data?: unknown };
+    if (data.data !== undefined) err.data = data.data;
+    throw err;
   }
 
   return data;

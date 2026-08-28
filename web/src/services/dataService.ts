@@ -1,6 +1,19 @@
 import { apiFetch } from "../config/api";
 import type { EmailConfig } from "../types/email";
-import type { EmailEnvio, Medico, MedicoFormData, Paciente, PacienteFormData } from "../types";
+import type { PresupuestoEmailConfig } from "../types/presupuestoEmail";
+import type { PresupuestoPlantillaConfig } from "../types/presupuestoPlantilla";
+import type {
+  EmailEnvio,
+  Medico,
+  MedicoFormData,
+  Paciente,
+  PacienteFormData,
+  Prestacion,
+  PrestacionFormData,
+  Presupuesto,
+  PresupuestoFormData,
+  PresupuestosConfig,
+} from "../types";
 
 type AppDb = {
   version: number;
@@ -36,6 +49,56 @@ export async function saveEmailConfig(data: EmailConfig): Promise<EmailConfig> {
     method: "PUT",
     body: JSON.stringify(data),
   });
+  return res.data;
+}
+
+export async function fetchPresupuestoEmailConfig(): Promise<{
+  data: PresupuestoEmailConfig;
+  variables: string[];
+}> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: PresupuestoEmailConfig;
+    variables: string[];
+  }>("/api/config/presupuesto-email");
+  return { data: res.data, variables: res.variables };
+}
+
+export async function savePresupuestoEmailConfig(
+  data: PresupuestoEmailConfig,
+): Promise<PresupuestoEmailConfig> {
+  const res = await apiFetch<{ ok: boolean; data: PresupuestoEmailConfig }>(
+    "/api/config/presupuesto-email",
+    {
+      method: "PUT",
+      body: JSON.stringify(data),
+    },
+  );
+  return res.data;
+}
+
+export async function fetchPresupuestoPlantillaConfig(): Promise<{
+  data: PresupuestoPlantillaConfig;
+  variables: string[];
+}> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: PresupuestoPlantillaConfig;
+    variables: string[];
+  }>("/api/presupuestos/plantilla");
+  return { data: res.data, variables: res.variables };
+}
+
+export async function savePresupuestoPlantillaConfig(
+  data: PresupuestoPlantillaConfig,
+): Promise<PresupuestoPlantillaConfig> {
+  const res = await apiFetch<{ ok: boolean; data: PresupuestoPlantillaConfig }>(
+    "/api/presupuestos/plantilla",
+    {
+      method: "PUT",
+      body: JSON.stringify(data),
+    },
+  );
   return res.data;
 }
 
@@ -173,4 +236,90 @@ export async function deleteFirmaMedico(id: string): Promise<Medico> {
     method: "DELETE",
   });
   return res.data;
+}
+
+export async function fetchPrestaciones(): Promise<Prestacion[]> {
+  const res = await apiFetch<{ ok: boolean; data: Prestacion[] }>("/api/prestaciones");
+  return res.data;
+}
+
+export async function createPrestacion(data: PrestacionFormData): Promise<Prestacion> {
+  const res = await apiFetch<{ ok: boolean; data: Prestacion }>("/api/prestaciones", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function updatePrestacion(id: string, data: PrestacionFormData): Promise<Prestacion> {
+  const res = await apiFetch<{ ok: boolean; data: Prestacion }>(`/api/prestaciones/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function deletePrestacion(id: string): Promise<void> {
+  await apiFetch(`/api/prestaciones/${id}`, { method: "DELETE" });
+}
+
+export async function fetchPresupuestosConfig(): Promise<PresupuestosConfig> {
+  const res = await apiFetch<{ ok: boolean; data: PresupuestosConfig }>("/api/presupuestos/config");
+  return res.data;
+}
+
+export async function savePresupuestosConfig(data: PresupuestosConfig): Promise<PresupuestosConfig> {
+  const res = await apiFetch<{ ok: boolean; data: PresupuestosConfig }>("/api/presupuestos/config", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function fetchPresupuestos(): Promise<Presupuesto[]> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto[] }>("/api/presupuestos");
+  return res.data;
+}
+
+export async function createPresupuesto(
+  data: PresupuestoFormData & { pdfBase64?: string; enviar?: boolean },
+): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>("/api/presupuestos", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function enviarPresupuesto(id: string): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/enviar`, {
+    method: "POST",
+  });
+  return res.data;
+}
+
+export async function updatePresupuesto(
+  id: string,
+  data: PresupuestoFormData & { pdfBase64?: string; enviar?: boolean },
+): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function updatePresupuestoEstado(
+  id: string,
+  estado: Presupuesto["estado"],
+): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/estado`, {
+    method: "PATCH",
+    body: JSON.stringify({ estado }),
+  });
+  return res.data;
+}
+
+export async function deletePresupuesto(id: string): Promise<void> {
+  await apiFetch(`/api/presupuestos/${id}`, { method: "DELETE" });
 }

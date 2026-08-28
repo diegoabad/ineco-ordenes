@@ -93,7 +93,7 @@ export function MedicoFormModal({
   return (
     <ModalShell
       open={open}
-      title={editing ? "Editar médico" : "Nuevo médico"}
+      title={editing ? "Editar profesional" : "Nuevo profesional"}
       onClose={onClose}
       onSubmit={handleSubmit}
       submitLabel={editing ? "Guardar cambios" : "Agregar"}
@@ -204,7 +204,7 @@ function ModalShell({
 }) {
   if (!open) return null;
   return (
-    <div className="fl-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="fl-modal-backdrop" role="presentation">
       <form
         className="fl-modal fl-modal--wide"
         role="dialog"

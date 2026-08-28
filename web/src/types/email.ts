@@ -29,7 +29,7 @@ export const EMAIL_TEMPLATE_VAR_LABELS: Record<EmailTemplateVar, string> = {
   afiliado: "Afiliado",
   diagnostico: "Diagnóstico",
   prestacion: "Prestación",
-  nombreMedico: "Nombre médico",
+  nombreMedico: "Nombre profesional",
   especialidad: "Especialidad",
   matricula: "Matrícula",
   fechaOrden: "Fecha de la orden",

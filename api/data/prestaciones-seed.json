@@ -1,0 +1,182 @@
+[
+  {
+    "id": "evaluacion-terapia-ocupacional",
+    "titulo": "Evaluación de Terapia Ocupacional",
+    "tipo": "Evaluación",
+    "descripcion": "Se realiza para obtener información sobre el funcionamiento del individuo en su hogar y en su medio social y familiar habitual, sea cual sea la patología que presente. Releva las actividades de la vida diaria (básicas e instrumentales), cómo se organizan en la rutina diaria, los intereses de la persona y su historia ocupacional. Se combina con la observación del desempeño en actividades funcionales como parte de la entrevista. Duración estimada: 1:30 hora. (Oyola – Fiorino)",
+    "duracionMinutos": 90,
+    "precioEfectivo": 290000,
+    "precio3Cuotas": 350000
+  },
+  {
+    "id": "evaluacion-cognitiva",
+    "titulo": "Evaluación Cognitiva",
+    "tipo": "Evaluación",
+    "descripcion": "Herramienta que permite conocer el perfil cognitivo del paciente mediante una batería que evalúa atención, funciones ejecutivas, memoria, lenguaje, resolución de problemas y otras habilidades intelectuales. Los resultados se usan en combinación con otros instrumentos diagnósticos (imágenes cerebrales, evaluación neuropsiquiátrica y psicológica) para determinar el perfil neuropsicológico. Duración estimada: 90 minutos. (TT – MR – J. Carrillo)",
+    "duracionMinutos": 90,
+    "precioEfectivo": 290000,
+    "precio3Cuotas": 350000
+  },
+  {
+    "id": "evaluacion-funciones-cognitivas-ejecutivas",
+    "titulo": "Evaluación de las Funciones Cognitivas y Ejecutivas",
+    "tipo": "Evaluación",
+    "descripcion": "Batería especialmente diseñada para evaluar los diferentes dominios cognitivos: atención, funciones ejecutivas, memoria, lenguaje, capacidad de resolución de problemas y otras habilidades intelectuales. Los resultados permiten determinar el perfil cognitivo del paciente, que analizado junto al resto de las evaluaciones y exámenes complementarios ayuda a establecer el diagnóstico y el plan de tratamiento. Duración estimada: 2 horas. (TT – MR – J. Carrillo)",
+    "duracionMinutos": 120,
+    "precioEfectivo": 440000,
+    "precio3Cuotas": 540000
+  },
+  {
+    "id": "evaluacion-wais",
+    "titulo": "Evaluación de coeficiente intelectual (WAIS)",
+    "tipo": "Evaluación",
+    "descripcion": "Estimación del Coeficiente Intelectual mediante la Escala de Inteligencia para Adultos de Wechsler (WAIS), aplicable a personas de 16 años o más. Se compone de dos subescalas principales (Verbal y de Ejecución), subdivididas en Comprensión Verbal, Organización Perceptual, Memoria Operativa y Velocidad de Procesamiento. Aporta información para adecuar los objetivos y la modalidad del tratamiento a las capacidades intelectuales del paciente. Duración estimada: 1 hora. (TT – MR – J. Carrillo)",
+    "duracionMinutos": 60,
+    "precioEfectivo": 290000,
+    "precio3Cuotas": 350000
+  },
+  {
+    "id": "entrevista-evaluacion-psicologica",
+    "titulo": "Entrevista de Evaluación Psicológica",
+    "tipo": "Evaluación",
+    "descripcion": "Entrevista en la que se conceptualiza el o los problemas del paciente en términos cognitivo-conductuales, para determinar y sugerir el tratamiento psicoterapéutico más eficiente y efectivo. Se brinda orientación y se formulan en conjunto, entre paciente y profesional, los objetivos a trabajar, ya sea que la psicoterapia se realice en INECO o en otro lugar. Es el momento en el que se hace psicoeducación sobre el modelo terapéutico y sobre la problemática del paciente. Duración estimada: 1 hora. (Giralt Font – Rial – Traiber – Herrero)",
+    "duracionMinutos": 60,
+    "precioEfectivo": 150000,
+    "precio3Cuotas": 180000
+  },
+  {
+    "id": "evaluacion-ados",
+    "titulo": "Evaluación ADOS",
+    "tipo": "Evaluación",
+    "descripcion": "Instrumento de observación semiestructurado que se realiza en personas con sospecha de encontrarse dentro del espectro autista. Incluye diversas actividades que el entrevistador presenta al sujeto para valorar comunicación, lenguaje, interacción social recíproca, comprensión socioemocional, imaginación y la presencia de intereses o conductas repetitivas, estereotipadas u otras conductas anómalas. Duración estimada: 1 hora. (Karen Sánchez, solo los martes)",
+    "duracionMinutos": 60,
+    "precioEfectivo": 290000,
+    "precio3Cuotas": 350000
+  },
+  {
+    "id": "evaluacion-musicoterapia",
+    "titulo": "Evaluación de Musicoterapia",
+    "tipo": "Evaluación",
+    "descripcion": "",
+    "duracionMinutos": 0,
+    "precioEfectivo": 160000,
+    "precio3Cuotas": 200000
+  },
+  {
+    "id": "evaluacion-kinesiologia",
+    "titulo": "Evaluación de Kinesiología",
+    "tipo": "Evaluación",
+    "descripcion": "",
+    "duracionMinutos": 0,
+    "precioEfectivo": 160000,
+    "precio3Cuotas": 200000
+  },
+  {
+    "id": "evaluacion-neuroconductual",
+    "titulo": "Evaluación Neuroconductual",
+    "tipo": "Evaluación",
+    "descripcion": "Evaluación semiestructurada que incluye diversas medidas de los problemas conductuales, emocionales y características de personalidad del paciente. Permite, en un tiempo acotado, arribar a un diagnóstico acorde a las normas internacionales y elaborar un informe. Establece el estado actual del paciente, los problemas emocionales y conductuales que motivan la consulta, y los antecedentes psiquiátricos personales y familiares. Requiere la presencia de un familiar acompañante para aportar información. Duración estimada: 2 horas. (Bea – Acuña – Bamondez – Garrido – Kes – Salmerón)",
+    "duracionMinutos": 120,
+    "precioEfectivo": 290000,
+    "precio3Cuotas": 350000
+  },
+  {
+    "id": "cuestionario-virtual",
+    "titulo": "Cuestionario Virtual",
+    "tipo": "Evaluación",
+    "descripcion": "Serie de escalas específicamente diseñadas para complementar la información del profesional que realizará la devolución. Se envía por email al paciente y a un familiar, y debe completarse al menos 5 días hábiles antes del turno de devolución. (Tarallo)",
+    "duracionMinutos": 0,
+    "precioEfectivo": 80000,
+    "precio3Cuotas": 100000
+  },
+  {
+    "id": "evaluacion-fonoaudiologia",
+    "titulo": "Evaluación de Fonoaudiología",
+    "tipo": "Evaluación",
+    "descripcion": "",
+    "duracionMinutos": 0,
+    "precioEfectivo": 290000,
+    "precio3Cuotas": 350000
+  },
+  {
+    "id": "entrevista-devolucion",
+    "titulo": "Entrevista de Devolución",
+    "tipo": "Evaluación",
+    "descripcion": "Consulta de devolución en la que se informa cómo será el tratamiento a seguir. Es importante que un familiar referente o acompañante esté presente. Duración estimada: 1 hora.",
+    "duracionMinutos": 60,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-rehabilitacion-neuropsicologica",
+    "titulo": "Rehabilitación Neuropsicológica",
+    "tipo": "Tratamiento",
+    "descripcion": "Conjunto de actividades terapéuticas y estrategias de intervención que apuntan a ayudar a los pacientes a reducir, manejar y afrontar de manera más eficiente sus déficits cognitivos. Están especialmente diseñadas para reentrenar las habilidades del individuo para pensar, utilizar su juicio y tomar decisiones.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-entrenamiento-ejecutivo",
+    "titulo": "Entrenamiento Ejecutivo",
+    "tipo": "Tratamiento",
+    "descripcion": "Programa de rehabilitación cognitiva enfocado en los problemas prácticos que experimenta cada persona en el día a día. Está especialmente diseñado para trabajar áreas relacionadas con el reentrenamiento de la atención, la planificación y la organización, frecuentemente afectadas en pacientes con ADHD/ADD. Su característica principal es la modalidad personalizada.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-psicoterapia-cognitiva",
+    "titulo": "Psicoterapia Cognitiva",
+    "tipo": "Tratamiento",
+    "descripcion": "También conocida como psicoterapia cognitivo-conductual, es un método psicoterapéutico orientado a la resolución de dificultades y problemas psicológicos y psiquiátricos específicos. Es activa, porque se basa en el trabajo colaborativo entre terapeuta y paciente: el terapeuta ofrece orientación, sugiere técnicas y solicita tareas y registros entre sesiones. Es estructurada, porque apunta a objetivos delimitados acordados al comienzo del tratamiento. Es focalizada en el presente, ya que busca modificar los factores actuales que disparan y mantienen el problema. Busca ser limitada en el tiempo, con una duración acotada a la resolución de los objetivos establecidos de antemano. Ha demostrado su eficacia a través de numerosos estudios de investigación.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-terapia-ocupacional",
+    "titulo": "Terapia Ocupacional",
+    "tipo": "Tratamiento",
+    "descripcion": "Tiene como objetivo favorecer la autonomía de las personas mediante el entrenamiento a través del uso de diferentes actividades funcionales. Busca mejorar, mantener o recuperar en la medida de lo posible la independencia de pacientes con alguna discapacidad. Contribuye no solo a mejorar su calidad de vida, sino también a promover la integración en la comunidad, favoreciendo el desempeño de sus antiguos roles ocupacionales.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-kinesiologia",
+    "titulo": "Kinesiología",
+    "tipo": "Tratamiento",
+    "descripcion": "Se trabaja desde la primera fase de la recuperación de las funciones motoras generales y deglutorias que pudieran estar comprometidas, con el objetivo de ofrecer al paciente el mejor trato médico y humano a través de un tratamiento personalizado y adaptado a sus necesidades. Para un tratamiento eficaz es necesario que los especialistas de las diferentes disciplinas trabajen coordinados, en equipo y con un mismo objetivo: el mejor resultado para el paciente en el menor tiempo posible. El Departamento entiende que el trabajo en equipo fomenta la creatividad y la innovación, y facilita la integración de conocimientos y el abordaje de cada enfermedad con una perspectiva global.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-fonoaudiologia",
+    "titulo": "Fonoaudiología",
+    "tipo": "Tratamiento",
+    "descripcion": "Se diseña un plan de tratamiento específico para cada paciente, en función de sus fortalezas y dificultades. El objetivo es restaurar las funciones afectadas y brindar estrategias para reconstituirlas, haciendo uso de las habilidades preservadas. Se abordan los aspectos inherentes a una comunicación más efectiva en función de la situación actual del paciente.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-consulta-neurologica",
+    "titulo": "Consulta Neurológica",
+    "tipo": "Tratamiento",
+    "descripcion": "Consulta a cargo de un médico neurólogo en la que se investiga el motivo de consulta. Al finalizar, el profesional determina en función de los datos obtenidos cuáles son las evaluaciones a realizar para llegar a un diagnóstico.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  },
+  {
+    "id": "tratamiento-consulta-psiquiatria",
+    "titulo": "Consulta Psiquiatría",
+    "tipo": "Tratamiento",
+    "descripcion": "Se realiza un seguimiento del estado emocional y conductual de la persona, de la evolución del tratamiento en general y de la medicación psiquiátrica en caso de que la esté recibiendo. Es importante que algún familiar referente o acompañante esté presente en las entrevistas, para evaluar e interpretar adecuadamente el estado emocional y conductual y dar recomendaciones de manejo de la situación a la familia.",
+    "duracionMinutos": 0,
+    "precioEfectivo": 0,
+    "precio3Cuotas": 0
+  }
+]
