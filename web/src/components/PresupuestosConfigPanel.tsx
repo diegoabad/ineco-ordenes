@@ -197,7 +197,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   return (
     <section className="presup-config-page">
-      <details className="presup-config-accordion" open>
+      <details className="presup-config-accordion">
         <summary className="presup-config-accordion__summary">
           <div className="presup-config-accordion__lead">
             <span className="presup-config-accordion__title">Profesionales</span>

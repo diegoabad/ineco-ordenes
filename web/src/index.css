@@ -3056,6 +3056,65 @@ tbody tr.is-inactive td {
   box-shadow: var(--shadow-sm);
 }
 
+.config-section--collapsible {
+  padding: 0;
+  overflow: hidden;
+}
+
+.config-section__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1.15rem;
+  list-style: none;
+  user-select: none;
+  cursor: pointer;
+}
+
+.config-section__summary::-webkit-details-marker {
+  display: none;
+}
+
+.config-section__summary::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.15rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.config-section--collapsible[open] > .config-section__summary::before {
+  transform: rotate(45deg);
+}
+
+.config-section__lead {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  min-width: 0;
+}
+
+.config-section__meta {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-section__body {
+  padding: 0 1.15rem 1.15rem;
+}
+
 .config-section--grow {
   flex: 1 1 0%;
   min-height: 0;
@@ -3081,6 +3140,11 @@ tbody tr.is-inactive td {
   font-size: 0.78rem;
   line-height: 1.4;
   color: var(--text-muted);
+}
+
+.config-section__lead .config-section__hint {
+  margin: 0;
+  font-weight: 400;
 }
 
 .config-panel__grid {

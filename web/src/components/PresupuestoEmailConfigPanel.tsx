@@ -200,11 +200,14 @@ export function PresupuestoEmailConfigPanel() {
         <div className="config-panel__body">
           <div className="config-panel__layout">
             <div className="config-panel__main">
-              <section className="config-section">
-                <header className="config-section__head">
-                  <h3 className="config-section__title">Remitente</h3>
-                </header>
-                <div className="form-grid config-panel__grid">
+              <details className="config-section config-section--collapsible">
+                <summary className="config-section__summary">
+                  <div className="config-section__lead">
+                    <h3 className="config-section__title">Remitente</h3>
+                    <span className="config-section__hint">Email y nombre de envío</span>
+                  </div>
+                </summary>
+                <div className="form-grid config-panel__grid config-section__body">
                   <div className="form-group">
                     <label htmlFor="presup-fromEmail">Email remitente</label>
                     <input
@@ -225,7 +228,7 @@ export function PresupuestoEmailConfigPanel() {
                     />
                   </div>
                 </div>
-              </section>
+              </details>
 
               <section className="config-section config-section--grow">
                 <header className="config-section__head">
