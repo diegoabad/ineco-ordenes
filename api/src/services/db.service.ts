@@ -113,6 +113,10 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
       : "pendiente";
   const pdfUrl =
     typeof raw.pdfUrl === "string" && raw.pdfUrl.trim() ? raw.pdfUrl.trim() : null;
+  const ultimoEnvioAt =
+    typeof raw.ultimoEnvioAt === "string" && raw.ultimoEnvioAt.trim()
+      ? raw.ultimoEnvioAt.trim()
+      : null;
   return {
     id,
     fecha: String(raw.fecha ?? fechaHoyIso()),
@@ -127,6 +131,7 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     total3Cuotas: toMoney(raw.total3Cuotas),
     estado,
     pdfUrl,
+    ultimoEnvioAt,
     creadoAt: readCreadoAt(raw),
   };
 }
@@ -145,6 +150,7 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     total3Cuotas: p.total3Cuotas,
     estado: p.estado,
     pdfUrl: p.pdfUrl,
+    ultimoEnvioAt: p.ultimoEnvioAt,
     ...(p.creadoAt ? { creadoAt: p.creadoAt } : {}),
   };
 }
@@ -894,7 +900,7 @@ function presupuestoPermiteEdicion(estado: Presupuesto["estado"]): boolean {
 }
 
 function presupuestoPermiteEnvio(estado: Presupuesto["estado"]): boolean {
-  return estado === "pendiente" || estado === "fallido";
+  return estado === "pendiente" || estado === "fallido" || estado === "enviado";
 }
 
 export class PresupuestoEnvioError extends Error {
@@ -908,7 +914,11 @@ export class PresupuestoEnvioError extends Error {
 }
 
 async function marcarPresupuestoEnvioFallido(presupuesto: Presupuesto): Promise<never> {
-  const fallido: Presupuesto = { ...presupuesto, estado: "fallido" };
+  const fallido: Presupuesto = {
+    ...presupuesto,
+    estado: "fallido",
+    ultimoEnvioAt: nowIso(),
+  };
   await setDoc(
     doc(firestore, PRESUPUESTOS_EMITIDOS, presupuesto.id),
     presupuestoPayload(fallido),
@@ -958,6 +968,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     total3Cuotas: items.reduce((s, i) => s + i.precio3Cuotas, 0),
     estado: "pendiente",
     pdfUrl,
+    ultimoEnvioAt: null,
     creadoAt: nowIso(),
   };
 
@@ -979,6 +990,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
         items: presupuesto.items,
       });
       presupuesto.estado = "enviado";
+      presupuesto.ultimoEnvioAt = nowIso();
       await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
     } catch (error) {
       console.error("[create-presupuesto] envio", error);
@@ -1047,6 +1059,7 @@ export async function updatePresupuesto(
         items: presupuesto.items,
       });
       presupuesto.estado = "enviado";
+      presupuesto.ultimoEnvioAt = nowIso();
       await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
     } catch (error) {
       console.error("[update-presupuesto] envio", error);
@@ -1063,7 +1076,7 @@ export async function enviarPresupuesto(id: string): Promise<Presupuesto> {
 
   const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
   if (!presupuestoPermiteEnvio(current.estado)) {
-    throw new Error("Este presupuesto ya fue enviado");
+    throw new Error("Este presupuesto no se puede enviar en su estado actual");
   }
   if (!current.email.trim()) {
     throw new Error("El presupuesto no tiene email cargado");
@@ -1098,7 +1111,7 @@ export async function enviarPresupuesto(id: string): Promise<Presupuesto> {
     return await marcarPresupuestoEnvioFallido(current);
   }
 
-  const presupuesto: Presupuesto = { ...current, estado: "enviado" };
+  const presupuesto: Presupuesto = { ...current, estado: "enviado", ultimoEnvioAt: nowIso() };
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
   return presupuesto;
 }

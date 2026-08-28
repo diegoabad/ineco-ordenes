@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import { resolveAssetUrl } from "../config/api";
-import { formatFechaYmd } from "../lib/fechas";
+import { formatFechaHora, formatFechaYmd } from "../lib/fechas";
 import { deletePresupuesto, enviarPresupuesto, fetchPresupuestos, updatePresupuestoEstado } from "../services/dataService";
 import type { ModalidadPresupuesto, Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
@@ -14,7 +14,7 @@ function presupuestoEsEditable(estado: PresupuestoEstado): boolean {
 }
 
 function presupuestoPermiteEnvio(estado: PresupuestoEstado): boolean {
-  return estado === "pendiente" || estado === "fallido";
+  return estado === "pendiente" || estado === "fallido" || estado === "enviado";
 }
 
 const ESTADOS_MANUALES: PresupuestoEstado[] = ["aceptado", "rechazado"];
@@ -242,7 +242,11 @@ export function PresupuestosPanel({
     try {
       const updated = await enviarPresupuesto(p.id);
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success(p.estado === "fallido" ? "Presupuesto reenviado" : "Presupuesto enviado");
+      toast.success(
+        p.estado === "fallido" || p.estado === "enviado"
+          ? "Presupuesto reenviado"
+          : "Presupuesto enviado",
+      );
     } catch (error) {
       toast.error("No se pudo enviar el presupuesto");
       const err = error as Error & { data?: unknown };
@@ -347,7 +351,14 @@ export function PresupuestosPanel({
                     </td>
                     <td className="fl-col-presup-total">{formatTotal(p.totalEfectivo)}</td>
                     <td className="fl-col-presup-estado">
-                      <span className={estadoChipClass(p.estado)}>
+                      <span
+                        className={estadoChipClass(p.estado)}
+                        title={
+                          (p.estado === "enviado" || p.estado === "fallido") && p.ultimoEnvioAt
+                            ? `Último intento: ${formatFechaHora(p.ultimoEnvioAt)}`
+                            : undefined
+                        }
+                      >
                         {PRESUPUESTO_ESTADO_LABEL[p.estado]}
                       </span>
                     </td>
@@ -372,20 +383,20 @@ export function PresupuestosPanel({
                                 ? "Sin email"
                                 : !p.pdfUrl
                                   ? "Sin PDF"
-                                  : p.estado === "fallido"
-                                    ? "Reintentar envío"
-                                    : "Enviar presupuesto"
+                                  : p.estado === "pendiente"
+                                    ? "Enviar presupuesto"
+                                    : "Reenviar presupuesto"
                             }
                             aria-label={
-                              p.estado === "fallido" ? "Reintentar envío" : "Enviar presupuesto"
+                              p.estado === "pendiente" ? "Enviar presupuesto" : "Reenviar presupuesto"
                             }
                             disabled={!p.email.trim() || !p.pdfUrl || enviandoId === p.id}
                             onClick={() => void handleEnviar(p)}
                           >
-                            {p.estado === "fallido" ? (
-                              <IconRefresh size={16} />
-                            ) : (
+                            {p.estado === "pendiente" ? (
                               <IconMail size={16} />
+                            ) : (
+                              <IconRefresh size={16} />
                             )}
                           </button>
                         ) : null}

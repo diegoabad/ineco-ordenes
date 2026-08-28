@@ -190,6 +190,8 @@ export type Presupuesto = {
   total3Cuotas: number;
   estado: PresupuestoEstado;
   pdfUrl: string | null;
+  /** ISO del último intento de envío (éxito o fallo). */
+  ultimoEnvioAt: string | null;
   creadoAt?: string;
 };
 
