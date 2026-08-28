@@ -242,7 +242,7 @@ label {
 }
 
 .app-sidebar {
-  width: 13.5rem;
+  width: 14.5rem;
   flex-shrink: 0;
   z-index: 2;
   display: flex;
@@ -255,16 +255,21 @@ label {
 }
 
 .app-sidebar__brand {
-  padding: 0.25rem 0.5rem 0.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.35rem 0.35rem 0.65rem;
 }
 
 .app-sidebar__logo {
   display: block;
   width: 100%;
+  max-width: 11.5rem;
   height: auto;
-  max-height: 2.1rem;
+  max-height: 5.25rem;
+  margin: 0 auto;
   object-fit: contain;
-  object-position: left center;
+  object-position: center;
 }
 
 .app-sidebar__nav {
@@ -597,15 +602,10 @@ label {
   max-width: 8rem;
 }
 
-.col-presup-paciente {
-  width: auto;
-  min-width: 10.5rem;
-}
-
+.col-presup-paciente,
 .col-presup-profesional {
-  width: 10.5rem;
-  min-width: 10.5rem;
-  max-width: 10.5rem;
+  width: 22%;
+  min-width: 10rem;
 }
 
 .fl-col-presup-fecha,
@@ -641,8 +641,9 @@ label {
 }
 
 .fl-modal--presupuesto {
-  width: min(100%, 920px);
-  max-height: min(94vh, 900px);
+  width: min(100%, 1040px);
+  max-height: min(98vh, 1100px);
+  min-height: min(92vh, 960px);
 }
 
 .fl-modal--presupuesto .fl-modal__body {
@@ -664,6 +665,11 @@ label {
   flex-direction: column;
   min-height: 0;
   margin-bottom: 0;
+}
+
+.fl-modal--presupuesto .presup-prest-list {
+  min-height: 28rem;
+  max-height: none;
 }
 
 .presup-prest-toolbar {
@@ -2586,12 +2592,14 @@ tbody tr.is-inactive td {
     flex: 0 1 auto;
     min-width: 0;
     padding: 0;
+    justify-content: flex-start;
   }
 
   .app-sidebar__logo {
     width: auto;
-    max-width: 7rem;
-    max-height: 1.6rem;
+    max-width: 10.5rem;
+    max-height: 3.4rem;
+    margin: 0;
   }
 
   .app-sidebar__nav {

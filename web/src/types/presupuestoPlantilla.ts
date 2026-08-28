@@ -7,7 +7,7 @@ export const DEFAULT_PRESUPUESTO_PLANTILLA_BODY =
   `<br>` +
   `<div>Por medio de la presente se describe el módulo de evaluación según indicación de {{nombreProfesional}}.</div>` +
   `<br>` +
-  `<div>El esquema del tratamiento podrá ser modificado de acuerdo a la evolución y a los objetivos planteados en cada etapa. Todas las evaluaciones que se detallan a continuación se realizan en <b>INECO - Marcelo T. de Alvear 1632, CABA.</b></div>` +
+  `<div>El esquema del tratamiento podrá ser modificado de acuerdo a la evolución y a los objetivos planteados en cada etapa. Todas las evaluaciones que se detallan a continuación se realizan en <b>{{lugarEvaluacion}}</b>.</div>` +
   `<br>` +
   `<div>{{listaPrestaciones}}</div>` +
   `<br>` +
@@ -43,6 +43,8 @@ export const PRESUPUESTO_PLANTILLA_VARS = [
   "nombrePaciente",
   "email",
   "nombreProfesional",
+  "modalidadTitulo",
+  "lugarEvaluacion",
   "fechaPresupuesto",
   "totalEfectivo",
   "total3Cuotas",
@@ -56,6 +58,8 @@ export const PRESUPUESTO_PLANTILLA_VAR_LABELS: Record<PresupuestoPlantillaVar, s
   nombrePaciente: "Nombre paciente",
   email: "Email",
   nombreProfesional: "Nombre profesional",
+  modalidadTitulo: "Modalidad",
+  lugarEvaluacion: "Lugar / texto modalidad",
   fechaPresupuesto: "Fecha del presupuesto",
   totalEfectivo: "Total en efectivo",
   total3Cuotas: "Total en 3 cuotas",

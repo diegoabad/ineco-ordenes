@@ -17,19 +17,19 @@ const TEXT = [17, 24, 39] as const;
 const MUTED = [75, 85, 99] as const;
 const LINE = [209, 213, 219] as const;
 
-const HEADER_LOGO_W = 80;
+const HEADER_LOGO_W = 96;
 const HEADER_LOGO_H = HEADER_LOGO_W * (LOGO_INECO_HEIGHT / LOGO_INECO_WIDTH);
 const HEADER_TITLE_SIZE = 22;
 const HEADER_DATE_SIZE = 10;
 /** Aire extra debajo del logo antes de la línea separadora. */
-const HEADER_LINE_EXTRA = 14;
+const HEADER_LINE_EXTRA = 12;
 /** Separación entre la línea y el inicio del cuerpo (“Estimado…”). */
-const HEADER_LINE_TO_BODY = 30;
-const HEADER_TOP = 28;
+const HEADER_LINE_TO_BODY = 26;
+const HEADER_TOP = 24;
 /** Y de inicio del cuerpo, alineado con el retorno de `drawHeader`. */
 const BODY_START_Y = HEADER_TOP + HEADER_LOGO_H + HEADER_LINE_EXTRA + HEADER_LINE_TO_BODY;
 
-const FOOTER_LOGO_W = 48;
+const FOOTER_LOGO_W = 40;
 const FOOTER_LOGO_H = FOOTER_LOGO_W * (LOGO_INECO_HEIGHT / LOGO_INECO_WIDTH);
 const FOOTER_BOTTOM_MARGIN = 10;
 const FOOTER_LINE_GAP = 6;

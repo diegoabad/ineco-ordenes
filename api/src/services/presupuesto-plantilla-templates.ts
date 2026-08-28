@@ -7,7 +7,7 @@ export const DEFAULT_PRESUPUESTO_PLANTILLA_BODY =
   `<br>` +
   `<div>Por medio de la presente se describe el módulo de evaluación según indicación de {{nombreProfesional}}.</div>` +
   `<br>` +
-  `<div>El esquema del tratamiento podrá ser modificado de acuerdo a la evolución y a los objetivos planteados en cada etapa. Todas las evaluaciones que se detallan a continuación se realizan en <b>INECO - Marcelo T. de Alvear 1632, CABA.</b></div>` +
+  `<div>El esquema del tratamiento podrá ser modificado de acuerdo a la evolución y a los objetivos planteados en cada etapa. Todas las evaluaciones que se detallan a continuación se realizan en <b>{{lugarEvaluacion}}</b>.</div>` +
   `<br>` +
   `<div>{{listaPrestaciones}}</div>` +
   `<br>` +
@@ -47,6 +47,8 @@ export const PRESUPUESTO_PLANTILLA_VARS = [
   "nombrePaciente",
   "email",
   "nombreProfesional",
+  "modalidadTitulo",
+  "lugarEvaluacion",
   "fechaPresupuesto",
   "totalEfectivo",
   "total3Cuotas",
@@ -60,6 +62,9 @@ const TEMPLATE_VAR_ALIASES: Record<string, PresupuestoPlantillaVar> = {
   nombre: "nombrePaciente",
   fecha: "fechaPresupuesto",
   profesional: "nombreProfesional",
+  modalidad: "modalidadTitulo",
+  lugar: "lugarEvaluacion",
+  modalidadTexto: "lugarEvaluacion",
 };
 
 export function applyPresupuestoPlantilla(
@@ -73,11 +78,27 @@ export function applyPresupuestoPlantilla(
   });
 }
 
+const LEGACY_DIRECCION_FIJA = "INECO - Marcelo T. de Alvear 1632, CABA";
+
+function migratePlantillaBodyLugar(body: string): string {
+  if (!body.includes(LEGACY_DIRECCION_FIJA)) return body;
+  if (body.includes("{{lugarEvaluacion}}") || body.includes("{{lugar}}")) return body;
+  return body
+    .replace(
+      /<b>\s*INECO\s*-\s*Marcelo T\.\s*de Alvear 1632,\s*CABA\.?\s*<\/b>/gi,
+      "<b>{{lugarEvaluacion}}</b>",
+    )
+    .replace(
+      /INECO\s*-\s*Marcelo T\.\s*de Alvear 1632,\s*CABA\.?/gi,
+      "{{lugarEvaluacion}}",
+    );
+}
+
 export function presupuestoPlantillaConfigWithDefaults(
   stored: Partial<PresupuestoPlantillaConfig> | null,
 ): PresupuestoPlantillaConfig {
   const storedBody = stored?.body?.trim() || "";
   return {
-    body: storedBody || DEFAULT_PRESUPUESTO_PLANTILLA_CONFIG.body,
+    body: migratePlantillaBodyLugar(storedBody || DEFAULT_PRESUPUESTO_PLANTILLA_CONFIG.body),
   };
 }

@@ -7,7 +7,9 @@ import {
 import { nextTipoColor, mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
 import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
 import {
+  DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
+  type ModalidadPresupuesto,
   type ProfesionalPresupuesto,
   type TipoPrestacion,
 } from "../types";
@@ -19,21 +21,27 @@ type Props = {
   onSaved?: () => void;
 };
 
-function newProfesionalId(): string {
+function newId(): string {
   return crypto.randomUUID();
 }
 
 type PendingDelete =
   | { kind: "tipo"; index: number; nombre: string }
-  | { kind: "profesional"; id: string; label: string };
+  | { kind: "profesional"; id: string; label: string }
+  | { kind: "modalidad"; id: string; label: string };
 
 export function PresupuestosConfigPanel({ onSaved }: Props) {
   const [tipos, setTipos] = useState<TipoPrestacion[]>(DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })));
   const [profesionales, setProfesionales] = useState<ProfesionalPresupuesto[]>([]);
+  const [modalidades, setModalidades] = useState<ModalidadPresupuesto[]>(
+    DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
+  );
   const [nuevoTipo, setNuevoTipo] = useState("");
   const [nuevoColor, setNuevoColor] = useState(() => nextTipoColor(DEFAULT_TIPOS_PRESTACION));
   const [nuevoProfTitulo, setNuevoProfTitulo] = useState<string>(TITULOS_PROFESIONAL_PRESUPUESTO[0]!);
   const [nuevoProfNombre, setNuevoProfNombre] = useState("");
+  const [nuevaModTitulo, setNuevaModTitulo] = useState("");
+  const [nuevaModTexto, setNuevaModTexto] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
@@ -44,19 +52,26 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       try {
         const config = await fetchPresupuestosConfig();
         const { tipos: tiposMerged, changed } = mergeMissingDefaultTipos(config.tiposPrestacion);
-        if (changed) {
+        const modalidadesLoaded =
+          config.modalidades?.length > 0
+            ? config.modalidades
+            : DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m }));
+        if (changed || !config.modalidades?.length) {
           const saved = await savePresupuestosConfig({
             tiposPrestacion: tiposMerged,
             profesionales: config.profesionales,
+            modalidades: modalidadesLoaded,
           });
           setTipos(saved.tiposPrestacion);
           setProfesionales(saved.profesionales);
+          setModalidades(saved.modalidades);
           setNuevoColor(nextTipoColor(saved.tiposPrestacion));
           onSaved?.();
-          toast.success("Tipos Evaluación y Tratamiento restaurados");
+          if (changed) toast.success("Tipos Evaluación y Tratamiento restaurados");
         } else {
           setTipos(config.tiposPrestacion);
           setProfesionales(config.profesionales);
+          setModalidades(config.modalidades);
           setNuevoColor(nextTipoColor(config.tiposPrestacion));
         }
       } catch (error) {
@@ -70,6 +85,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   async function persistConfig(
     nextTipos: TipoPrestacion[],
     nextProfesionales: ProfesionalPresupuesto[],
+    nextModalidades: ModalidadPresupuesto[],
     okMessage?: string,
   ) {
     setSaving(true);
@@ -77,9 +93,11 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       const saved = await savePresupuestosConfig({
         tiposPrestacion: nextTipos,
         profesionales: nextProfesionales,
+        modalidades: nextModalidades,
       });
       setTipos(saved.tiposPrestacion);
       setProfesionales(saved.profesionales);
+      setModalidades(saved.modalidades);
       setNuevoColor(nextTipoColor(saved.tiposPrestacion));
       onSaved?.();
       if (okMessage) toast.success(okMessage);
@@ -89,6 +107,11 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
         const config = await fetchPresupuestosConfig();
         setTipos(config.tiposPrestacion);
         setProfesionales(config.profesionales);
+        setModalidades(
+          config.modalidades?.length > 0
+            ? config.modalidades
+            : DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
+        );
         setNuevoColor(nextTipoColor(config.tiposPrestacion));
       } catch {
         // El toast ya avisó; la lista queda como estaba en pantalla.
@@ -108,7 +131,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     const next = [{ nombre, color: nuevoColor }, ...tipos];
     setNuevoTipo("");
     setNuevoColor(nextTipoColor(next));
-    await persistConfig(next, profesionales, "Tipo agregado");
+    await persistConfig(next, profesionales, modalidades, "Tipo agregado");
   }
 
   function solicitarQuitarTipo(index: number) {
@@ -123,7 +146,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   async function confirmarQuitarTipo(index: number) {
     const next = tipos.filter((_, i) => i !== index);
-    await persistConfig(next, profesionales, "Tipo eliminado");
+    await persistConfig(next, profesionales, modalidades, "Tipo eliminado");
   }
 
   function solicitarQuitarProfesional(p: ProfesionalPresupuesto) {
@@ -136,7 +159,20 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   async function confirmarQuitarProfesional(id: string) {
     const next = profesionales.filter((p) => p.id !== id);
-    await persistConfig(tipos, next, "Profesional eliminado");
+    await persistConfig(tipos, next, modalidades, "Profesional eliminado");
+  }
+
+  function solicitarQuitarModalidad(m: ModalidadPresupuesto) {
+    if (modalidades.length <= 1) {
+      toast.warning("Debe quedar al menos una modalidad");
+      return;
+    }
+    setPendingDelete({ kind: "modalidad", id: m.id, label: m.titulo });
+  }
+
+  async function confirmarQuitarModalidad(id: string) {
+    const next = modalidades.filter((m) => m.id !== id);
+    await persistConfig(tipos, profesionales, next, "Modalidad eliminada");
   }
 
   async function confirmarEliminacion() {
@@ -145,14 +181,16 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     setPendingDelete(null);
     if (pending.kind === "tipo") {
       await confirmarQuitarTipo(pending.index);
-    } else {
+    } else if (pending.kind === "profesional") {
       await confirmarQuitarProfesional(pending.id);
+    } else {
+      await confirmarQuitarModalidad(pending.id);
     }
   }
 
   async function cambiarColor(index: number, color: string) {
     const next = tipos.map((t, i) => (i === index ? { ...t, color } : t));
-    await persistConfig(next, profesionales);
+    await persistConfig(next, profesionales, modalidades);
   }
 
   async function agregarProfesional() {
@@ -171,11 +209,11 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       return;
     }
     const next = [
-      { id: newProfesionalId(), titulo: nuevoProfTitulo, nombreApellido },
+      { id: newId(), titulo: nuevoProfTitulo, nombreApellido },
       ...profesionales,
     ];
     setNuevoProfNombre("");
-    await persistConfig(tipos, next, "Profesional agregado");
+    await persistConfig(tipos, next, modalidades, "Profesional agregado");
   }
 
   async function actualizarProfesional(
@@ -184,7 +222,35 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   ) {
     const next = profesionales.map((p) => (p.id === id ? { ...p, ...patch } : p));
     setProfesionales(next);
-    await persistConfig(tipos, next);
+    await persistConfig(tipos, next, modalidades);
+  }
+
+  async function agregarModalidad() {
+    const titulo = nuevaModTitulo.trim();
+    if (!titulo) {
+      toast.warning("Ingresá el título de la modalidad");
+      return;
+    }
+    if (modalidades.some((m) => m.titulo.toLowerCase() === titulo.toLowerCase())) {
+      toast.warning("Esa modalidad ya existe");
+      return;
+    }
+    const next = [
+      { id: newId(), titulo, textoPdf: nuevaModTexto.trim() },
+      ...modalidades,
+    ];
+    setNuevaModTitulo("");
+    setNuevaModTexto("");
+    await persistConfig(tipos, profesionales, next, "Modalidad agregada");
+  }
+
+  async function actualizarModalidad(
+    id: string,
+    patch: Partial<Pick<ModalidadPresupuesto, "titulo" | "textoPdf">>,
+  ) {
+    const next = modalidades.map((m) => (m.id === id ? { ...m, ...patch } : m));
+    setModalidades(next);
+    await persistConfig(tipos, profesionales, next);
   }
 
   if (loading) {
@@ -311,6 +377,109 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       <details className="presup-config-accordion">
         <summary className="presup-config-accordion__summary">
           <div className="presup-config-accordion__lead">
+            <span className="presup-config-accordion__title">Modalidades</span>
+            <span className="presup-config-accordion__hint">
+              Título en el formulario y texto que va al PDF (dirección o “virtual”).
+            </span>
+          </div>
+          <span className="presup-config-accordion__meta">{modalidades.length} modalidad(es)</span>
+        </summary>
+        <div className="presup-config-accordion__body">
+          <ul className="presup-config-list presup-config-list--profesionales">
+            {modalidades.map((m) => (
+              <li key={m.id} className="presup-config-list__item presup-config-list__item--prof">
+                <div className="presup-config-prof">
+                  <div className="form-group presup-config-prof__titulo">
+                    <label htmlFor={`mod-titulo-${m.id}`}>Título</label>
+                    <input
+                      id={`mod-titulo-${m.id}`}
+                      type="text"
+                      value={m.titulo}
+                      disabled={saving}
+                      onChange={(e) =>
+                        setModalidades((prev) =>
+                          prev.map((item) =>
+                            item.id === m.id ? { ...item, titulo: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      onBlur={(e) =>
+                        void actualizarModalidad(m.id, { titulo: e.target.value.trim() })
+                      }
+                    />
+                  </div>
+                  <div className="form-group presup-config-prof__nombre">
+                    <label htmlFor={`mod-texto-${m.id}`}>Texto en el PDF</label>
+                    <input
+                      id={`mod-texto-${m.id}`}
+                      type="text"
+                      value={m.textoPdf}
+                      disabled={saving}
+                      placeholder="Ej. dirección o modalidad virtual"
+                      onChange={(e) =>
+                        setModalidades((prev) =>
+                          prev.map((item) =>
+                            item.id === m.id ? { ...item, textoPdf: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      onBlur={(e) =>
+                        void actualizarModalidad(m.id, { textoPdf: e.target.value.trim() })
+                      }
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="fl-icon-btn fl-icon-btn--danger"
+                  title="Quitar modalidad"
+                  disabled={modalidades.length <= 1 || saving}
+                  onClick={() => solicitarQuitarModalidad(m)}
+                >
+                  <IconTrash size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="presup-config-add presup-config-add--prof">
+            <input
+              type="text"
+              value={nuevaModTitulo}
+              onChange={(e) => setNuevaModTitulo(e.target.value)}
+              placeholder="Título, ej. Híbrida"
+              disabled={saving}
+              aria-label="Título de la modalidad"
+            />
+            <input
+              type="text"
+              value={nuevaModTexto}
+              onChange={(e) => setNuevaModTexto(e.target.value)}
+              placeholder="Texto para el PDF"
+              disabled={saving}
+              aria-label="Texto PDF de la modalidad"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void agregarModalidad();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={saving}
+              onClick={() => void agregarModalidad()}
+            >
+              <IconPlus size={16} />
+              Agregar
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <details className="presup-config-accordion">
+        <summary className="presup-config-accordion__summary">
+          <div className="presup-config-accordion__lead">
             <span className="presup-config-accordion__title">Tipos de prestación</span>
             <span className="presup-config-accordion__hint">
               Categorías para clasificar prestaciones.
@@ -385,14 +554,20 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       <ConfirmDialog
         open={pendingDelete !== null}
         title={
-          pendingDelete?.kind === "tipo" ? "Eliminar tipo de prestación" : "Eliminar profesional"
+          pendingDelete?.kind === "tipo"
+            ? "Eliminar tipo de prestación"
+            : pendingDelete?.kind === "profesional"
+              ? "Eliminar profesional"
+              : "Eliminar modalidad"
         }
         message={
           pendingDelete?.kind === "tipo"
             ? `¿Eliminar el tipo "${pendingDelete.nombre}"?`
             : pendingDelete?.kind === "profesional"
               ? `¿Eliminar a ${pendingDelete.label}?`
-              : ""
+              : pendingDelete?.kind === "modalidad"
+                ? `¿Eliminar la modalidad "${pendingDelete.label}"?`
+                : ""
         }
         confirmLabel="Eliminar"
         onConfirm={() => void confirmarEliminacion()}

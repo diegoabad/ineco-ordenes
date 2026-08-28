@@ -7,7 +7,7 @@ import { PresupuestosPanel } from "./PresupuestosPanel";
 import { PrestacionesPanel } from "./PrestacionesPanel";
 import { mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
 import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
-import { DEFAULT_TIPOS_PRESTACION, type ProfesionalPresupuesto, type TipoPrestacion } from "../types";
+import { DEFAULT_TIPOS_PRESTACION, type ModalidadPresupuesto, type ProfesionalPresupuesto, type TipoPrestacion } from "../types";
 
 type PresupuestoTab =
   | "presupuestos"
@@ -26,6 +26,7 @@ export function PresupuestosModule() {
   const [profesionalesPresupuesto, setProfesionalesPresupuesto] = useState<ProfesionalPresupuesto[]>(
     [],
   );
+  const [modalidadesPresupuesto, setModalidadesPresupuesto] = useState<ModalidadPresupuesto[]>([]);
 
   const cargarConfig = useCallback(async () => {
     try {
@@ -35,16 +36,20 @@ export function PresupuestosModule() {
         const saved = await savePresupuestosConfig({
           tiposPrestacion: tiposMerged,
           profesionales: config.profesionales,
+          modalidades: config.modalidades,
         });
         setTiposPrestacion(saved.tiposPrestacion);
         setProfesionalesPresupuesto(saved.profesionales);
+        setModalidadesPresupuesto(saved.modalidades);
       } else {
         setTiposPrestacion(config.tiposPrestacion);
         setProfesionalesPresupuesto(config.profesionales);
+        setModalidadesPresupuesto(config.modalidades);
       }
     } catch {
       setTiposPrestacion(DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })));
       setProfesionalesPresupuesto([]);
+      setModalidadesPresupuesto([]);
     }
   }, []);
 
@@ -132,6 +137,7 @@ export function PresupuestosModule() {
           addRequestKey={addPresupuestoKey}
           profesionales={profesionalesPresupuesto}
           onProfesionalesChange={setProfesionalesPresupuesto}
+          modalidades={modalidadesPresupuesto}
         />
       ) : null}
       {tab === "prestaciones" ? (

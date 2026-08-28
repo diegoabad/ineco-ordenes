@@ -33,6 +33,10 @@ const VAR_GROUPS: { title: string; keys: readonly PresupuestoPlantillaVar[] }[] 
     keys: ["nombreProfesional"],
   },
   {
+    title: "Modalidad",
+    keys: ["modalidadTitulo", "lugarEvaluacion"],
+  },
+  {
     title: "Presupuesto",
     keys: ["fechaPresupuesto", "totalEfectivo", "total3Cuotas"],
   },

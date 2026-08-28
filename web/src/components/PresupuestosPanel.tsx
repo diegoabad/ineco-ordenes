@@ -3,7 +3,7 @@ import { toast } from "react-toastify";
 import { resolveAssetUrl } from "../config/api";
 import { formatFechaYmd } from "../lib/fechas";
 import { deletePresupuesto, enviarPresupuesto, fetchPresupuestos, updatePresupuestoEstado } from "../services/dataService";
-import type { Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
+import type { ModalidadPresupuesto, Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconAlert, IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
@@ -86,6 +86,7 @@ type Props = {
   addRequestKey?: number;
   profesionales?: ProfesionalPresupuesto[];
   onProfesionalesChange?: (profesionales: ProfesionalPresupuesto[]) => void;
+  modalidades?: ModalidadPresupuesto[];
 };
 
 function formatMoney(value: number): string {
@@ -123,6 +124,7 @@ export function PresupuestosPanel({
   addRequestKey = 0,
   profesionales = [],
   onProfesionalesChange,
+  modalidades = [],
 }: Props) {
   const [items, setItems] = useState<Presupuesto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -454,6 +456,7 @@ export function PresupuestosPanel({
         initial={editando}
         profesionales={profesionales}
         onProfesionalesChange={onProfesionalesChange}
+        modalidades={modalidades}
         onClose={cerrarModal}
         onSaved={(saved) => {
           setItems((prev) => {

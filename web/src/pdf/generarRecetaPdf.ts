@@ -19,11 +19,11 @@ const MUTED = [75, 85, 99] as const;
 const LINE = [209, 213, 219] as const;
 
 /** Logo principal (cabecera). */
-const LOGO_W = 118;
+const LOGO_W = 110;
 const LOGO_H = LOGO_W * (LOGO_INECO_HEIGHT / LOGO_INECO_WIDTH);
 
 /** Logo chico del pie (al lado del texto). */
-const FOOTER_LOGO_W = 48;
+const FOOTER_LOGO_W = 42;
 const FOOTER_LOGO_H = FOOTER_LOGO_W * (LOGO_INECO_HEIGHT / LOGO_INECO_WIDTH);
 
 function formatFecha(iso: string): string {

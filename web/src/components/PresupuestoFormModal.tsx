@@ -11,7 +11,13 @@ import {
   fetchPrestaciones,
   updatePresupuesto,
 } from "../services/dataService";
-import type { Prestacion, Presupuesto, PresupuestoFormData, ProfesionalPresupuesto } from "../types";
+import type {
+  ModalidadPresupuesto,
+  Prestacion,
+  Presupuesto,
+  PresupuestoFormData,
+  ProfesionalPresupuesto,
+} from "../types";
 import { IconSearch, IconX } from "./Icons";
 import { ProfesionalPresupuestoField } from "./ProfesionalPresupuestoField";
 
@@ -20,6 +26,7 @@ type Props = {
   initial?: Presupuesto | null;
   profesionales?: ProfesionalPresupuesto[];
   onProfesionalesChange?: (profesionales: ProfesionalPresupuesto[]) => void;
+  modalidades?: ModalidadPresupuesto[];
   onClose: () => void;
   onSaved: (presupuesto: Presupuesto) => void;
   onEnvioFallido?: () => void;
@@ -28,6 +35,7 @@ type Props = {
 const EMPTY_FORM: PresupuestoFormData = {
   nombrePaciente: "",
   profesional: "",
+  modalidadId: "",
   email: "",
   prestacionIds: [],
 };
@@ -62,6 +70,7 @@ export function PresupuestoFormModal({
   initial = null,
   profesionales = [],
   onProfesionalesChange,
+  modalidades = [],
   onClose,
   onSaved,
   onEnvioFallido,
@@ -74,6 +83,13 @@ export function PresupuestoFormModal({
   const [accion, setAccion] = useState<"crear" | "enviar" | null>(null);
   const [busquedaPrest, setBusquedaPrest] = useState("");
   const [plantillaBody, setPlantillaBody] = useState("");
+  const [creandoProfesional, setCreandoProfesional] = useState(false);
+
+  const modalidadDefaultId = modalidades[0]?.id ?? "";
+
+  useEffect(() => {
+    if (!open) setCreandoProfesional(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,10 +102,14 @@ export function PresupuestoFormModal({
         ? {
             nombrePaciente: initial.nombrePaciente,
             profesional: initial.profesional,
+            modalidadId:
+              initial.modalidadId && modalidades.some((m) => m.id === initial.modalidadId)
+                ? initial.modalidadId
+                : modalidadDefaultId,
             email: initial.email,
             prestacionIds: initial.items.map((i) => i.prestacionId),
           }
-        : EMPTY_FORM,
+        : { ...EMPTY_FORM, modalidadId: modalidadDefaultId },
     );
     void (async () => {
       setLoadingPrestaciones(true);
@@ -101,7 +121,18 @@ export function PresupuestoFormModal({
         setLoadingPrestaciones(false);
       }
     })();
-  }, [open, initial]);
+  }, [open, initial, modalidadDefaultId, modalidades]);
+
+  useEffect(() => {
+    if (!open || form.modalidadId) return;
+    if (!modalidadDefaultId) return;
+    setForm((f) => (f.modalidadId ? f : { ...f, modalidadId: modalidadDefaultId }));
+  }, [open, form.modalidadId, modalidadDefaultId]);
+
+  const modalidadSeleccionada = useMemo(
+    () => modalidades.find((m) => m.id === form.modalidadId) ?? null,
+    [modalidades, form.modalidadId],
+  );
 
   const seleccionadas = useMemo(
     () => prestaciones.filter((p) => form.prestacionIds.includes(p.id)),
@@ -138,6 +169,7 @@ export function PresupuestoFormModal({
     if (!form.nombrePaciente.trim()) return false;
     if (!form.email.trim()) return false;
     if (!form.profesional.trim()) return false;
+    if (!form.modalidadId.trim()) return false;
     if (form.prestacionIds.length === 0) return false;
     return seleccionadas.length > 0 && seleccionadas.every(prestacionTienePrecios);
   }, [form, seleccionadas]);
@@ -170,6 +202,10 @@ export function PresupuestoFormModal({
       toast.warning("Seleccioná un profesional");
       return;
     }
+    if (!form.modalidadId.trim() || !modalidadSeleccionada) {
+      toast.warning("Seleccioná una modalidad");
+      return;
+    }
     if (form.prestacionIds.length === 0) {
       toast.warning("Seleccioná al menos una prestación");
       return;
@@ -188,6 +224,8 @@ export function PresupuestoFormModal({
         nombrePaciente: form.nombrePaciente.trim(),
         email: form.email.trim(),
         nombreProfesional: form.profesional.trim(),
+        modalidadTitulo: modalidadSeleccionada.titulo,
+        lugarEvaluacion: modalidadSeleccionada.textoPdf,
         fecha,
         items,
         totalEfectivo: totales.totalEfectivo,
@@ -199,6 +237,7 @@ export function PresupuestoFormModal({
       const payload = {
         nombrePaciente: form.nombrePaciente.trim(),
         profesional: form.profesional.trim(),
+        modalidadId: form.modalidadId,
         email: form.email.trim(),
         prestacionIds: form.prestacionIds,
         pdfBase64,
@@ -318,16 +357,41 @@ export function PresupuestoFormModal({
           </div>
         </div>
 
-        <div className="form-group">
-          <label htmlFor="presup-profesional">Profesional *</label>
-          <ProfesionalPresupuestoField
-            id="presup-profesional"
-            value={form.profesional}
-            profesionales={profesionales}
-            disabled={disabled}
-            onChange={(profesional) => setForm((f) => ({ ...f, profesional }))}
-            onProfesionalesChange={onProfesionalesChange}
-          />
+        <div className="form-grid">
+          <div className={`form-group${creandoProfesional ? " form-group--full" : ""}`}>
+            <label htmlFor="presup-profesional">Profesional *</label>
+            <ProfesionalPresupuestoField
+              id="presup-profesional"
+              value={form.profesional}
+              profesionales={profesionales}
+              disabled={disabled}
+              onChange={(profesional) => setForm((f) => ({ ...f, profesional }))}
+              onProfesionalesChange={onProfesionalesChange}
+              onCreatingChange={setCreandoProfesional}
+            />
+          </div>
+          {!creandoProfesional ? (
+            <div className="form-group">
+              <label htmlFor="presup-modalidad">Modalidad *</label>
+              <select
+                id="presup-modalidad"
+                value={form.modalidadId}
+                disabled={disabled || modalidades.length === 0}
+                onChange={(e) => setForm((f) => ({ ...f, modalidadId: e.target.value }))}
+                required
+              >
+                {modalidades.length === 0 ? (
+                  <option value="">Sin modalidades configuradas</option>
+                ) : (
+                  modalidades.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.titulo}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          ) : null}
         </div>
 
         <div className="form-group form-group--presup-prest">

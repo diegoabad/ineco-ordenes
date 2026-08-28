@@ -16,8 +16,10 @@ import {
 import { PRESUPUESTO_PLANTILLA_VARS } from "../services/presupuesto-plantilla-templates.js";
 import type { PresupuestoPlantillaConfig } from "../services/presupuesto-plantilla-templates.js";
 import {
+  DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
   TIPO_COLOR_PALETTE,
+  type ModalidadPresupuesto,
   type PresupuestoCreateInput,
   type PresupuestoEstado,
   type PresupuestosConfig,
@@ -54,12 +56,33 @@ function parseProfesionalesPresupuesto(raw: unknown): ProfesionalPresupuesto[] {
   return result;
 }
 
+function parseModalidadesPresupuesto(raw: unknown): ModalidadPresupuesto[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m }));
+  }
+  const result: ModalidadPresupuesto[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const titulo = String(obj.titulo ?? "").trim();
+    if (!titulo) continue;
+    const id = String(obj.id ?? "").trim() || randomUUID();
+    const textoPdf = String(obj.textoPdf ?? "").trim();
+    result.push({ id, titulo, textoPdf });
+  }
+  if (result.length === 0) {
+    throw new Error("Debe haber al menos una modalidad");
+  }
+  return result;
+}
+
 function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
   const raw = body as Record<string, unknown>;
   if (!Array.isArray(raw.tiposPrestacion)) {
     return {
       tiposPrestacion: DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })),
       profesionales: parseProfesionalesPresupuesto(raw.profesionales),
+      modalidades: parseModalidadesPresupuesto(raw.modalidades),
     };
   }
 
@@ -104,6 +127,7 @@ function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
   return {
     tiposPrestacion: unique,
     profesionales: parseProfesionalesPresupuesto(raw.profesionales),
+    modalidades: parseModalidadesPresupuesto(raw.modalidades),
   };
 }
 
@@ -122,6 +146,7 @@ function parseCreatePresupuesto(body: unknown): PresupuestoCreateInput {
   return {
     nombrePaciente: String(raw.nombrePaciente ?? "").trim(),
     profesional: String(raw.profesional ?? "").trim(),
+    modalidadId: String(raw.modalidadId ?? "").trim(),
     email: String(raw.email ?? "").trim(),
     prestacionIds,
     pdfBase64: String(raw.pdfBase64 ?? "").trim() || undefined,

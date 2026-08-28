@@ -67,6 +67,7 @@ export type TipoPrestacion = {
 export type PresupuestosConfig = {
   tiposPrestacion: TipoPrestacion[];
   profesionales: ProfesionalPresupuesto[];
+  modalidades: ModalidadPresupuesto[];
 };
 
 export type ProfesionalPresupuesto = {
@@ -74,6 +75,25 @@ export type ProfesionalPresupuesto = {
   titulo: string;
   nombreApellido: string;
 };
+
+export type ModalidadPresupuesto = {
+  id: string;
+  titulo: string;
+  textoPdf: string;
+};
+
+export const DEFAULT_MODALIDADES_PRESUPUESTO: ModalidadPresupuesto[] = [
+  {
+    id: "presencial",
+    titulo: "Presencial",
+    textoPdf: "INECO - Marcelo T. de Alvear 1632, CABA",
+  },
+  {
+    id: "virtual",
+    titulo: "Virtual",
+    textoPdf: "modalidad virtual",
+  },
+];
 
 export const TIPO_COLOR_PALETTE = [
   "#2563eb",
@@ -103,6 +123,9 @@ export type Presupuesto = {
   fecha: string;
   nombrePaciente: string;
   profesional: string;
+  modalidadId: string;
+  modalidadTitulo: string;
+  modalidadTextoPdf: string;
   email: string;
   items: PresupuestoItem[];
   totalEfectivo: number;
@@ -115,6 +138,7 @@ export type Presupuesto = {
 export type PresupuestoCreateInput = {
   nombrePaciente: string;
   profesional: string;
+  modalidadId: string;
   email: string;
   prestacionIds: string[];
   pdfBase64?: string;

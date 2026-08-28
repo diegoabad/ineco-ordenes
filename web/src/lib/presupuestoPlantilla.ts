@@ -8,6 +8,9 @@ const TEMPLATE_VAR_ALIASES: Record<string, PresupuestoPlantillaVar> = {
   nombre: "nombrePaciente",
   fecha: "fechaPresupuesto",
   profesional: "nombreProfesional",
+  modalidad: "modalidadTitulo",
+  lugar: "lugarEvaluacion",
+  modalidadTexto: "lugarEvaluacion",
 };
 
 function formatMoney(value: number): string {
@@ -35,6 +38,8 @@ export type PresupuestoPlantillaContext = {
   nombrePaciente: string;
   email: string;
   nombreProfesional: string;
+  modalidadTitulo: string;
+  lugarEvaluacion: string;
   fecha: string;
   items: PresupuestoItem[];
   totalEfectivo: number;
@@ -48,6 +53,8 @@ export function buildPresupuestoPlantillaVars(
     nombrePaciente: input.nombrePaciente.trim() || "—",
     email: input.email.trim() || "—",
     nombreProfesional: input.nombreProfesional.trim() || "—",
+    modalidadTitulo: input.modalidadTitulo.trim() || "—",
+    lugarEvaluacion: input.lugarEvaluacion.trim() || "—",
     fechaPresupuesto: formatFechaYmd(input.fecha) || "—",
     totalEfectivo: formatMoney(input.totalEfectivo),
     total3Cuotas: formatMoney(input.total3Cuotas),

@@ -15,6 +15,7 @@ type Props = {
   disabled?: boolean;
   onChange: (value: string) => void;
   onProfesionalesChange?: (profesionales: ProfesionalPresupuesto[]) => void;
+  onCreatingChange?: (creating: boolean) => void;
 };
 
 function newProfesionalId(): string {
@@ -28,6 +29,7 @@ export function ProfesionalPresupuestoField({
   disabled = false,
   onChange,
   onProfesionalesChange,
+  onCreatingChange,
 }: Props) {
   const reactId = useId();
   const inputId = idProp ?? `presup-prof-${reactId}`;
@@ -41,6 +43,10 @@ export function ProfesionalPresupuestoField({
   const [nuevoTitulo, setNuevoTitulo] = useState<string>(TITULOS_PROFESIONAL_PRESUPUESTO[0]!);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [savingProf, setSavingProf] = useState(false);
+
+  useEffect(() => {
+    onCreatingChange?.(creating);
+  }, [creating, onCreatingChange]);
 
   useEffect(() => {
     if (!focused && !creating) {
@@ -117,6 +123,7 @@ export function ProfesionalPresupuestoField({
       const saved = await savePresupuestosConfig({
         tiposPrestacion: config.tiposPrestacion,
         profesionales: nextProfesionales,
+        modalidades: config.modalidades,
       });
       onProfesionalesChange?.(saved.profesionales);
       seleccionar(label);

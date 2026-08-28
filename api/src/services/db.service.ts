@@ -16,8 +16,9 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
-import type { AppDb, Medico, MedicoInput, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion } from "../types.js";
+import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion } from "../types.js";
 import {
+  DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
   TIPO_COLOR_PALETTE,
 } from "../types.js";
@@ -117,6 +118,9 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     fecha: String(raw.fecha ?? fechaHoyIso()),
     nombrePaciente: String(raw.nombrePaciente ?? raw.nombre ?? ""),
     profesional: String(raw.profesional ?? "").trim(),
+    modalidadId: String(raw.modalidadId ?? "").trim(),
+    modalidadTitulo: String(raw.modalidadTitulo ?? "").trim(),
+    modalidadTextoPdf: String(raw.modalidadTextoPdf ?? "").trim(),
     email: String(raw.email ?? "").trim(),
     items,
     totalEfectivo: toMoney(raw.totalEfectivo ?? raw.total),
@@ -132,6 +136,9 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     fecha: p.fecha,
     nombrePaciente: p.nombrePaciente,
     profesional: p.profesional,
+    modalidadId: p.modalidadId,
+    modalidadTitulo: p.modalidadTitulo,
+    modalidadTextoPdf: p.modalidadTextoPdf,
     email: p.email,
     items: p.items,
     totalEfectivo: p.totalEfectivo,
@@ -223,6 +230,44 @@ function normalizeProfesionalesPresupuesto(raw: unknown): ProfesionalPresupuesto
   }
 
   return result;
+}
+
+function normalizeModalidadesPresupuesto(raw: unknown): ModalidadPresupuesto[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m }));
+  }
+
+  const result: ModalidadPresupuesto[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const titulo = String(obj.titulo ?? "").trim();
+    if (!titulo) continue;
+    const id = String(obj.id ?? "").trim() || randomUUID();
+    const textoPdf = String(obj.textoPdf ?? "").trim();
+    result.push({ id, titulo, textoPdf });
+  }
+
+  return result.length > 0
+    ? result
+    : DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m }));
+}
+
+async function resolveModalidadPresupuesto(modalidadId: string): Promise<{
+  modalidadId: string;
+  modalidadTitulo: string;
+  modalidadTextoPdf: string;
+}> {
+  const id = modalidadId.trim();
+  if (!id) throw new Error("La modalidad es obligatoria");
+  const config = await getPresupuestosConfig();
+  const found = config.modalidades.find((m) => m.id === id);
+  if (!found) throw new Error("Modalidad no válida");
+  return {
+    modalidadId: found.id,
+    modalidadTitulo: found.titulo,
+    modalidadTextoPdf: found.textoPdf,
+  };
 }
 
 type ConfigDoc = {
@@ -650,12 +695,14 @@ export async function getPresupuestosConfig(): Promise<PresupuestosConfig> {
     return {
       tiposPrestacion: DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })),
       profesionales: [],
+      modalidades: DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
     };
   }
   const data = snap.data() as Record<string, unknown>;
   return {
     tiposPrestacion: normalizeTiposPrestacion(data.tiposPrestacion),
     profesionales: normalizeProfesionalesPresupuesto(data.profesionales),
+    modalidades: normalizeModalidadesPresupuesto(data.modalidades),
   };
 }
 
@@ -665,7 +712,11 @@ export async function savePresupuestosConfig(input: PresupuestosConfig): Promise
     throw new Error("Debe haber al menos un tipo de prestación");
   }
   const profesionales = normalizeProfesionalesPresupuesto(input.profesionales);
-  const config: PresupuestosConfig = { tiposPrestacion: tipos, profesionales };
+  const modalidades = normalizeModalidadesPresupuesto(input.modalidades);
+  if (modalidades.length === 0) {
+    throw new Error("Debe haber al menos una modalidad");
+  }
+  const config: PresupuestosConfig = { tiposPrestacion: tipos, profesionales, modalidades };
   await setDoc(doc(firestore, CONFIG, PRESUPUESTOS_CONFIG_DOC), config, { merge: true });
   return config;
 }
@@ -886,6 +937,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
   }
 
   const items = await loadPresupuestoItemsFromIds(input.prestacionIds);
+  const modalidad = await resolveModalidadPresupuesto(input.modalidadId);
 
   const id = randomUUID();
   let pdfUrl: string | null = null;
@@ -899,6 +951,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     fecha: fechaHoyIso(),
     nombrePaciente,
     profesional: input.profesional.trim(),
+    ...modalidad,
     email: input.email.trim(),
     items,
     totalEfectivo: items.reduce((s, i) => s + i.precioEfectivo, 0),
@@ -955,6 +1008,7 @@ export async function updatePresupuesto(
   }
 
   const items = await loadPresupuestoItemsFromIds(input.prestacionIds);
+  const modalidad = await resolveModalidadPresupuesto(input.modalidadId);
 
   let pdfUrl = current.pdfUrl;
   if (input.pdfBase64?.trim()) {
@@ -966,6 +1020,7 @@ export async function updatePresupuesto(
     ...current,
     nombrePaciente,
     profesional: input.profesional.trim(),
+    ...modalidad,
     email: input.email.trim(),
     items,
     totalEfectivo: items.reduce((s, i) => s + i.precioEfectivo, 0),
