@@ -20,3 +20,8 @@ export function uploadsEnviosDir(): string {
 export function uploadsPresupuestosDir(): string {
   return path.join(path.dirname(uploadsFirmasDir()), "presupuestos");
 }
+
+/** Excels y PDF del módulo PAMI. */
+export function uploadsPamiDir(): string {
+  return path.join(path.dirname(uploadsFirmasDir()), "pami");
+}

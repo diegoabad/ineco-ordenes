@@ -165,3 +165,51 @@ export type AppDb = {
 export type PacienteInput = Omit<Paciente, "id" | "activo" | "creadoAt">;
 export type MedicoInput = Omit<Medico, "id" | "firmaUrl" | "activo" | "creadoAt">;
 export type PrestacionInput = Omit<Prestacion, "id" | "creadoAt">;
+
+/** Análisis mensual PAMI (cruce Presentación INECO × Débitos). */
+export type PamiAnalisisResumen = {
+  coincidentes: number;
+  prestacionesObservadas: number;
+  opsPresentadas: number;
+  afiliadosUnicosObservados: number;
+  conteoModulo: Record<string, number>;
+  conteoPrestacion: Record<string, number>;
+  concentracion125: {
+    afiliados: number;
+    totalPrestaciones: number;
+    conMasDeUna: number;
+  };
+  motivoDominante: string | null;
+  motivoDominanteCantidad: number;
+};
+
+export type PamiAnalisis = {
+  id: string;
+  /** YYYY-MM */
+  mes: string;
+  mesLabel: string;
+  presentacionFileName: string;
+  debitosFileName: string;
+  presentacionUrl: string | null;
+  debitosUrl: string | null;
+  pdfUrl: string | null;
+  resumen: PamiAnalisisResumen;
+  /** Resultado completo del cruce (JSON serializable). */
+  resultado: Record<string, unknown>;
+  creadoAt?: string;
+};
+
+export type PamiAnalisisCreateInput = {
+  mes: string;
+  presentacionFileName: string;
+  debitosFileName: string;
+  /** base64 del .xlsx Presentación */
+  presentacionBase64: string;
+  /** base64 del .xlsx Débitos */
+  debitosBase64: string;
+  /** base64 del PDF generado */
+  pdfBase64: string;
+  resumen: PamiAnalisisResumen;
+  resultado: Record<string, unknown>;
+};
+

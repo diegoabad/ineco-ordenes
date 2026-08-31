@@ -1070,7 +1070,10 @@ export async function updatePresupuesto(
   return presupuesto;
 }
 
-export async function enviarPresupuesto(id: string): Promise<Presupuesto> {
+export async function enviarPresupuesto(
+  id: string,
+  overrides?: { subject?: string; body?: string },
+): Promise<Presupuesto> {
   const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
   if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
 
@@ -1105,6 +1108,8 @@ export async function enviarPresupuesto(id: string): Promise<Presupuesto> {
       total3Cuotas: current.total3Cuotas,
       cantidadPrestaciones: current.items.length,
       items: current.items,
+      subject: overrides?.subject,
+      body: overrides?.body,
     });
   } catch (error) {
     console.error("[enviar-presupuesto] email", error);

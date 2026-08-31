@@ -242,10 +242,21 @@ function parsePresupuestoEstado(body: unknown): PresupuestoEstado {
   throw new Error("Solo se puede marcar como aceptado o rechazado");
 }
 
+function parsePresupuestoEnvioOverrides(body: unknown): { subject?: string; body?: string } {
+  if (!body || typeof body !== "object") return {};
+  const raw = body as Record<string, unknown>;
+  const subject = String(raw.subject ?? "").trim();
+  const emailBody = typeof raw.body === "string" ? raw.body : "";
+  return {
+    subject: subject || undefined,
+    body: emailBody.trim() ? emailBody : undefined,
+  };
+}
+
 router.post("/:id/enviar", async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
-    const data = await enviarPresupuesto(id);
+    const data = await enviarPresupuesto(id, parsePresupuestoEnvioOverrides(req.body));
     res.json({ ok: true, data });
   } catch (error) {
     if (error instanceof PresupuestoEnvioError) {

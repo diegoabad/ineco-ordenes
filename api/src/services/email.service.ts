@@ -24,6 +24,9 @@ export type SendOrdenEmailInput = {
   filename?: string;
   fecha?: string;
   medicoNombre?: string;
+  /** Si vienen, se usan tal cual (preview editable del cliente). */
+  subject?: string;
+  body?: string;
 };
 
 function ensureSendGrid(): void {
@@ -120,7 +123,11 @@ export async function sendOrdenEmail(
 
   const medico = await resolveMedicoForPaciente(paciente.medicoId);
   const medicoNombre = input.medicoNombre?.trim() || medico?.nombre || "";
-  const fechaOrden = input.fecha?.trim() || "";
+  const fechaOrdenRaw = input.fecha?.trim() || "";
+  const fechaOrdenFmt = (() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaOrdenRaw);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : fechaOrdenRaw || "—";
+  })();
   const config = await getEmailConfig();
   const vars = {
     nombrePaciente: paciente.paciente,
@@ -132,11 +139,14 @@ export async function sendOrdenEmail(
     nombreMedico: medicoNombre || "—",
     especialidad: medico?.especialidad?.trim() || "—",
     matricula: medico?.matricula?.trim() || "—",
-    fechaOrden: fechaOrden || "—",
+    fechaOrden: fechaOrdenFmt,
   };
 
-  const subject = applyEmailTemplate(config.subject, vars).trim() || "Orden médica";
-  const bodyRaw = applyEmailTemplate(config.body, vars);
+  const subject =
+    input.subject?.trim() ||
+    applyEmailTemplate(config.subject, vars).trim() ||
+    "Orden médica";
+  const bodyRaw = input.body?.trim() || applyEmailTemplate(config.body, vars);
   const bodyText = emailBodyToPlainText(bodyRaw);
   const bodyHtml = emailBodyToHtml(bodyRaw);
 
@@ -162,7 +172,7 @@ export async function sendOrdenEmail(
     toEmail: paciente.email.trim(),
     medicoId: medico?.id ?? null,
     medicoNombre,
-    fechaOrden,
+    fechaOrden: fechaOrdenRaw,
     filename: filename.endsWith(".pdf") ? filename : `${filename}.pdf`,
     pdfUrl,
     subject,
@@ -229,6 +239,9 @@ export type SendPresupuestoEmailInput = {
   total3Cuotas?: number;
   cantidadPrestaciones?: number;
   items?: PresupuestoItem[];
+  /** Si vienen, se usan tal cual (preview editable del cliente). */
+  subject?: string;
+  body?: string;
 };
 
 const moneyFormatter = new Intl.NumberFormat("es-AR", {
@@ -251,11 +264,16 @@ export async function sendPresupuestoEmail(
 
   const nombrePaciente = input.nombrePaciente.trim() || "paciente";
   const config = await getPresupuestoEmailConfig();
+  const fechaRaw = input.fechaPresupuesto?.trim() || "";
+  const fechaFmt = (() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaRaw);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : fechaRaw || "—";
+  })();
   const vars = {
     nombrePaciente,
     email: to,
     nombreProfesional: input.profesional?.trim() || "—",
-    fechaPresupuesto: input.fechaPresupuesto?.trim() || "—",
+    fechaPresupuesto: fechaFmt,
     totalEfectivo: formatPresupuestoMoney(input.totalEfectivo),
     total3Cuotas: formatPresupuestoMoney(input.total3Cuotas),
     cantidadPrestaciones:
@@ -264,9 +282,11 @@ export async function sendPresupuestoEmail(
   };
 
   const subject =
+    input.subject?.trim() ||
     applyPresupuestoEmailTemplate(config.subject, vars).trim() ||
     `Presupuesto - ${nombrePaciente}`;
-  const bodyRaw = applyPresupuestoEmailTemplate(config.body, vars);
+  const bodyRaw =
+    input.body?.trim() || applyPresupuestoEmailTemplate(config.body, vars);
   const bodyText = emailBodyToPlainText(bodyRaw);
   const bodyHtml = emailBodyToHtml(bodyRaw);
 

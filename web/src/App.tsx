@@ -24,8 +24,13 @@ import { creadoAtMs } from "./lib/sortRecientes";
 import { FechaOrdenModal } from "./components/FechaOrdenModal";
 import { HistorialEnviosPanel } from "./components/HistorialEnviosPanel";
 import { MedicoFormModal } from "./components/MedicoFormModal";
+import {
+  OrdenEmailPreviewModal,
+  type OrdenEmailDraft,
+} from "./components/OrdenEmailPreviewModal";
 import { PacienteFormModal } from "./components/PacienteFormModal";
 import { PresupuestosModule } from "./components/PresupuestosModule";
+import { PamiModule } from "./components/PamiModule";
 import { ViewDetailModal } from "./components/ViewDetailModal";
 import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
@@ -36,7 +41,6 @@ import {
   createMedico,
   createPaciente,
   deleteFirmaMedico,
-  enviarOrdenEmail,
   fetchDb,
   saveMedicoSeleccionadoId,
   setMedicoActivo,
@@ -113,6 +117,15 @@ export default function App() {
   const [envioResultado, setEnvioResultado] = useState<{
     items: EnvioResultadoItem[];
     omitidosSinEmail: number;
+  } | null>(null);
+  const [ordenEmailSession, setOrdenEmailSession] = useState<{
+    list: Paciente[];
+    fecha: string;
+    index: number;
+    draft: OrdenEmailDraft | null;
+    results: EnvioResultadoItem[];
+    omitidosSinEmail: number;
+    preparing: boolean;
   } | null>(null);
 
   const medicoPorDefecto =
@@ -403,7 +416,10 @@ export default function App() {
     abrirPdfEnPestana(pdfBlobFromDoc(doc));
   }
 
-  async function generarYEnviarOrden(paciente: Paciente, fecha: string): Promise<string> {
+  async function prepararOrdenEmailDraft(
+    paciente: Paciente,
+    fecha: string,
+  ): Promise<OrdenEmailDraft> {
     if (!paciente.email?.trim()) {
       throw new Error("Este paciente no tiene email cargado");
     }
@@ -433,14 +449,116 @@ export default function App() {
     const pdfBase64 = await blobToBase64(blob);
     const filename = `orden-${paciente.paciente.replace(/\s+/g, "-") || "paciente"}-${fecha}.pdf`;
 
-    const result = await enviarOrdenEmail({
-      pacienteId: paciente.id,
+    return {
+      paciente,
+      medicoNombre: medico.nombre,
+      especialidad: medico.especialidad,
+      matricula: medico.matricula,
+      fecha,
       pdfBase64,
       filename,
+    };
+  }
+
+  function finalizarOrdenEmailSession(
+    results: EnvioResultadoItem[],
+    omitidosSinEmail: number,
+  ) {
+    setOrdenEmailSession(null);
+    setEnviandoTodas(false);
+    setHistorialRefresh((n) => n + 1);
+
+    const enviados = results.filter((r) => r.ok).length;
+    const fallidos = results.length - enviados;
+
+    if (results.length === 0) {
+      return;
+    }
+
+    if (results.length === 1) {
+      const item = results[0]!;
+      if (item.ok) {
+        toast.success(`El mail se envió correctamente a ${item.email}`);
+      } else {
+        toast.error(item.errorMessage || "No se pudo enviar el mail.");
+      }
+      return;
+    }
+
+    if (enviados > 0 && fallidos === 0) {
+      toast.success(
+        `Se enviaron correctamente los ${enviados} mail${enviados === 1 ? "" : "s"}` +
+          (omitidosSinEmail > 0 ? ` (${omitidosSinEmail} sin email, omitidos)` : ""),
+      );
+    } else if (enviados > 0) {
+      toast.warning(`Listo: ${enviados} enviados, ${fallidos} fallaron. Mirá el detalle.`);
+    } else {
+      toast.error(`No se pudo enviar ningún mail (${fallidos} fallaron). Mirá el detalle.`);
+    }
+
+    setEnvioResultado({ items: results, omitidosSinEmail });
+  }
+
+  async function cargarDraftOrdenEmail(
+    list: Paciente[],
+    fecha: string,
+    index: number,
+    results: EnvioResultadoItem[],
+    omitidosSinEmail: number,
+  ) {
+    const paciente = list[index];
+    if (!paciente) {
+      finalizarOrdenEmailSession(results, omitidosSinEmail);
+      return;
+    }
+
+    setOrdenEmailSession({
+      list,
       fecha,
-      medicoNombre: medico.nombre,
+      index,
+      draft: null,
+      results,
+      omitidosSinEmail,
+      preparing: true,
     });
-    return result.to;
+    setEnviandoTodas(true);
+
+    const toastId = toast.loading(
+      list.length > 1
+        ? `Preparando email… (${index + 1}/${list.length})`
+        : "Preparando email…",
+    );
+
+    try {
+      const draft = await prepararOrdenEmailDraft(paciente, fecha);
+      toast.dismiss(toastId);
+      setOrdenEmailSession({
+        list,
+        fecha,
+        index,
+        draft,
+        results,
+        omitidosSinEmail,
+        preparing: false,
+      });
+    } catch (error) {
+      toast.dismiss(toastId);
+      const nextResults: EnvioResultadoItem[] = [
+        ...results,
+        {
+          pacienteNombre: paciente.paciente,
+          email: paciente.email.trim(),
+          ok: false,
+          errorMessage:
+            error instanceof Error ? error.message : "No se pudo preparar el envío",
+        },
+      ];
+      if (index + 1 < list.length) {
+        await cargarDraftOrdenEmail(list, fecha, index + 1, nextResults, omitidosSinEmail);
+      } else {
+        finalizarOrdenEmailSession(nextResults, omitidosSinEmail);
+      }
+    }
   }
 
   function solicitarImprimir(list: Paciente[]) {
@@ -449,7 +567,7 @@ export default function App() {
   }
 
   function solicitarEnviar(list: Paciente[]) {
-    if (enviandoTodas) {
+    if (enviandoTodas || ordenEmailSession) {
       toast.info("Ya hay un envío en curso. Esperá a que termine.");
       return;
     }
@@ -465,116 +583,6 @@ export default function App() {
     setFechaPending({ kind: "enviar", list: conEmail });
   }
 
-  async function enviarOrdenPorMail(paciente: Paciente, fecha: string) {
-    const toastId = toast.loading("Enviando mail…");
-    try {
-      const to = await generarYEnviarOrden(paciente, fecha);
-      toast.update(toastId, {
-        render: `El mail se envió correctamente a ${to}`,
-        type: "success",
-        isLoading: false,
-        autoClose: 4000,
-      });
-      setHistorialRefresh((n) => n + 1);
-    } catch {
-      toast.update(toastId, {
-        render: "No se pudo enviar el mail. Revisá el historial para ver el detalle.",
-        type: "error",
-        isLoading: false,
-        autoClose: 6000,
-      });
-      setHistorialRefresh((n) => n + 1);
-    }
-  }
-
-  async function enviarTodasPorMail(list: Paciente[], fecha: string) {
-    const conEmail = list.filter((p) => p.email?.trim());
-    const sinEmail = list.length - conEmail.length;
-
-    if (conEmail.length === 0) {
-      toast.warning("Ningún paciente tiene email cargado.");
-      return;
-    }
-
-    setEnviandoTodas(true);
-    const total = conEmail.length;
-    const toastId = toast.loading(`Enviando mails… (0/${total}) · OK 0 · Falló 0`);
-    const resultados: EnvioResultadoItem[] = [];
-
-    try {
-      for (let i = 0; i < conEmail.length; i += 1) {
-        const paciente = conEmail[i]!;
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 0);
-        });
-
-        try {
-          await generarYEnviarOrden(paciente, fecha);
-          resultados.push({
-            pacienteNombre: paciente.paciente,
-            email: paciente.email.trim(),
-            ok: true,
-          });
-        } catch (error) {
-          resultados.push({
-            pacienteNombre: paciente.paciente,
-            email: paciente.email.trim(),
-            ok: false,
-            errorMessage:
-              error instanceof Error ? error.message : "No se pudo enviar el mail",
-          });
-        }
-
-        const enviados = resultados.filter((r) => r.ok).length;
-        const fallidos = resultados.length - enviados;
-        toast.update(toastId, {
-          render: `Enviando mails… (${resultados.length}/${total}) · OK ${enviados} · Falló ${fallidos}`,
-          isLoading: true,
-        });
-      }
-
-      const enviados = resultados.filter((r) => r.ok).length;
-      const fallidos = resultados.length - enviados;
-
-      if (enviados > 0 && fallidos === 0) {
-        toast.update(toastId, {
-          render:
-            `Se enviaron correctamente los ${enviados} mail${enviados === 1 ? "" : "s"}` +
-            (sinEmail > 0 ? ` (${sinEmail} sin email, omitidos)` : ""),
-          type: "success",
-          isLoading: false,
-          autoClose: 4000,
-        });
-      } else if (enviados > 0) {
-        toast.update(toastId, {
-          render: `Listo: ${enviados} enviados, ${fallidos} fallaron. Mirá el detalle.`,
-          type: "warning",
-          isLoading: false,
-          autoClose: 5000,
-        });
-      } else {
-        toast.update(toastId, {
-          render: `No se pudo enviar ningún mail (${fallidos} fallaron). Mirá el detalle.`,
-          type: "error",
-          isLoading: false,
-          autoClose: 5000,
-        });
-      }
-
-      setEnvioResultado({ items: resultados, omitidosSinEmail: sinEmail });
-    } catch {
-      toast.update(toastId, {
-        render: "No se pudieron enviar los mails. Revisá el historial para ver el detalle.",
-        type: "error",
-        isLoading: false,
-        autoClose: 7000,
-      });
-    } finally {
-      setEnviandoTodas(false);
-      setHistorialRefresh((n) => n + 1);
-    }
-  }
-
   async function handleFechaConfirm(fecha: string) {
     const pending = fechaPending;
     setFechaPending(null);
@@ -585,20 +593,88 @@ export default function App() {
       return;
     }
 
-    // El envío corre en segundo plano para no bloquear la pantalla.
-    if (pending.list.length === 1) {
-      void enviarOrdenPorMail(pending.list[0]!, fecha);
+    const conEmail = pending.list.filter((p) => p.email?.trim());
+    const omitidosSinEmail = pending.list.length - conEmail.length;
+    if (conEmail.length === 0) {
+      toast.warning("Ningún paciente tiene email cargado.");
       return;
     }
 
-    void enviarTodasPorMail(pending.list, fecha);
+    await cargarDraftOrdenEmail(conEmail, fecha, 0, [], omitidosSinEmail);
+  }
+
+  function handleOrdenEmailSent(result: { to: string }) {
+    const session = ordenEmailSession;
+    if (!session) return;
+
+    const paciente = session.list[session.index];
+    const nextResults: EnvioResultadoItem[] = [
+      ...session.results,
+      {
+        pacienteNombre: paciente?.paciente ?? "Paciente",
+        email: result.to,
+        ok: true,
+      },
+    ];
+
+    if (session.index + 1 < session.list.length) {
+      void cargarDraftOrdenEmail(
+        session.list,
+        session.fecha,
+        session.index + 1,
+        nextResults,
+        session.omitidosSinEmail,
+      );
+      return;
+    }
+
+    finalizarOrdenEmailSession(nextResults, session.omitidosSinEmail);
+  }
+
+  function handleOrdenEmailFailed(errorMessage: string) {
+    const session = ordenEmailSession;
+    if (!session) return;
+
+    const paciente = session.list[session.index];
+    const nextResults: EnvioResultadoItem[] = [
+      ...session.results,
+      {
+        pacienteNombre: paciente?.paciente ?? "Paciente",
+        email: paciente?.email.trim() ?? "",
+        ok: false,
+        errorMessage,
+      },
+    ];
+
+    if (session.index + 1 < session.list.length) {
+      toast.warning(
+        `No se pudo enviar a ${paciente?.paciente ?? "paciente"}: ${errorMessage}`,
+      );
+      void cargarDraftOrdenEmail(
+        session.list,
+        session.fecha,
+        session.index + 1,
+        nextResults,
+        session.omitidosSinEmail,
+      );
+      return;
+    }
+
+    finalizarOrdenEmailSession(nextResults, session.omitidosSinEmail);
+  }
+
+  function handleOrdenEmailCancel() {
+    const session = ordenEmailSession;
+    if (!session) return;
+    finalizarOrdenEmailSession(session.results, session.omitidosSinEmail);
   }
 
   const puedeImprimir = Boolean(
     medicoPorDefecto || pacientesActivos.some((p) => p.medicoId),
   );
+  const emailFlowActive = enviandoTodas || ordenEmailSession !== null;
   const pacientesConEmail = pacientesActivos.filter((p) => p.email?.trim()).length;
-  const puedeEnviarTodas = pacientesConEmail > 0 && puedeImprimir && !enviandoTodas;
+  const puedeEnviarTodas = pacientesConEmail > 0 && puedeImprimir && !emailFlowActive;
 
   if (loading) {
     return (
@@ -640,6 +716,8 @@ export default function App() {
       <div className="app-main">
         {module === "presupuestos" ? (
           <PresupuestosModule />
+        ) : module === "pami" ? (
+          <PamiModule />
         ) : (
           <div className="app-shell">
       <header className="app-header">
@@ -693,14 +771,20 @@ export default function App() {
             title={
               pacientesConEmail === 0
                 ? "Ningún paciente tiene email"
-                : enviandoTodas
-                  ? "Enviando…"
+                : emailFlowActive
+                  ? ordenEmailSession?.preparing
+                    ? "Preparando email…"
+                    : "Revisá el email antes de enviar"
                   : `Enviar órdenes por mail (${pacientesConEmail})`
             }
             onClick={() => solicitarEnviar(pacientesActivos)}
           >
             <IconMail size={16} />
-            {enviandoTodas ? "Enviando…" : "Enviar todas"}
+            {emailFlowActive
+              ? ordenEmailSession?.preparing
+                ? "Preparando…"
+                : "Revisando email…"
+              : "Enviar todas"}
           </button>
         </div>
       </header>
@@ -837,7 +921,7 @@ export default function App() {
                               aria-label="Enviar orden por email"
                               disabled={
                                 !p.activo ||
-                                enviandoTodas ||
+                                emailFlowActive ||
                                 !p.email?.trim() ||
                                 !medicoParaPaciente(p)
                               }
@@ -1253,10 +1337,23 @@ export default function App() {
         open={fechaPending !== null}
         title="Fecha de la orden"
         confirmLabel={
-          fechaPending?.kind === "enviar" ? "Continuar y enviar" : "Continuar y generar"
+          fechaPending?.kind === "enviar" ? "Continuar y revisar email" : "Continuar y generar"
         }
         onClose={() => setFechaPending(null)}
         onConfirm={(fecha) => void handleFechaConfirm(fecha)}
+      />
+
+      <OrdenEmailPreviewModal
+        open={ordenEmailSession?.draft != null && !ordenEmailSession.preparing}
+        draft={ordenEmailSession?.draft ?? null}
+        queueLabel={
+          ordenEmailSession && ordenEmailSession.list.length > 1
+            ? `${ordenEmailSession.index + 1} de ${ordenEmailSession.list.length}`
+            : null
+        }
+        onClose={handleOrdenEmailCancel}
+        onSent={handleOrdenEmailSent}
+        onFailed={handleOrdenEmailFailed}
       />
 
       <EnvioResultadoModal

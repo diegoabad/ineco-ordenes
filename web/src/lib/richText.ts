@@ -491,9 +491,12 @@ export function richHtmlToPdfText(input: string): string {
   const blocks = [...doc.body.childNodes].map((node) => {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const el = node as HTMLElement;
+      // Un <br> (o <div><br></div> ya normalizado) entre bloques = una línea en blanco.
+      // Devolver "" para que el join("\n") sume exactamente un salto, sin duplicar.
+      if (el.tagName === "BR") return "";
       if (el.tagName === "P" || el.tagName === "DIV") {
         const content = walkBlock(el);
-        // <div><br></div> / vacío: no sumar un "\n" extra al join entre bloques
+        // <div><br></div> / vacío: línea en blanco (no descartar del todo)
         if (!content.replace(/\n/g, "").trim()) return "";
         return prefixPdfMarkerLines(
           content,
@@ -506,11 +509,7 @@ export function richHtmlToPdfText(input: string): string {
   });
 
   return mergeOrphanInlineFragments(
-    blocks
-      .join("\n")
-      .replace(/\r\n/g, "\n")
-      // Un Enter del editor ≈ una línea en blanco, no dos
-      .replace(/\n{3,}/g, "\n\n"),
+    blocks.join("\n").replace(/\r\n/g, "\n"),
   );
 }
 
@@ -676,7 +675,6 @@ export function canonicalRichHtml(input: string): string {
 
   return blocks
     .join("<br>")
-    .replace(/(?:<br>){3,}/g, "<br><br>")
     .trim();
 }
 

@@ -263,6 +263,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   return (
     <section className="presup-config-page">
+      <div className="presup-config-page__scroll">
       <details className="presup-config-accordion">
         <summary className="presup-config-accordion__summary">
           <div className="presup-config-accordion__lead">
@@ -297,7 +298,6 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
                           : p.titulo ? (
                             <option value={p.titulo}>{p.titulo}</option>
                           ) : null}
-                        <option value="">Sin título</option>
                       </select>
                     </div>
                     <div className="form-group presup-config-prof__nombre">
@@ -388,7 +388,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
           <ul className="presup-config-list presup-config-list--profesionales">
             {modalidades.map((m) => (
               <li key={m.id} className="presup-config-list__item presup-config-list__item--prof">
-                <div className="presup-config-prof">
+                <div className="presup-config-prof presup-config-prof--modalidad">
                   <div className="form-group presup-config-prof__titulo">
                     <label htmlFor={`mod-titulo-${m.id}`}>Título</label>
                     <input
@@ -441,7 +441,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
               </li>
             ))}
           </ul>
-          <div className="presup-config-add presup-config-add--prof">
+          <div className="presup-config-add presup-config-add--prof presup-config-add--modalidad">
             <input
               type="text"
               value={nuevaModTitulo}
@@ -550,6 +550,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
           </div>
         </div>
       </details>
+      </div>
 
       <ConfirmDialog
         open={pendingDelete !== null}

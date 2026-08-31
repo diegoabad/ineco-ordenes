@@ -14,6 +14,8 @@ import type {
   PresupuestoFormData,
   PresupuestosConfig,
 } from "../types";
+import type { PamiAnalisisGuardado, PamiAnalisisResumen } from "../types/pami";
+import type { PamiAnalisisResult } from "../lib/pami";
 
 type AppDb = {
   version: number;
@@ -108,6 +110,8 @@ export async function enviarOrdenEmail(input: {
   filename?: string;
   fecha?: string;
   medicoNombre?: string;
+  subject?: string;
+  body?: string;
 }): Promise<{ to: string; envioId: string }> {
   const res = await apiFetch<{ ok: boolean; data: { to: string; envioId: string } }>(
     `/api/pacientes/${input.pacienteId}/enviar-orden`,
@@ -118,6 +122,8 @@ export async function enviarOrdenEmail(input: {
         filename: input.filename,
         fecha: input.fecha,
         medicoNombre: input.medicoNombre,
+        subject: input.subject,
+        body: input.body,
       }),
     },
   );
@@ -291,9 +297,13 @@ export async function createPresupuesto(
   return res.data;
 }
 
-export async function enviarPresupuesto(id: string): Promise<Presupuesto> {
+export async function enviarPresupuesto(
+  id: string,
+  overrides?: { subject?: string; body?: string },
+): Promise<Presupuesto> {
   const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/enviar`, {
     method: "POST",
+    body: JSON.stringify(overrides ?? {}),
   });
   return res.data;
 }
@@ -322,4 +332,35 @@ export async function updatePresupuestoEstado(
 
 export async function deletePresupuesto(id: string): Promise<void> {
   await apiFetch(`/api/presupuestos/${id}`, { method: "DELETE" });
+}
+
+export async function listPamiAnalisis(): Promise<PamiAnalisisGuardado[]> {
+  const res = await apiFetch<{ ok: boolean; data: PamiAnalisisGuardado[] }>("/api/pami");
+  return res.data;
+}
+
+export async function getPamiAnalisis(id: string): Promise<PamiAnalisisGuardado> {
+  const res = await apiFetch<{ ok: boolean; data: PamiAnalisisGuardado }>(`/api/pami/${id}`);
+  return res.data;
+}
+
+export async function savePamiAnalisis(input: {
+  mes: string;
+  presentacionFileName: string;
+  debitosFileName: string;
+  presentacionBase64: string;
+  debitosBase64: string;
+  pdfBase64: string;
+  resumen: PamiAnalisisResumen;
+  resultado: PamiAnalisisResult;
+}): Promise<PamiAnalisisGuardado> {
+  const res = await apiFetch<{ ok: boolean; data: PamiAnalisisGuardado }>("/api/pami", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function deletePamiAnalisis(id: string): Promise<void> {
+  await apiFetch(`/api/pami/${id}`, { method: "DELETE" });
 }

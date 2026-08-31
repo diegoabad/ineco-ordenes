@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import { resolveAssetUrl } from "../config/api";
 import { formatFechaHora, formatFechaYmd } from "../lib/fechas";
-import { deletePresupuesto, enviarPresupuesto, fetchPresupuestos, updatePresupuestoEstado } from "../services/dataService";
+import { deletePresupuesto, fetchPresupuestos, updatePresupuestoEstado } from "../services/dataService";
 import type { ModalidadPresupuesto, Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconAlert, IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
+import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
 
 function presupuestoEsEditable(estado: PresupuestoEstado): boolean {
@@ -136,8 +137,20 @@ export function PresupuestosPanel({
   const [cambiandoEstado, setCambiandoEstado] = useState<Presupuesto | null>(null);
   const [nuevoEstado, setNuevoEstado] = useState<PresupuestoEstado>("pendiente");
   const [guardandoEstado, setGuardandoEstado] = useState(false);
-  const [enviandoId, setEnviandoId] = useState<string | null>(null);
+  const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
   const lastAddRequestKey = useRef(0);
+
+  function upsertPresupuesto(saved: Presupuesto) {
+    setItems((prev) => {
+      const idx = prev.findIndex((p) => p.id === saved.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
+      }
+      return [saved, ...prev];
+    });
+  }
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -225,10 +238,12 @@ export function PresupuestosPanel({
       toast.warning("Este presupuesto no tiene PDF guardado");
       return;
     }
-    window.open(url, "_blank", "noopener,noreferrer");
+    // Bustear caché: al editar se sobrescribe el mismo archivo en disco.
+    const sep = url.includes("?") ? "&" : "?";
+    window.open(`${url}${sep}t=${Date.now()}`, "_blank", "noopener,noreferrer");
   }
 
-  async function handleEnviar(p: Presupuesto) {
+  function handleEnviar(p: Presupuesto) {
     if (!p.email.trim()) {
       toast.warning("El presupuesto no tiene email cargado");
       return;
@@ -237,32 +252,7 @@ export function PresupuestosPanel({
       toast.warning("Este presupuesto no tiene PDF guardado");
       return;
     }
-
-    setEnviandoId(p.id);
-    try {
-      const updated = await enviarPresupuesto(p.id);
-      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success(
-        p.estado === "fallido" || p.estado === "enviado"
-          ? "Presupuesto reenviado"
-          : "Presupuesto enviado",
-      );
-    } catch (error) {
-      toast.error("No se pudo enviar el presupuesto");
-      const err = error as Error & { data?: unknown };
-      if (err.data && typeof err.data === "object" && err.data !== null && "id" in err.data) {
-        const fallido = err.data as Presupuesto;
-        setItems((prev) => prev.map((item) => (item.id === fallido.id ? fallido : item)));
-      } else {
-        try {
-          setItems(await fetchPresupuestos());
-        } catch {
-          // La lista quedará como estaba; el toast ya avisó del fallo.
-        }
-      }
-    } finally {
-      setEnviandoId(null);
-    }
+    setEmailPreview(p);
   }
 
   async function confirmarBorrar() {
@@ -369,7 +359,7 @@ export function PresupuestosPanel({
                           className={`fl-icon-btn ${estadoAccion.className}`}
                           title={estadoAccion.title}
                           aria-label={estadoAccion.title}
-                          disabled={enviandoId === p.id || guardandoEstado}
+                          disabled={emailPreview?.id === p.id || guardandoEstado}
                           onClick={() => abrirCambioEstado(p)}
                         >
                           <EstadoAccionIcon kind={estadoAccion.icon} />
@@ -390,7 +380,7 @@ export function PresupuestosPanel({
                             aria-label={
                               p.estado === "pendiente" ? "Enviar presupuesto" : "Reenviar presupuesto"
                             }
-                            disabled={!p.email.trim() || !p.pdfUrl || enviandoId === p.id}
+                            disabled={!p.email.trim() || !p.pdfUrl || emailPreview?.id === p.id}
                             onClick={() => void handleEnviar(p)}
                           >
                             {p.estado === "pendiente" ? (
@@ -405,7 +395,7 @@ export function PresupuestosPanel({
                           className="fl-icon-btn fl-icon-btn--print"
                           title={p.pdfUrl ? "Ver PDF" : "Sin PDF"}
                           aria-label="Ver PDF"
-                          disabled={!p.pdfUrl || enviandoId === p.id}
+                          disabled={!p.pdfUrl || emailPreview?.id === p.id}
                           onClick={() => handleVerPdf(p)}
                         >
                           <IconPdf size={16} />
@@ -416,7 +406,7 @@ export function PresupuestosPanel({
                             className="fl-icon-btn fl-icon-btn--edit"
                             title="Editar"
                             aria-label="Editar"
-                            disabled={enviandoId === p.id}
+                            disabled={emailPreview?.id === p.id}
                             onClick={() => {
                               setEditando(p);
                               setFormOpen(true);
@@ -430,7 +420,7 @@ export function PresupuestosPanel({
                           className="fl-icon-btn fl-icon-btn--danger"
                           title="Eliminar"
                           aria-label="Eliminar"
-                          disabled={enviandoId === p.id}
+                          disabled={emailPreview?.id === p.id}
                           onClick={() => setABorrar(p)}
                         >
                           <IconTrash size={16} />
@@ -469,18 +459,19 @@ export function PresupuestosPanel({
         onProfesionalesChange={onProfesionalesChange}
         modalidades={modalidades}
         onClose={cerrarModal}
-        onSaved={(saved) => {
-          setItems((prev) => {
-            const idx = prev.findIndex((p) => p.id === saved.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = saved;
-              return next;
-            }
-            return [saved, ...prev];
-          });
+        onSaved={upsertPresupuesto}
+        onRequestEnviar={(presupuesto) => setEmailPreview(presupuesto)}
+      />
+
+      <PresupuestoEmailPreviewModal
+        open={emailPreview !== null}
+        presupuesto={emailPreview}
+        onClose={() => setEmailPreview(null)}
+        onSent={upsertPresupuesto}
+        onFailed={(fallido) => {
+          upsertPresupuesto(fallido);
+          void cargar();
         }}
-        onEnvioFallido={() => void cargar()}
       />
 
       <ConfirmDialog

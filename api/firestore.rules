@@ -30,5 +30,9 @@ service cloud.firestore {
     match /presupuestos_config/{docId} {
       allow read, write: if true;
     }
+
+    match /pami_analisis/{docId} {
+      allow read, write: if true;
+    }
   }
 }

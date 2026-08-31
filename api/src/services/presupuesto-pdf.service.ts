@@ -31,7 +31,9 @@ export async function savePresupuestoPdf(
   }
   const filePath = presupuestoPdfFilePath(presupuestoId);
   await fs.writeFile(filePath, buffer);
-  return { filePath, publicUrl: presupuestoPdfPublicUrl(presupuestoId) };
+  // Misma ruta en disco; query distinta para invalidar caché del navegador al editar.
+  const publicUrl = `${presupuestoPdfPublicUrl(presupuestoId)}?v=${Date.now()}`;
+  return { filePath, publicUrl };
 }
 
 export async function deletePresupuestoPdfFile(presupuestoId: string): Promise<void> {

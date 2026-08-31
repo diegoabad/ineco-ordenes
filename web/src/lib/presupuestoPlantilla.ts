@@ -63,11 +63,17 @@ export function buildPresupuestoPlantillaVars(
   };
 }
 
-export function renderPresupuestoPlantillaBody(
+export function renderPresupuestoPlantillaHtml(
   templateHtml: string,
   input: PresupuestoPlantillaContext,
 ): string {
   const vars = buildPresupuestoPlantillaVars(input);
-  const applied = applyPresupuestoPlantilla(templateHtml, vars);
-  return richHtmlToPdfText(applied);
+  return applyPresupuestoPlantilla(templateHtml, vars);
+}
+
+export function renderPresupuestoPlantillaBody(
+  templateHtml: string,
+  input: PresupuestoPlantillaContext,
+): string {
+  return richHtmlToPdfText(renderPresupuestoPlantillaHtml(templateHtml, input));
 }

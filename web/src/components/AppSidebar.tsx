@@ -1,7 +1,7 @@
 import { LOGO_INECO_DATA_URL } from "../assets/logoIneco";
-import { IconOrders, IconPresupuesto } from "./Icons";
+import { IconOrders, IconPami, IconPresupuesto } from "./Icons";
 
-export type AppModule = "ordenes" | "presupuestos";
+export type AppModule = "ordenes" | "presupuestos" | "pami";
 
 type Props = {
   module: AppModule;
@@ -38,6 +38,16 @@ export function AppSidebar({ module, onModuleChange }: Props) {
             <IconPresupuesto size={16} />
           </span>
           Presupuestos
+        </button>
+        <button
+          type="button"
+          className={`app-sidebar__btn${module === "pami" ? " is-active" : ""}`}
+          onClick={() => onModuleChange("pami")}
+        >
+          <span className="app-sidebar__btn-icon" aria-hidden>
+            <IconPami size={16} />
+          </span>
+          PAMI
         </button>
       </nav>
     </aside>
