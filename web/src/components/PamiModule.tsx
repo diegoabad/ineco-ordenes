@@ -24,7 +24,7 @@ import {
 } from "../services/dataService";
 import { resumenFromResult, type PamiAnalisisGuardado } from "../types/pami";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { IconDownload, IconEye, IconTrash } from "./Icons";
+import { IconEye, IconTrash } from "./Icons";
 import { PamiDetalleModal } from "./PamiDetalleModal";
 import { PamiResultados } from "./PamiResultados";
 
@@ -327,7 +327,6 @@ export function PamiModule() {
       clearPamiDraft();
       await loadHistorial();
       setTab("historial");
-      setSelectedId(saved.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo guardar");
     } finally {
@@ -485,7 +484,7 @@ export function PamiModule() {
                     <th className="pami-col-num">Observadas</th>
                     <th className="pami-col-num">OPs</th>
                     <th className="pami-col-motivo">Motivo</th>
-                    <th className="fl-col-actions fl-col-actions--3">Acciones</th>
+                    <th className="fl-col-actions fl-col-actions--2">Acciones</th>
                   </tr>
                 </thead>
                 {!loadingHist && historial.length > 0 ? (
@@ -493,6 +492,14 @@ export function PamiModule() {
                     {historial.map((h) => {
                       const motivos = h.resultado?.motivos ?? [];
                       const coincidencias = h.resultado?.coincidencias ?? [];
+                      const soloPres =
+                        h.resumen.soloEnPresentacion ??
+                        h.resultado?.resumen?.soloEnPresentacion ??
+                        0;
+                      const soloDeb =
+                        h.resumen.soloEnDebitos ??
+                        h.resultado?.resumen?.soloEnDebitos ??
+                        0;
                       const cant =
                         h.resumen.motivoDominanteCantidad ||
                         motivos[0]?.cantidad ||
@@ -538,9 +545,9 @@ export function PamiModule() {
                                   </p>
                                 )}
                                 <p className="pami-tip__foot">
-                                  Solo presentación: {h.resumen.soloEnPresentacion ?? "—"}
+                                  Solo presentación: {soloPres}
                                   {" · "}
-                                  Solo débitos: {h.resumen.soloEnDebitos ?? "—"}
+                                  Solo débitos: {soloDeb}
                                   {coincidencias.length > 12
                                     ? ` · +${coincidencias.length - 12} más`
                                     : null}
@@ -596,8 +603,8 @@ export function PamiModule() {
                             "—"
                           )}
                         </td>
-                        <td className="fl-col-actions fl-col-actions--3">
-                          <div className="fl-table-actions">
+                        <td className="fl-col-actions fl-col-actions--2">
+                          <div className="fl-table-actions fl-table-actions--2">
                             <button
                               type="button"
                               className="fl-icon-btn fl-icon-btn--view"
@@ -605,23 +612,6 @@ export function PamiModule() {
                               onClick={() => setSelectedId(h.id)}
                             >
                               <IconEye size={15} />
-                            </button>
-                            <button
-                              type="button"
-                              className="fl-icon-btn"
-                              title="Descargar Excel"
-                              disabled={!h.resultado}
-                              onClick={() => {
-                                if (!h.resultado) {
-                                  toast.warn("Este mes no tiene resultados para exportar");
-                                  return;
-                                }
-                                exportTodoXlsx(h.resultado, `pami-${h.mes}.xlsx`, {
-                                  mesKey: h.mes,
-                                });
-                              }}
-                            >
-                              <IconDownload size={15} />
                             </button>
                             <button
                               type="button"

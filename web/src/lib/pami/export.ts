@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx-js-style";
+import { formatFechaYmd } from "../fechas";
 import { detectarDuplicadosDebitos, withDuplicadosDebitos } from "./cruzar";
 import { mesLabelFromKey } from "./mesLabel";
 import type { ResultadoPami } from "./types";
@@ -210,7 +211,7 @@ export function exportDuplicadosCsv(result: ResultadoPami) {
     ["Afiliado", "Fecha", "Código", "Filas", "Motivos"],
     dups.map((d) => [
       d.afiliadoOriginal,
-      d.fecha,
+      formatFechaYmd(d.fecha),
       String(d.codigo),
       String(d.cantidadFilas),
       d.motivos.join(" · "),
@@ -382,7 +383,7 @@ export function exportTodoXlsx(
       const isDup = dupKeys.has(dupKey(d.afiliadoKey, d.fecha, codigo));
       return [
         d.afiliadoOriginal,
-        d.fecha,
+        formatFechaYmd(d.fecha),
         d.prestacion,
         d.tipo,
         d.orden,
@@ -405,7 +406,7 @@ export function exportTodoXlsx(
     ["Afiliado", "Fecha", "Código", "Filas", "Motivos"],
     ...dups.map((d) => [
       d.afiliadoOriginal,
-      d.fecha,
+      formatFechaYmd(d.fecha),
       d.codigo,
       d.cantidadFilas,
       d.motivos.join(" · "),

@@ -5,6 +5,7 @@ import {
   LOGO_INECO_HEIGHT,
   LOGO_INECO_WIDTH,
 } from "../../assets/logoIneco";
+import { formatFechaYmd } from "../fechas";
 import { withDuplicadosDebitos } from "./cruzar";
 import { mesLabelFromKey } from "./mesLabel";
 import type { ResultadoPami } from "./types";
@@ -163,12 +164,14 @@ function sectionTitle(ctx: PdfCtx, title: string) {
 function mutedText(ctx: PdfCtx, text: string, size = 9) {
   const lines = ctx.doc.splitTextToSize(text, CONTENT_W) as string[];
   for (const l of lines) {
-    ensureSpace(ctx, size + 4);
+    ensureSpace(ctx, size + 6);
+    // Baseline debajo del borde previo (jsPDF dibuja desde la línea base hacia arriba)
+    ctx.y += size;
     ctx.doc.setFont("helvetica", "normal");
     ctx.doc.setFontSize(size);
     ctx.doc.setTextColor(...MUTED);
     ctx.doc.text(l, MARGIN, ctx.y);
-    ctx.y += size + 3;
+    ctx.y += 4;
   }
 }
 
@@ -440,7 +443,7 @@ export function generarPdfPami(result: ResultadoPami, mesKey: string): jsPDF {
       ["Afiliado", "Fecha", "Código", "Filas", "Motivos"],
       dups.map((d) => [
         d.afiliadoOriginal,
-        d.fecha,
+        formatFechaYmd(d.fecha),
         String(d.codigo),
         String(d.cantidadFilas),
         d.motivos.join(" · "),
@@ -510,7 +513,7 @@ export function generarPdfPami(result: ResultadoPami, mesKey: string): jsPDF {
           ctx,
           ["Fecha", "Código", "Tipo", "Motivo de rechazo"],
           c.detalle.map((d) => [
-            d.fecha,
+            formatFechaYmd(d.fecha),
             String(d.codigo),
             d.tipo,
             d.esDuplicado ? `${d.motivo} (duplicado)` : d.motivo,
@@ -533,6 +536,14 @@ export function generarPdfPami(result: ResultadoPami, mesKey: string): jsPDF {
 
   const r125 = resumen.concentracion125;
   if (full.concentracion125.length > 0) {
+    ctx.y += 6;
+    drawTableTitleBand(ctx, "Concentración de prestación 125");
+    ctx.y += 10;
+    mutedText(
+      ctx,
+      `${r125.afiliadosUnicos} afiliados concentran ${r125.totalPrestaciones} prestaciones observadas; ${r125.conMasDeUna} con más de una · ${r125.conUnaSola} con una sola.`,
+    );
+    ctx.y += 6;
     drawTable(
       ctx,
       ["Afiliado", "Cant.", "%", "En presentación"],
@@ -549,17 +560,12 @@ export function generarPdfPami(result: ResultadoPami, mesKey: string): jsPDF {
         { w: CONTENT_W * 0.26, align: "center" },
       ],
       {
-        title: "Concentración de prestación 125",
         rowBg: (_idx, cells) => (cells[3] === "Sí" ? BORDO_SOFT : null),
         cellColor: (_rowIdx, colIdx, value) =>
           colIdx === 3 && value === "Sí" ? BORDO : null,
       },
     );
-    ctx.y += 2;
-    mutedText(
-      ctx,
-      `${r125.afiliadosUnicos} afiliados concentran ${r125.totalPrestaciones} prestaciones observadas; ${r125.conMasDeUna} con más de una · ${r125.conUnaSola} con una sola.`,
-    );
+    ctx.y += 8;
   } else {
     sectionTitle(ctx, "Concentración de prestación 125");
     mutedText(ctx, "Sin datos de concentración 125.");

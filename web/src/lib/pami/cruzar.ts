@@ -15,6 +15,7 @@ import {
   MODULOS_CONOCIDOS,
   UMBRAL_FILAS_DESCARTADAS_A,
 } from "./types";
+import { formatFechaYmd } from "../fechas";
 
 function toNumero(v: string): number {
   const n = Number(String(v).replace(/\D/g, ""));
@@ -104,10 +105,10 @@ function buildAlertas(
     alertas.push({
       tipo: "duplicado_motivos_distintos",
       titulo: "Prestación duplicada",
-      meta: `${d.afiliadoOriginal} · ${d.fecha} · código ${d.codigo}`,
+      meta: `${d.afiliadoOriginal} · ${formatFechaYmd(d.fecha)} · código ${d.codigo}`,
       badge: `${d.cantidadFilas} filas`,
       items: d.motivos,
-      mensaje: `Prestación duplicada ${d.afiliadoOriginal} · ${d.fecha} · código ${d.codigo} (${d.cantidadFilas} filas). Motivos: ${motivosTxt}`,
+      mensaje: `Prestación duplicada ${d.afiliadoOriginal} · ${formatFechaYmd(d.fecha)} · código ${d.codigo} (${d.cantidadFilas} filas). Motivos: ${motivosTxt}`,
     });
   }
 

@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { formatFechaYmd } from "../lib/fechas";
 import { withDuplicadosDebitos, type ResultadoPami } from "../lib/pami";
 import { IconAlert } from "./Icons";
 
@@ -114,7 +115,7 @@ export function PamiResultados({ result: resultProp, compact }: Props) {
                 {result.duplicadosDebitos.map((d) => (
                   <tr key={`${d.afiliadoNormalizado}-${d.fecha}-${d.codigo}`}>
                     <td className="pami-mono pami-col-afiliado">{d.afiliadoOriginal}</td>
-                    <td className="pami-col-fecha">{d.fecha}</td>
+                    <td className="pami-col-fecha">{formatFechaYmd(d.fecha)}</td>
                     <td className="pami-col-codigo">{d.codigo}</td>
                     <td className="pami-col-cant">{d.cantidadFilas}</td>
                     <td className="pami-col-motivos">
@@ -213,7 +214,7 @@ export function PamiResultados({ result: resultProp, compact }: Props) {
                                       key={`${c.afiliadoNormalizado}-d-${i}`}
                                       className={d.esDuplicado ? "pami-row--dup" : undefined}
                                     >
-                                      <td className="pami-col-fecha">{d.fecha}</td>
+                                      <td className="pami-col-fecha">{formatFechaYmd(d.fecha)}</td>
                                       <td className="pami-col-codigo">{d.codigo}</td>
                                       <td className="pami-col-tipo">{d.tipo}</td>
                                       <td className="pami-col-motivo">

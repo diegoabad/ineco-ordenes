@@ -50,6 +50,8 @@ function normalizeResumen(raw: unknown): PamiAnalisisResumen {
     prestacionesObservadas: Number(o.prestacionesObservadas ?? 0) || 0,
     opsPresentadas: Number(o.opsPresentadas ?? 0) || 0,
     afiliadosUnicosObservados: Number(o.afiliadosUnicosObservados ?? 0) || 0,
+    soloEnPresentacion: Number(o.soloEnPresentacion ?? 0) || 0,
+    soloEnDebitos: Number(o.soloEnDebitos ?? 0) || 0,
     conteoModulo:
       o.conteoModulo && typeof o.conteoModulo === "object"
         ? (o.conteoModulo as Record<string, number>)

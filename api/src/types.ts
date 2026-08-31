@@ -172,6 +172,8 @@ export type PamiAnalisisResumen = {
   prestacionesObservadas: number;
   opsPresentadas: number;
   afiliadosUnicosObservados: number;
+  soloEnPresentacion: number;
+  soloEnDebitos: number;
   conteoModulo: Record<string, number>;
   conteoPrestacion: Record<string, number>;
   concentracion125: {
