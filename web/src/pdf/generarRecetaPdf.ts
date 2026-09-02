@@ -6,6 +6,7 @@ import {
   LOGO_INECO_WIDTH,
 } from "../assets/logoIneco";
 import { parsePrestaciones } from "../lib/prestaciones";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import type { ConfigMedico, Paciente } from "../types";
 
 const MARGIN = 42;
@@ -73,7 +74,7 @@ function dibujarReceta(doc: jsPDF, paciente: Paciente, medico: ConfigMedico, fec
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(...TEXT);
-  doc.text(medico.nombre || "—", PAGE_W / 2, y, { align: "center" });
+  doc.text(formatNombrePersona(medico.nombre) || "—", PAGE_W / 2, y, { align: "center" });
   y += 14;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
@@ -93,7 +94,7 @@ function dibujarReceta(doc: jsPDF, paciente: Paciente, medico: ConfigMedico, fec
   doc.text("Paciente", MARGIN, y);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text(paciente.paciente || "—", MARGIN + 52, y);
+  doc.text(formatNombrePersona(paciente.paciente) || "—", MARGIN + 52, y);
   y += 16;
 
   doc.setFont("helvetica", "bold");
@@ -197,7 +198,7 @@ function drawFirma(doc: jsPDF, medico: ConfigMedico, y: number) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...TEXT);
-  doc.text(medico.nombre || "—", firmaX + firmaW / 2, selloY + 14, { align: "center" });
+  doc.text(formatNombrePersona(medico.nombre) || "—", firmaX + firmaW / 2, selloY + 14, { align: "center" });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(...MUTED);

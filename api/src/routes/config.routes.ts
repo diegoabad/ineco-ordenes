@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireAuth } from "../middleware/auth.middleware.js";
 import {
   getDb,
   getEmailConfig,
@@ -17,6 +18,8 @@ import {
 import { sendOrdenEmail } from "../services/email.service.js";
 
 const router = Router();
+
+router.use(requireAuth);
 
 function parseEmailConfig(body: unknown): EmailConfig {
   const raw = body as Record<string, unknown>;

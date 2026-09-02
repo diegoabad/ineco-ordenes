@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { buildOrdenEmailVars, renderOrdenEmailPreview } from "../lib/ordenEmail";
 import { enviarOrdenEmail, fetchEmailConfig } from "../services/dataService";
 import type { Paciente } from "../types";
@@ -177,7 +178,7 @@ export function OrdenEmailPreviewModal({
             <input
               id="orden-email-preview-paciente"
               type="text"
-              value={draft.paciente.paciente}
+              value={formatNombrePersona(draft.paciente.paciente)}
               readOnly
               disabled
             />

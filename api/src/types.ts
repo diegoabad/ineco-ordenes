@@ -215,3 +215,133 @@ export type PamiAnalisisCreateInput = {
   resultado: Record<string, unknown>;
 };
 
+/** Módulos / pantallas de la app. */
+export type AppModuleId =
+  | "ordenes"
+  | "presupuestos"
+  | "pami"
+  | "busca-turno"
+  | "pedidos-sistema"
+  | "usuarios";
+
+export const ALL_APP_MODULES: AppModuleId[] = [
+  "ordenes",
+  "presupuestos",
+  "pami",
+  "busca-turno",
+  "pedidos-sistema",
+  "usuarios",
+];
+
+export type PedidoSistemaSeccion =
+  | "ordenes"
+  | "presupuestos"
+  | "pami"
+  | "busca-turno"
+  | "nueva";
+
+export type PedidoSistemaPrioridad = "baja" | "media" | "alta";
+export type PedidoSistemaEstado = "pendiente" | "en_proceso" | "finalizado";
+
+export type PedidoSistemaFoto = {
+  url: string;
+  nombre: string;
+};
+
+export type PedidoSistema = {
+  id: string;
+  seccion: PedidoSistemaSeccion;
+  seccionNueva: string;
+  titulo: string;
+  detalle: string;
+  cuando: string;
+  solicitadoPor: string;
+  prioridad: PedidoSistemaPrioridad;
+  estado: PedidoSistemaEstado;
+  fotos: PedidoSistemaFoto[];
+  creadoPorUserId: string | null;
+  creadoPorEmail: string | null;
+  creadoAt: string;
+  actualizadoAt: string;
+};
+
+export type PedidoSistemaFotoInput = {
+  base64: string;
+  nombre: string;
+  mime?: string;
+};
+
+export type PedidoSistemaCreateInput = {
+  seccion: PedidoSistemaSeccion;
+  seccionNueva?: string;
+  titulo: string;
+  detalle: string;
+  cuando?: string;
+  solicitadoPor: string;
+  prioridad?: PedidoSistemaPrioridad;
+  fotos?: PedidoSistemaFotoInput[];
+};
+
+export type PedidoSistemaUpdateInput = {
+  prioridad?: PedidoSistemaPrioridad;
+  estado?: PedidoSistemaEstado;
+  titulo?: string;
+  detalle?: string;
+  cuando?: string;
+};
+
+export type UserRole = "user" | "admin";
+export type UserStatus = "pending" | "approved" | "rejected";
+
+export type AppUser = {
+  id: string;
+  email: string;
+  nombre: string;
+  passwordHash: string;
+  role: UserRole;
+  modules: AppModuleId[];
+  status: UserStatus;
+  creadoAt: string;
+  actualizadoAt: string;
+  aprobadoAt?: string | null;
+  rechazadoAt?: string | null;
+};
+
+/** Usuario sin hash de contraseña (respuestas API). */
+export type AppUserPublic = Omit<AppUser, "passwordHash">;
+
+export type ApproveUserInput = {
+  role: UserRole;
+  modules: AppModuleId[];
+};
+
+/** Catálogo + flags del módulo Busca turno (compartido en Firestore). */
+export type BuscaTurnoProfesional = {
+  doc: string;
+  nombre: string;
+  sede: string;
+  enabled: boolean;
+};
+
+export type BuscaTurnoPrestacionProf = {
+  doc: string;
+  nombre: string;
+  sede: string;
+};
+
+export type BuscaTurnoPrestacion = {
+  nombre: string;
+  duracion: number;
+  enabled: boolean;
+  profesionales: BuscaTurnoPrestacionProf[];
+};
+
+export type BuscaTurnoConfig = {
+  version: 2;
+  updatedAt: string;
+  updatedBy?: string | null;
+  sedesCarga: string[];
+  profesionales: BuscaTurnoProfesional[];
+  prestaciones: Record<string, BuscaTurnoPrestacion>;
+};
+

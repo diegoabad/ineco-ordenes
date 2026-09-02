@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import { resolveAssetUrl } from "../config/api";
 import { formatFechaYmd } from "../lib/fechas";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { deleteEmailEnvio, fetchEmailEnvios } from "../services/dataService";
 import type { EmailEnvio, Paciente } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -244,8 +245,8 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
                         </span>
                       </td>
                       <td>
-                        <span className="fl-texto-truncado" title={envio.pacienteNombre}>
-                          {envio.pacienteNombre || "—"}
+                        <span className="fl-texto-truncado" title={formatNombrePersona(envio.pacienteNombre)}>
+                          {formatNombrePersona(envio.pacienteNombre) || "—"}
                         </span>
                       </td>
                       <td className="fl-col-email">
@@ -369,7 +370,7 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
         title="Eliminar del historial"
         message={
           envioABorrar
-            ? `¿Eliminar el envío de ${envioABorrar.pacienteNombre || "este paciente"} (${envioABorrar.toEmail || "sin email"})?`
+            ? `¿Eliminar el envío de ${formatNombrePersona(envioABorrar.pacienteNombre) || "este paciente"} (${envioABorrar.toEmail || "sin email"})?`
             : ""
         }
         confirmLabel="Eliminar"
@@ -388,7 +389,7 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
                   label: "Fecha envío",
                   value: formatFechaHora(errorDetalle.enviadoAt),
                 },
-                { label: "Paciente", value: errorDetalle.pacienteNombre },
+                { label: "Paciente", value: formatNombrePersona(errorDetalle.pacienteNombre) },
                 { label: "Mail", value: errorDetalle.toEmail },
                 {
                   label: "Error",

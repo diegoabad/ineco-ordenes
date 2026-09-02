@@ -13,21 +13,30 @@
     "migrate:medico-ids": "node scripts/migrate-medico-ids.mjs",
     "migrate:medico-ids:dry": "node scripts/migrate-medico-ids.mjs --dry-run",
     "migrate:paciente-ids": "node scripts/migrate-paciente-ids.mjs",
-    "migrate:paciente-ids:dry": "node scripts/migrate-paciente-ids.mjs --dry-run"
+    "migrate:paciente-ids:dry": "node scripts/migrate-paciente-ids.mjs --dry-run",
+    "migrate:nombres-pacientes": "node scripts/migrate-nombres-pacientes.mjs",
+    "migrate:nombres-pacientes:dry": "node scripts/migrate-nombres-pacientes.mjs --dry-run"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "firebase": "^12.1.0",
+    "jose": "^6.2.10",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "ordenes-ineco": "file:..",
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
     "@types/node": "^22.18.6",
     "tsx": "^4.20.6",

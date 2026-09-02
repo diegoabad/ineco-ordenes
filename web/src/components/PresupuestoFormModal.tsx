@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, t
 import { toast } from "react-toastify";
 import { blobToBase64 } from "../lib/blob";
 import { fechaHoyIso } from "../lib/fechas";
+import { formatNombrePersona, normalizeNombrePersona } from "../lib/nombrePersona";
 import {
   renderPresupuestoPlantillaBody,
   type PresupuestoPlantillaContext,
@@ -160,8 +161,8 @@ export function PresupuestoFormModal({
     setForm(
       initial
         ? {
-            nombrePaciente: initial.nombrePaciente,
-            profesional: initial.profesional,
+            nombrePaciente: formatNombrePersona(initial.nombrePaciente),
+            profesional: formatNombrePersona(initial.profesional),
             modalidadId:
               initial.modalidadId && modalidades.some((m) => m.id === initial.modalidadId)
                 ? initial.modalidadId
@@ -337,9 +338,9 @@ export function PresupuestoFormModal({
       const fecha = isEditing ? initial!.fecha : fechaHoyIso();
       const items = seleccionadas.map(prestacionToItem);
       const plantillaCtx = {
-        nombrePaciente: form.nombrePaciente.trim(),
+        nombrePaciente: normalizeNombrePersona(form.nombrePaciente),
         email: form.email.trim(),
-        nombreProfesional: form.profesional.trim(),
+        nombreProfesional: normalizeNombrePersona(form.profesional),
         modalidadTitulo: modalidadSeleccionada.titulo,
         lugarEvaluacion: modalidadSeleccionada.textoPdf,
         fecha,
@@ -456,8 +457,8 @@ export function PresupuestoFormModal({
     setSaving(true);
     try {
       const payload = {
-        nombrePaciente: form.nombrePaciente.trim(),
-        profesional: form.profesional.trim(),
+        nombrePaciente: normalizeNombrePersona(form.nombrePaciente),
+        profesional: normalizeNombrePersona(form.profesional),
         modalidadId: form.modalidadId,
         email: form.email.trim(),
         prestacionIds: form.prestacionIds,
@@ -792,7 +793,7 @@ export function PresupuestoFormModal({
     <PdfViewerModal
       open={pdfPreview !== null}
       blob={pdfPreview?.blob ?? null}
-      title={`Presupuesto - ${form.nombrePaciente.trim() || "paciente"}`}
+      title={`Presupuesto - ${formatNombrePersona(form.nombrePaciente) || "paciente"}`}
       subtitle=""
       hideFileActions
       onClose={() => {

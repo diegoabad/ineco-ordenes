@@ -1,4 +1,5 @@
 import { formatFechaYmd } from "./fechas";
+import { formatNombrePersona } from "./nombrePersona";
 import { formatListaPrestaciones } from "./presupuestoPrestacionesList";
 import { richHtmlToPdfText } from "./richText";
 import type { PresupuestoItem } from "../types";
@@ -50,9 +51,9 @@ export function buildPresupuestoPlantillaVars(
   input: PresupuestoPlantillaContext,
 ): Record<PresupuestoPlantillaVar, string> {
   return {
-    nombrePaciente: input.nombrePaciente.trim() || "—",
+    nombrePaciente: formatNombrePersona(input.nombrePaciente) || "—",
     email: input.email.trim() || "—",
-    nombreProfesional: input.nombreProfesional.trim() || "—",
+    nombreProfesional: formatNombrePersona(input.nombreProfesional) || "—",
     modalidadTitulo: input.modalidadTitulo.trim() || "—",
     lugarEvaluacion: input.lugarEvaluacion.trim() || "—",
     fechaPresupuesto: formatFechaYmd(input.fecha) || "—",

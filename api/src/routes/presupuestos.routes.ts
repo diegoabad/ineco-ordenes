@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
+import { normalizeNombrePersona } from "../lib/nombrePersona.js";
 import {
   createPresupuesto,
   deletePresupuesto,
@@ -47,7 +48,7 @@ function parseProfesionalesPresupuesto(raw: unknown): ProfesionalPresupuesto[] {
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const obj = item as Record<string, unknown>;
-    const nombreApellido = String(obj.nombreApellido ?? obj.nombre ?? "").trim();
+    const nombreApellido = normalizeNombrePersona(String(obj.nombreApellido ?? obj.nombre ?? ""));
     if (!nombreApellido) continue;
     const id = String(obj.id ?? "").trim() || randomUUID();
     const titulo = String(obj.titulo ?? "").trim();
@@ -144,8 +145,8 @@ function parseCreatePresupuesto(body: unknown): PresupuestoCreateInput {
     ? raw.prestacionIds.map((id) => String(id ?? "").trim()).filter(Boolean)
     : [];
   return {
-    nombrePaciente: String(raw.nombrePaciente ?? "").trim(),
-    profesional: String(raw.profesional ?? "").trim(),
+    nombrePaciente: normalizeNombrePersona(String(raw.nombrePaciente ?? "")),
+    profesional: normalizeNombrePersona(String(raw.profesional ?? "")),
     modalidadId: String(raw.modalidadId ?? "").trim(),
     email: String(raw.email ?? "").trim(),
     prestacionIds,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { toast } from "react-toastify";
 import { copiarLinkFirma } from "../lib/firmaLink";
 import { firmaSrc } from "../lib/firma";
+import { formatNombrePersona, normalizeNombrePersona } from "../lib/nombrePersona";
 import type { Medico, MedicoFormData, MedicoSavePayload } from "../types";
 import { EMPTY_MEDICO } from "../types";
 import { IconLink, IconUpload, IconX } from "./Icons";
@@ -17,7 +18,7 @@ type Props = {
 
 function toFormData(m: Medico): MedicoFormData {
   return {
-    nombre: m.nombre,
+    nombre: formatNombrePersona(m.nombre),
     especialidad: m.especialidad,
     matricula: m.matricula,
     firmaUrl: m.firmaUrl,
@@ -74,7 +75,7 @@ export function MedicoFormModal({
     e.preventDefault();
     if (!form.nombre.trim()) return;
     void onSave({
-      data: form,
+      data: { ...form, nombre: normalizeNombrePersona(form.nombre) },
       id: initial?.id,
       firmaFile,
       removeFirma,

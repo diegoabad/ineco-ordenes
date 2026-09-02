@@ -3,6 +3,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Todo el acceso es vía API Express (JWT + roles/módulos).
+    // El SDK cliente del servidor no usa Auth → allow if true.
+    //
+    // ordenes_usuarios/{id}:
+    //   email, nombre, role (user|admin), modules[], status (pending|approved|rejected)
+    // ordenes_config/auth: allowedDomains[]
+    // Módulos: ordenes | presupuestos | pami | busca-turno | pedidos-sistema | usuarios
+    // ordenes_pedidos_sistema/{id}: pedidos internos (titulo, detalle, estado, prioridad, fotos)
+
+    match /ordenes_usuarios/{userId} {
+      allow read, write: if true;
+    }
+
     match /ordenes_medicos/{docId} {
       allow read, write: if true;
     }
@@ -32,6 +45,10 @@ service cloud.firestore {
     }
 
     match /pami_analisis/{docId} {
+      allow read, write: if true;
+    }
+
+    match /ordenes_pedidos_sistema/{docId} {
       allow read, write: if true;
     }
   }

@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import {
   formatProfesionalPresupuesto,
+  normalizeProfesionalPresupuestoNombre,
   TITULOS_PROFESIONAL_PRESUPUESTO,
 } from "../lib/profesionalPresupuesto";
 import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
@@ -97,7 +98,7 @@ export function ProfesionalPresupuestoField({
   }
 
   async function agregarProfesional() {
-    const nombreApellido = nuevoNombre.trim();
+    const nombreApellido = normalizeProfesionalPresupuestoNombre(nuevoNombre);
     if (!nombreApellido) {
       toast.warning("Ingresá nombre y apellido");
       return;

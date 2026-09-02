@@ -3,8 +3,6 @@ import { toast } from "react-toastify";
 import {
   analizarPamiEnWorker,
   buildPamiPdfBase64,
-  downloadPamiPdf,
-  exportTodoXlsx,
   fileSlotFromStored,
   loadPamiDraft,
   mesLabelFromKey,
@@ -27,6 +25,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconTrash } from "./Icons";
 import { PamiDetalleModal } from "./PamiDetalleModal";
 import { PamiResultados } from "./PamiResultados";
+import { ScrollableAppTabs } from "./ScrollableAppTabs";
 
 type Tab = "analisis" | "historial";
 
@@ -171,7 +170,7 @@ function readInitialDraft(): {
 
 export function PamiModule() {
   const initial = useMemo(() => readInitialDraft(), []);
-  const [tab, setTab] = useState<Tab>("analisis");
+  const [tab, setTab] = useState<Tab>("historial");
   const mesOptions = useMemo(() => buildMesOptions(), []);
   const [mes, setMes] = useState(initial.mes);
   const [presentacion, setPresentacion] = useState<FileSlot | null>(initial.presentacion);
@@ -185,6 +184,7 @@ export function PamiModule() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [aBorrar, setABorrar] = useState<PamiAnalisisGuardado | null>(null);
+  const [confirmReemplazo, setConfirmReemplazo] = useState(false);
 
   useEffect(() => {
     setHydrated(true);
@@ -212,6 +212,10 @@ export function PamiModule() {
       setLoadingHist(false);
     }
   }, []);
+
+  useEffect(() => {
+    void loadHistorial();
+  }, [loadHistorial]);
 
   useEffect(() => {
     if (tab === "historial") void loadHistorial();
@@ -265,12 +269,18 @@ export function PamiModule() {
     }
   };
 
-  const onProcesar = async () => {
+  const analisisExistente = useMemo(
+    () => historial.find((h) => h.mes === mes) ?? null,
+    [historial, mes],
+  );
+
+  const ejecutarProcesar = async () => {
     if (!presentacion || !debitos) {
       toast.warn("Cargá ambos Excel (INECO y PAMI) antes de procesar");
       return;
     }
     setProcessing(true);
+    setSaving(true);
     setError(null);
     try {
       // Copiar buffers: el worker transfiere ownership
@@ -280,35 +290,8 @@ export function PamiModule() {
         { buffer: pBuf, fileName: presentacion.file.name },
         { buffer: dBuf, fileName: debitos.file.name },
       );
-      setResult(out);
-      toast.success("Análisis listo");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Error al procesar";
-      setError(msg);
-      setResult(null);
-      toast.error(msg);
-    } finally {
-      setProcessing(false);
-    }
-  };
 
-  const onLimpiar = () => {
-    setPresentacion(null);
-    setDebitos(null);
-    setResult(null);
-    setError(null);
-    clearPamiDraft();
-    toast.info("Análisis limpiado");
-  };
-
-  const onGuardar = async () => {
-    if (!result || !presentacion || !debitos) {
-      toast.warn("Procesá ambos archivos antes de guardar");
-      return;
-    }
-    setSaving(true);
-    try {
-      const pdfBase64 = buildPamiPdfBase64(result, mes);
+      const pdfBase64 = buildPamiPdfBase64(out, mes);
       const saved = await savePamiAnalisis({
         mes,
         presentacionFileName: presentacion.file.name,
@@ -316,8 +299,8 @@ export function PamiModule() {
         presentacionBase64: arrayBufferToBase64(presentacion.buffer),
         debitosBase64: arrayBufferToBase64(debitos.buffer),
         pdfBase64,
-        resumen: resumenFromResult(result),
-        resultado: result,
+        resumen: resumenFromResult(out),
+        resultado: out,
       });
       toast.success(`Guardado: ${saved.mesLabel}`);
       setPresentacion(null);
@@ -328,10 +311,40 @@ export function PamiModule() {
       await loadHistorial();
       setTab("historial");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo guardar");
+      const msg = err instanceof Error ? err.message : "Error al procesar";
+      setError(msg);
+      setResult(null);
+      toast.error(msg);
     } finally {
+      setProcessing(false);
       setSaving(false);
     }
+  };
+
+  const onProcesar = () => {
+    if (!presentacion || !debitos) {
+      toast.warn("Cargá ambos Excel (INECO y PAMI) antes de procesar");
+      return;
+    }
+    if (analisisExistente) {
+      setConfirmReemplazo(true);
+      return;
+    }
+    void ejecutarProcesar();
+  };
+
+  const confirmarReemplazo = () => {
+    setConfirmReemplazo(false);
+    void ejecutarProcesar();
+  };
+
+  const onLimpiar = () => {
+    setPresentacion(null);
+    setDebitos(null);
+    setResult(null);
+    setError(null);
+    clearPamiDraft();
+    toast.info("Análisis limpiado");
   };
 
   const selected = historial.find((h) => h.id === selectedId) ?? null;
@@ -361,14 +374,7 @@ export function PamiModule() {
         </div>
       </header>
 
-      <nav className="app-tabs app-tabs--full" aria-label="Secciones PAMI">
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "analisis" ? " is-active" : ""}`}
-          onClick={() => setTab("analisis")}
-        >
-          Análisis
-        </button>
+      <ScrollableAppTabs aria-label="Secciones PAMI">
         <button
           type="button"
           className={`app-tabs__btn${tab === "historial" ? " is-active" : ""}`}
@@ -376,7 +382,14 @@ export function PamiModule() {
         >
           Historial
         </button>
-      </nav>
+        <button
+          type="button"
+          className={`app-tabs__btn${tab === "analisis" ? " is-active" : ""}`}
+          onClick={() => setTab("analisis")}
+        >
+          Análisis
+        </button>
+      </ScrollableAppTabs>
 
       {tab === "analisis" ? (
         <>
@@ -406,41 +419,11 @@ export function PamiModule() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn-outline"
-                  disabled={!result}
-                  onClick={() => {
-                    if (!result) return;
-                    exportTodoXlsx(result, `pami-${mes}.xlsx`, { mesKey: mes });
-                  }}
-                >
-                  Exportar Excel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  disabled={!result}
-                  onClick={() => {
-                    if (!result) return;
-                    downloadPamiPdf(result, mes);
-                  }}
-                >
-                  Descargar PDF
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  disabled={saving || !result}
-                  onClick={() => void onGuardar()}
-                >
-                  {saving ? "Guardando…" : "Guardar mes"}
-                </button>
-                <button
-                  type="button"
                   className="btn btn-primary pami-btn-procesar"
-                  disabled={processing || !presentacion || !debitos}
-                  onClick={() => void onProcesar()}
+                  disabled={processing || saving || !presentacion || !debitos}
+                  onClick={onProcesar}
                 >
-                  {processing ? "Procesando…" : "Procesar mes"}
+                  {processing || saving ? "Procesando…" : "Procesar y guardar"}
                 </button>
               </div>
             </div>
@@ -637,7 +620,7 @@ export function PamiModule() {
                 <div className="fl-table-empty fl-table-empty--fill">
                   <p className="fl-table-empty__title">Sin análisis guardados</p>
                   <p className="fl-table-empty__hint">
-                    Procesá un mes en la pestaña Análisis y usá «Guardar mes».
+                    Procesá un mes en la pestaña Análisis.
                   </p>
                 </div>
               ) : null}
@@ -664,6 +647,18 @@ export function PamiModule() {
           />
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmReemplazo}
+        title="Mes ya analizado"
+        message={`Ya tenés un análisis guardado para ${
+          analisisExistente?.mesLabel ?? mesLabelFromKey(mes)
+        }. ¿Querés reemplazarlo con este nuevo procesamiento?`}
+        confirmLabel="Reemplazar"
+        cancelLabel="Cancelar"
+        onConfirm={confirmarReemplazo}
+        onCancel={() => setConfirmReemplazo(false)}
+      />
     </div>
   );
 }

@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "firebase": "^12.18.0",
     "jspdf": "^3.0.1",
     "ordenes-ineco": "file:..",
     "react": "^19.1.0",

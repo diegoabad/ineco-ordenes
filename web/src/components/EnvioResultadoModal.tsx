@@ -1,4 +1,5 @@
 import { IconX } from "./Icons";
+import { formatNombrePersona } from "../lib/nombrePersona";
 
 export type EnvioResultadoItem = {
   pacienteNombre: string;
@@ -73,7 +74,7 @@ export function EnvioResultadoModal({
                 {failItems.map((item) => (
                   <li key={`fail-${item.email}-${item.pacienteNombre}`} className="envio-resultado__item envio-resultado__item--error">
                     <div className="envio-resultado__row">
-                      <span className="envio-resultado__nombre">{item.pacienteNombre || "—"}</span>
+                      <span className="envio-resultado__nombre">{formatNombrePersona(item.pacienteNombre) || "—"}</span>
                       <span className="chip chip--error">Falló</span>
                     </div>
                     <span className="envio-resultado__email">{item.email || "—"}</span>
@@ -95,7 +96,7 @@ export function EnvioResultadoModal({
                 {okItems.map((item) => (
                   <li key={`ok-${item.email}-${item.pacienteNombre}`} className="envio-resultado__item envio-resultado__item--ok">
                     <div className="envio-resultado__row">
-                      <span className="envio-resultado__nombre">{item.pacienteNombre || "—"}</span>
+                      <span className="envio-resultado__nombre">{formatNombrePersona(item.pacienteNombre) || "—"}</span>
                       <span className="chip chip--ok">Enviado</span>
                     </div>
                     <span className="envio-resultado__email">{item.email || "—"}</span>

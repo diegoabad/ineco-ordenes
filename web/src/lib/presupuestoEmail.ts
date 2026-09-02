@@ -1,4 +1,5 @@
 import { formatFechaYmd } from "./fechas";
+import { formatNombrePersona } from "./nombrePersona";
 import { formatListaPrestaciones } from "./presupuestoPrestacionesList";
 import type { Presupuesto, PresupuestoItem } from "../types";
 import type {
@@ -49,9 +50,9 @@ export function buildPresupuestoEmailVars(
   input: PresupuestoEmailVarsInput,
 ): Record<PresupuestoEmailTemplateVar, string> {
   return {
-    nombrePaciente: input.nombrePaciente.trim() || "—",
+    nombrePaciente: formatNombrePersona(input.nombrePaciente) || "—",
     email: input.email.trim() || "—",
-    nombreProfesional: input.profesional.trim() || "—",
+    nombreProfesional: formatNombrePersona(input.profesional) || "—",
     fechaPresupuesto: formatFechaYmd(input.fecha) || input.fecha.trim() || "—",
     totalEfectivo: formatMoney(input.totalEfectivo),
     total3Cuotas: formatMoney(input.total3Cuotas),

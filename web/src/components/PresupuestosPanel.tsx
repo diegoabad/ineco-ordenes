@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import { resolveAssetUrl } from "../config/api";
 import { formatFechaHora, formatFechaYmd } from "../lib/fechas";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { deletePresupuesto, fetchPresupuestos, updatePresupuestoEstado } from "../services/dataService";
 import type { ModalidadPresupuesto, Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { IconAlert, IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
+import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
 
@@ -15,61 +16,21 @@ function presupuestoEsEditable(estado: PresupuestoEstado): boolean {
 }
 
 function presupuestoPermiteEnvio(estado: PresupuestoEstado): boolean {
-  return estado === "pendiente" || estado === "fallido" || estado === "enviado";
+  return estado === "pendiente" || estado === "enviado" || estado === "fallido";
 }
 
-const ESTADOS_MANUALES: PresupuestoEstado[] = ["aceptado", "rechazado"];
-
-type AccionesCount = 3 | 4 | 5;
-
-function contarAccionesPresupuesto(p: Presupuesto): AccionesCount {
-  let count = 3;
-  if (presupuestoPermiteEnvio(p.estado)) count++;
-  if (presupuestoEsEditable(p.estado)) count++;
-  return count as AccionesCount;
+function presupuestoEditTooltip(estado: PresupuestoEstado): string {
+  if (presupuestoEsEditable(estado)) return "Editar";
+  if (estado === "enviado") return "No se puede editar presupuestos enviados";
+  if (estado === "aceptado") return "No se puede editar presupuestos aceptados";
+  if (estado === "rechazado") return "No se puede editar presupuestos rechazados";
+  return "No se puede editar en este estado";
 }
 
-function accionesClass(count: AccionesCount): string {
-  return `fl-col-actions--${count}`;
-}
+const ACCIONES_PRESUPUESTO = 6;
 
-function estadoAccionConfig(estado: PresupuestoEstado): {
-  className: string;
-  title: string;
-  icon: "check" | "x" | "alert";
-} {
-  switch (estado) {
-    case "aceptado":
-      return {
-        className: "fl-icon-btn--success",
-        title: "Aceptado — cambiar estado",
-        icon: "check",
-      };
-    case "rechazado":
-      return {
-        className: "fl-icon-btn--danger",
-        title: "Rechazado — cambiar estado",
-        icon: "x",
-      };
-    case "fallido":
-      return {
-        className: "fl-icon-btn--warning",
-        title: "Envío fallido — marcar aceptado o rechazado",
-        icon: "alert",
-      };
-    default:
-      return {
-        className: "fl-icon-btn--accent",
-        title: "Marcar aceptado o rechazado",
-        icon: "check",
-      };
-  }
-}
-
-function EstadoAccionIcon({ kind }: { kind: "check" | "x" | "alert" }) {
-  if (kind === "x") return <IconX size={16} />;
-  if (kind === "alert") return <IconAlert size={16} />;
-  return <IconCheck size={16} />;
+function accionesClass(): string {
+  return `fl-col-actions--${ACCIONES_PRESUPUESTO}`;
 }
 
 type FiltroPresupuestoEstado = "todos" | PresupuestoEstado;
@@ -134,9 +95,7 @@ export function PresupuestosPanel({
   const [formOpen, setFormOpen] = useState(false);
   const [editando, setEditando] = useState<Presupuesto | null>(null);
   const [aBorrar, setABorrar] = useState<Presupuesto | null>(null);
-  const [cambiandoEstado, setCambiandoEstado] = useState<Presupuesto | null>(null);
-  const [nuevoEstado, setNuevoEstado] = useState<PresupuestoEstado>("pendiente");
-  const [guardandoEstado, setGuardandoEstado] = useState(false);
+  const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
   const lastAddRequestKey = useRef(0);
 
@@ -195,40 +154,21 @@ export function PresupuestosPanel({
     );
   }, [items, busqueda, filtroEstado]);
 
-  const maxAcciones = useMemo((): AccionesCount => {
-    if (filtrados.length === 0) return 5;
-    return Math.max(3, ...filtrados.map(contarAccionesPresupuesto)) as AccionesCount;
-  }, [filtrados]);
+  const maxAcciones = ACCIONES_PRESUPUESTO;
 
-  function abrirCambioEstado(p: Presupuesto) {
-    setCambiandoEstado(p);
-    const inicial =
-      p.estado === "aceptado" || p.estado === "rechazado" ? p.estado : "aceptado";
-    setNuevoEstado(inicial);
-  }
-
-  function cerrarCambioEstado() {
-    if (guardandoEstado) return;
-    setCambiandoEstado(null);
-  }
-
-  async function guardarCambioEstado() {
-    if (!cambiandoEstado) return;
-    if (nuevoEstado === cambiandoEstado.estado) {
-      cerrarCambioEstado();
-      return;
-    }
-
-    setGuardandoEstado(true);
+  async function marcarEstado(p: Presupuesto, estado: "aceptado" | "rechazado") {
+    if (p.estado === estado || guardandoEstadoId) return;
+    setGuardandoEstadoId(p.id);
     try {
-      const updated = await updatePresupuestoEstado(cambiandoEstado.id, nuevoEstado);
+      const updated = await updatePresupuestoEstado(p.id, estado);
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success("Estado actualizado");
-      setCambiandoEstado(null);
+      toast.success(
+        estado === "aceptado" ? "Presupuesto marcado como aceptado" : "Presupuesto marcado como rechazado",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
     } finally {
-      setGuardandoEstado(false);
+      setGuardandoEstadoId(null);
     }
   }
 
@@ -318,25 +258,26 @@ export function PresupuestosPanel({
                 <th>Profesional</th>
                 <th className="fl-col-presup-total">Total</th>
                 <th className="fl-col-presup-estado">Estado</th>
-                <th className={`fl-col-actions ${accionesClass(maxAcciones)}`}>Acciones</th>
+                <th className={`fl-col-actions ${accionesClass()}`}>Acciones</th>
               </tr>
             </thead>
             {!loading && filtrados.length > 0 ? (
               <tbody>
                 {filtrados.map((p) => {
-                  const accionesCount = contarAccionesPresupuesto(p);
-                  const estadoAccion = estadoAccionConfig(p.estado);
+                  const puedeEnviar = presupuestoPermiteEnvio(p.estado);
+                  const puedeEditar = presupuestoEsEditable(p.estado);
+                  const guardandoEstaFila = guardandoEstadoId === p.id;
                   return (
                   <tr key={p.id}>
                     <td className="fl-col-presup-fecha">{formatFechaYmd(p.fecha)}</td>
                     <td>
-                      <span className="fl-texto-truncado" title={p.nombrePaciente}>
-                        {p.nombrePaciente || "—"}
+                      <span className="fl-texto-truncado" title={formatNombrePersona(p.nombrePaciente)}>
+                        {formatNombrePersona(p.nombrePaciente) || "—"}
                       </span>
                     </td>
                     <td>
-                      <span className="fl-texto-truncado" title={p.profesional}>
-                        {p.profesional || "—"}
+                      <span className="fl-texto-truncado" title={formatNombrePersona(p.profesional)}>
+                        {formatNombrePersona(p.profesional) || "—"}
                       </span>
                     </td>
                     <td className="fl-col-presup-total">{formatTotal(p.totalEfectivo)}</td>
@@ -352,44 +293,77 @@ export function PresupuestosPanel({
                         {PRESUPUESTO_ESTADO_LABEL[p.estado]}
                       </span>
                     </td>
-                    <td className={`fl-col-actions ${accionesClass(maxAcciones)}`}>
-                      <div className={`fl-table-actions fl-table-actions--${accionesCount}`}>
+                    <td className={`fl-col-actions ${accionesClass()}`}>
+                      <div className={`fl-table-actions fl-table-actions--${maxAcciones}`}>
                         <button
                           type="button"
-                          className={`fl-icon-btn ${estadoAccion.className}`}
-                          title={estadoAccion.title}
-                          aria-label={estadoAccion.title}
-                          disabled={emailPreview?.id === p.id || guardandoEstado}
-                          onClick={() => abrirCambioEstado(p)}
+                          className="fl-icon-btn fl-icon-btn--success"
+                          title={
+                            p.estado === "aceptado"
+                              ? "Ya está aceptado"
+                              : "Marcar como aceptado"
+                          }
+                          aria-label="Marcar como aceptado"
+                          disabled={
+                            emailPreview?.id === p.id ||
+                            guardandoEstaFila ||
+                            Boolean(guardandoEstadoId) ||
+                            p.estado === "aceptado"
+                          }
+                          onClick={() => void marcarEstado(p, "aceptado")}
                         >
-                          <EstadoAccionIcon kind={estadoAccion.icon} />
+                          <IconCheck size={16} />
                         </button>
-                        {presupuestoPermiteEnvio(p.estado) ? (
-                          <button
-                            type="button"
-                            className="fl-icon-btn fl-icon-btn--mail"
-                            title={
-                              !p.email.trim()
+                        <button
+                          type="button"
+                          className="fl-icon-btn fl-icon-btn--danger"
+                          title={
+                            p.estado === "rechazado"
+                              ? "Ya está rechazado"
+                              : "Marcar como rechazado"
+                          }
+                          aria-label="Marcar como rechazado"
+                          disabled={
+                            emailPreview?.id === p.id ||
+                            guardandoEstaFila ||
+                            Boolean(guardandoEstadoId) ||
+                            p.estado === "rechazado"
+                          }
+                          onClick={() => void marcarEstado(p, "rechazado")}
+                        >
+                          <IconX size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="fl-icon-btn fl-icon-btn--mail"
+                          title={
+                            !puedeEnviar
+                              ? "No se puede enviar en este estado"
+                              : !p.email.trim()
                                 ? "Sin email"
                                 : !p.pdfUrl
                                   ? "Sin PDF"
                                   : p.estado === "pendiente"
                                     ? "Enviar presupuesto"
                                     : "Reenviar presupuesto"
-                            }
-                            aria-label={
-                              p.estado === "pendiente" ? "Enviar presupuesto" : "Reenviar presupuesto"
-                            }
-                            disabled={!p.email.trim() || !p.pdfUrl || emailPreview?.id === p.id}
-                            onClick={() => void handleEnviar(p)}
-                          >
-                            {p.estado === "pendiente" ? (
-                              <IconMail size={16} />
-                            ) : (
-                              <IconRefresh size={16} />
-                            )}
-                          </button>
-                        ) : null}
+                          }
+                          aria-label={
+                            p.estado === "pendiente" ? "Enviar presupuesto" : "Reenviar presupuesto"
+                          }
+                          disabled={
+                            !puedeEnviar ||
+                            !p.email.trim() ||
+                            !p.pdfUrl ||
+                            emailPreview?.id === p.id
+                          }
+                          onClick={() => void handleEnviar(p)}
+                        >
+                          {p.estado === "pendiente" || !puedeEnviar ? (
+                            <IconMail size={16} />
+                          ) : (
+                            <IconRefresh size={16} />
+                          )}
+                        </button>
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--print"
@@ -400,21 +374,19 @@ export function PresupuestosPanel({
                         >
                           <IconPdf size={16} />
                         </button>
-                        {presupuestoEsEditable(p.estado) ? (
-                          <button
-                            type="button"
-                            className="fl-icon-btn fl-icon-btn--edit"
-                            title="Editar"
-                            aria-label="Editar"
-                            disabled={emailPreview?.id === p.id}
-                            onClick={() => {
-                              setEditando(p);
-                              setFormOpen(true);
-                            }}
-                          >
-                            <IconPencil size={16} />
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          className="fl-icon-btn fl-icon-btn--edit"
+                          title={presupuestoEditTooltip(p.estado)}
+                          aria-label={presupuestoEditTooltip(p.estado)}
+                          disabled={!puedeEditar || emailPreview?.id === p.id}
+                          onClick={() => {
+                            setEditando(p);
+                            setFormOpen(true);
+                          }}
+                        >
+                          <IconPencil size={16} />
+                        </button>
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--danger"
@@ -479,76 +451,13 @@ export function PresupuestosPanel({
         title="Eliminar presupuesto"
         message={
           aBorrar
-            ? `¿Eliminar el presupuesto de ${aBorrar.nombrePaciente}?`
+            ? `¿Eliminar el presupuesto de ${formatNombrePersona(aBorrar.nombrePaciente)}?`
             : ""
         }
         confirmLabel="Eliminar"
         onConfirm={() => void confirmarBorrar()}
         onCancel={() => setABorrar(null)}
       />
-
-      {cambiandoEstado ? (
-        <div className="fl-modal-backdrop" role="presentation">
-          <div
-            className="fl-modal fl-modal--confirm"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="presup-estado-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="fl-modal__header">
-              <h2 id="presup-estado-title">Cambiar estado</h2>
-              <button
-                type="button"
-                className="fl-icon-btn"
-                onClick={cerrarCambioEstado}
-                aria-label="Cerrar"
-                disabled={guardandoEstado}
-              >
-                <IconX size={18} />
-              </button>
-            </div>
-            <div className="fl-modal__body">
-              <p className="confirm-dialog__message">
-                Presupuesto de <strong>{cambiandoEstado.nombrePaciente}</strong>
-              </p>
-              <div className="form-group">
-                <label htmlFor="presup-estado-select">Marcar como</label>
-                <select
-                  id="presup-estado-select"
-                  value={nuevoEstado}
-                  onChange={(e) => setNuevoEstado(e.target.value as PresupuestoEstado)}
-                  disabled={guardandoEstado}
-                >
-                  {ESTADOS_MANUALES.map((estado) => (
-                    <option key={estado} value={estado}>
-                      {PRESUPUESTO_ESTADO_LABEL[estado]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="fl-modal__footer">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={cerrarCambioEstado}
-                disabled={guardandoEstado}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => void guardarCambioEstado()}
-                disabled={guardandoEstado || nuevoEstado === cambiandoEstado.estado}
-              >
-                {guardandoEstado ? "Guardando…" : "Guardar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }

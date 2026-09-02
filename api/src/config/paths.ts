@@ -25,3 +25,8 @@ export function uploadsPresupuestosDir(): string {
 export function uploadsPamiDir(): string {
   return path.join(path.dirname(uploadsFirmasDir()), "pami");
 }
+
+/** Fotos adjuntas de pedidos al sistema. */
+export function uploadsPedidosDir(): string {
+  return path.join(path.dirname(uploadsFirmasDir()), "pedidos");
+}

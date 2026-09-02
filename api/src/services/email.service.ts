@@ -2,6 +2,7 @@ import sgMail from "@sendgrid/mail";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { formatListaPrestaciones } from "../lib/presupuestoPrestacionesList.js";
+import { formatNombrePersona } from "../lib/nombrePersona.js";
 import { applyEmailTemplate } from "./email-templates.js";
 import {
   applyPresupuestoEmailTemplate,
@@ -122,7 +123,10 @@ export async function sendOrdenEmail(
   }
 
   const medico = await resolveMedicoForPaciente(paciente.medicoId);
-  const medicoNombre = input.medicoNombre?.trim() || medico?.nombre || "";
+  const medicoNombre =
+    formatNombrePersona(input.medicoNombre ?? "") ||
+    formatNombrePersona(medico?.nombre ?? "") ||
+    "";
   const fechaOrdenRaw = input.fecha?.trim() || "";
   const fechaOrdenFmt = (() => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaOrdenRaw);
@@ -130,7 +134,7 @@ export async function sendOrdenEmail(
   })();
   const config = await getEmailConfig();
   const vars = {
-    nombrePaciente: paciente.paciente,
+    nombrePaciente: formatNombrePersona(paciente.paciente) || "—",
     email: paciente.email,
     obraSocial: paciente.obraSocial || "—",
     afiliado: paciente.afiliado || "—",
@@ -168,7 +172,7 @@ export async function sendOrdenEmail(
 
   const baseEnvio = {
     pacienteId: paciente.id,
-    pacienteNombre: paciente.paciente,
+    pacienteNombre: formatNombrePersona(paciente.paciente),
     toEmail: paciente.email.trim(),
     medicoId: medico?.id ?? null,
     medicoNombre,
@@ -262,7 +266,7 @@ export async function sendPresupuestoEmail(
   const to = input.toEmail.trim();
   if (!to) throw new Error("El email es obligatorio para enviar el presupuesto");
 
-  const nombrePaciente = input.nombrePaciente.trim() || "paciente";
+  const nombrePaciente = formatNombrePersona(input.nombrePaciente) || "paciente";
   const config = await getPresupuestoEmailConfig();
   const fechaRaw = input.fechaPresupuesto?.trim() || "";
   const fechaFmt = (() => {
@@ -272,7 +276,7 @@ export async function sendPresupuestoEmail(
   const vars = {
     nombrePaciente,
     email: to,
-    nombreProfesional: input.profesional?.trim() || "—",
+    nombreProfesional: formatNombrePersona(input.profesional ?? "") || "—",
     fechaPresupuesto: fechaFmt,
     totalEfectivo: formatPresupuestoMoney(input.totalEfectivo),
     total3Cuotas: formatPresupuestoMoney(input.total3Cuotas),

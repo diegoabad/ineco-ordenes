@@ -5,6 +5,7 @@ import { PresupuestoPlantillaPanel } from "./PresupuestoPlantillaPanel";
 import { PresupuestosConfigPanel } from "./PresupuestosConfigPanel";
 import { PresupuestosPanel } from "./PresupuestosPanel";
 import { PrestacionesPanel } from "./PrestacionesPanel";
+import { ScrollableAppTabs } from "./ScrollableAppTabs";
 import { mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
 import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
 import { DEFAULT_TIPOS_PRESTACION, type ModalidadPresupuesto, type ProfesionalPresupuesto, type TipoPrestacion } from "../types";
@@ -94,7 +95,7 @@ export function PresupuestosModule() {
         </div>
       </header>
 
-      <nav className="app-tabs app-tabs--full" aria-label="Secciones de presupuestos">
+      <ScrollableAppTabs aria-label="Secciones de presupuestos">
         <button
           type="button"
           className={`app-tabs__btn${tab === "presupuestos" ? " is-active" : ""}`}
@@ -130,7 +131,7 @@ export function PresupuestosModule() {
         >
           Configuración
         </button>
-      </nav>
+      </ScrollableAppTabs>
 
       {tab === "presupuestos" ? (
         <PresupuestosPanel

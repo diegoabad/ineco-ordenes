@@ -84,6 +84,24 @@ export function IconChevronDown(p: IconProps) {
   );
 }
 
+export function IconChevronLeft(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+export function IconChevronRight(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
 export function IconGrip(p: IconProps) {
   const s = base(p);
   return (
@@ -300,3 +318,26 @@ export function IconPami(p: IconProps) {
     </svg>
   );
 }
+
+/** Módulo usuarios — una sola persona. */
+export function IconUsers(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
+/** Pedidos / checklist. */
+export function IconPedidos(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
+  );
+}
+

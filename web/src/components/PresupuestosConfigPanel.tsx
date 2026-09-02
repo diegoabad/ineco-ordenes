@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import {
   formatProfesionalPresupuesto,
+  normalizeProfesionalPresupuestoNombre,
   TITULOS_PROFESIONAL_PRESUPUESTO,
 } from "../lib/profesionalPresupuesto";
 import { nextTipoColor, mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
@@ -194,7 +195,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   }
 
   async function agregarProfesional() {
-    const nombreApellido = nuevoProfNombre.trim();
+    const nombreApellido = normalizeProfesionalPresupuestoNombre(nuevoProfNombre);
     if (!nombreApellido) {
       toast.warning("Ingresá nombre y apellido");
       return;
@@ -220,7 +221,13 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     id: string,
     patch: Partial<Pick<ProfesionalPresupuesto, "titulo" | "nombreApellido">>,
   ) {
-    const next = profesionales.map((p) => (p.id === id ? { ...p, ...patch } : p));
+    const normalized = {
+      ...patch,
+      ...(patch.nombreApellido !== undefined
+        ? { nombreApellido: normalizeProfesionalPresupuestoNombre(patch.nombreApellido) }
+        : {}),
+    };
+    const next = profesionales.map((p) => (p.id === id ? { ...p, ...normalized } : p));
     setProfesionales(next);
     await persistConfig(tipos, next, modalidades);
   }

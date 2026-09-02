@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { formatNombrePersona, normalizeNombrePersona } from "../lib/nombrePersona";
 import type { Medico, Paciente, PacienteFormData } from "../types";
 import { EMPTY_PACIENTE } from "../types";
 import { IconX } from "./Icons";
@@ -14,7 +15,7 @@ type Props = {
 
 function toFormData(p: Paciente): PacienteFormData {
   return {
-    paciente: p.paciente,
+    paciente: formatNombrePersona(p.paciente),
     email: p.email ?? "",
     obraSocial: p.obraSocial,
     afiliado: p.afiliado,
@@ -53,7 +54,10 @@ export function PacienteFormModal({
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!form.paciente.trim()) return;
-    onSave(form, initial?.id);
+    onSave(
+      { ...form, paciente: normalizeNombrePersona(form.paciente) },
+      initial?.id,
+    );
   }
 
   const editing = Boolean(initial);

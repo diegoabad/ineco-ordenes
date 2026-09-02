@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
+import { useAuth, type AppModuleId } from "./auth/AuthContext";
 import { AppSidebar, type AppModule } from "./components/AppSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import {
@@ -21,8 +22,10 @@ import {
   type EnvioResultadoItem,
 } from "./components/EnvioResultadoModal";
 import { creadoAtMs } from "./lib/sortRecientes";
+import { loadLastModule, saveLastModule } from "./lib/lastModuleStorage";
 import { FechaOrdenModal } from "./components/FechaOrdenModal";
 import { HistorialEnviosPanel } from "./components/HistorialEnviosPanel";
+import { LoginPage } from "./components/LoginPage";
 import { MedicoFormModal } from "./components/MedicoFormModal";
 import {
   OrdenEmailPreviewModal,
@@ -31,9 +34,14 @@ import {
 import { PacienteFormModal } from "./components/PacienteFormModal";
 import { PresupuestosModule } from "./components/PresupuestosModule";
 import { PamiModule } from "./components/PamiModule";
+import { BuscaTurnoModule } from "./components/BuscaTurnoModule";
+import { UsuariosPanel } from "./components/UsuariosPanel";
+import { PedidosSistemaPanel } from "./components/PedidosSistemaPanel";
+import { ScrollableAppTabs } from "./components/ScrollableAppTabs";
 import { ViewDetailModal } from "./components/ViewDetailModal";
 import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
+import { formatNombrePersona } from "./lib/nombrePersona";
 import { subscribeFirmaActualizada } from "./lib/firmaSync";
 import { abrirPdfEnPestana } from "./lib/pdfViewer";
 import { generarPdfRecetas, pdfBlobFromDoc } from "./pdf/generarRecetaPdf";
@@ -76,7 +84,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 function toConfigMedico(m: Medico, firmaDataUrl?: string | null): ConfigMedico {
   return {
-    nombre: m.nombre,
+    nombre: formatNombrePersona(m.nombre),
     especialidad: m.especialidad,
     matricula: m.matricula,
     firmaUrl: m.firmaUrl,
@@ -84,8 +92,36 @@ function toConfigMedico(m: Medico, firmaDataUrl?: string | null): ConfigMedico {
   };
 }
 
+function firstAllowedModule(
+  canAccess: (m: AppModuleId) => boolean,
+): AppModule {
+  const order: AppModule[] = [
+    "ordenes",
+    "presupuestos",
+    "pami",
+    "busca-turno",
+    "pedidos-sistema",
+    "usuarios",
+  ];
+  return order.find((m) => canAccess(m)) ?? "ordenes";
+}
+
 export default function App() {
+  const { user, loading: authLoading, logout, canAccessModule } = useAuth();
+  const allowedModules = useMemo(() => {
+    const all: AppModule[] = [
+      "ordenes",
+      "presupuestos",
+      "pami",
+      "busca-turno",
+      "pedidos-sistema",
+      "usuarios",
+    ];
+    return all.filter((m) => canAccessModule(m));
+  }, [canAccessModule]);
+
   const [module, setModule] = useState<AppModule>("ordenes");
+  const skipModulePersist = useRef(false);
   const [tab, setTab] = useState<Tab>("pacientes");
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [medicos, setMedicos] = useState<Medico[]>([]);
@@ -128,6 +164,41 @@ export default function App() {
     preparing: boolean;
   } | null>(null);
 
+  // Restaurar última sección usada por este usuario
+  useEffect(() => {
+    if (!user) return;
+    const saved = loadLastModule(user.id);
+    const next: AppModule =
+      saved && canAccessModule(saved)
+        ? saved
+        : canAccessModule(module)
+          ? module
+          : firstAllowedModule(canAccessModule);
+    skipModulePersist.current = true;
+    setModule(next);
+    saveLastModule(user.id, next);
+    // Solo al cambiar de usuario (login / refresh de sesión)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Guardar sección actual por usuario
+  useEffect(() => {
+    if (!user) return;
+    if (skipModulePersist.current) {
+      skipModulePersist.current = false;
+      return;
+    }
+    if (!canAccessModule(module)) return;
+    saveLastModule(user.id, module);
+  }, [user, module, canAccessModule]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!canAccessModule(module)) {
+      setModule(firstAllowedModule(canAccessModule));
+    }
+  }, [user, module, canAccessModule]);
+
   const medicoPorDefecto =
     medicos.find((m) => m.id === medicoSeleccionadoId && m.activo) ??
     medicos.find((m) => m.activo) ??
@@ -136,6 +207,11 @@ export default function App() {
   const pacientesActivos = pacientes.filter((p) => p.activo);
 
   const cargarDatos = useCallback(async () => {
+    if (!canAccessModule("ordenes")) {
+      setLoading(false);
+      setLoadError("");
+      return;
+    }
     setLoading(true);
     setLoadError("");
     try {
@@ -148,7 +224,12 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canAccessModule]);
+
+  useEffect(() => {
+    if (!user) return;
+    void cargarDatos();
+  }, [user, cargarDatos]);
 
   const refrescarMedicos = useCallback(async () => {
     try {
@@ -176,10 +257,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void cargarDatos();
-  }, [cargarDatos]);
-
-  useEffect(() => {
     const unsubscribe = subscribeFirmaActualizada(aplicarMedicoActualizado);
 
     function onVisible() {
@@ -197,7 +274,7 @@ export default function App() {
 
   function nombreMedico(medicoId: string | null): string {
     if (!medicoId) return "";
-    return medicos.find((m) => m.id === medicoId)?.nombre ?? "";
+    return formatNombrePersona(medicos.find((m) => m.id === medicoId)?.nombre ?? "");
   }
 
   function medicoParaPaciente(p: Paciente): Medico | null {
@@ -273,7 +350,7 @@ export default function App() {
     setConfirmDialog({
       title: "Desactivar paciente",
       message: paciente
-        ? `¿Desactivar a ${paciente.paciente}? Va a salir de la lista de activos, pero el historial se conserva.`
+        ? `¿Desactivar a ${formatNombrePersona(paciente.paciente)}? Va a salir de la lista de activos, pero el historial se conserva.`
         : "¿Desactivar este paciente?",
       confirmLabel: "Desactivar",
       onConfirm: async () => {
@@ -343,12 +420,12 @@ export default function App() {
       afectados.length === 0
         ? "Ningún paciente lo tiene asignado."
         : afectados.length === 1
-          ? `El paciente ${afectados[0]!.paciente} pasará a usar el profesional por defecto.`
+          ? `El paciente ${formatNombrePersona(afectados[0]!.paciente)} pasará a usar el profesional por defecto.`
           : `${afectados.length} pacientes que lo tienen asignado pasarán a usar el profesional por defecto.`;
 
     setConfirmDialog({
       title: "Desactivar profesional",
-      message: `¿Desactivar a ${medico.nombre}? ${avisoPacientes}`,
+      message: `¿Desactivar a ${formatNombrePersona(medico.nombre)}? ${avisoPacientes}`,
       confirmLabel: "Desactivar",
       onConfirm: async () => {
         try {
@@ -394,13 +471,13 @@ export default function App() {
       const medico = medicoParaPaciente(p);
       if (!medico) {
         toast.warning(
-          `No hay profesional para "${p.paciente}". Asignale uno en el paciente o elegí un profesional por defecto.`,
+          `No hay profesional para "${formatNombrePersona(p.paciente)}". Asignale uno en el paciente o elegí un profesional por defecto.`,
         );
         return;
       }
       const firmaDataUrl = await firmaToDataUrlForPdf(medico.firmaUrl);
       if (medico.firmaUrl && !firmaDataUrl) {
-        firmasFaltantes.push(medico.nombre);
+        firmasFaltantes.push(formatNombrePersona(medico.nombre));
       }
       items.push({ paciente: p, medico: toConfigMedico(medico, firmaDataUrl) });
     }
@@ -430,14 +507,14 @@ export default function App() {
     const medico = medicoParaPaciente(paciente);
     if (!medico) {
       throw new Error(
-        `No hay profesional para "${paciente.paciente}". Asignale uno o elegí un profesional por defecto.`,
+        `No hay profesional para "${formatNombrePersona(paciente.paciente)}". Asignale uno o elegí un profesional por defecto.`,
       );
     }
 
     const firmaDataUrl = await firmaToDataUrlForPdf(medico.firmaUrl);
     if (medico.firmaUrl && !firmaDataUrl) {
       toast.warning(
-        `No se encontró la firma de ${medico.nombre}. El PDF se enviará sin firma.`,
+        `No se encontró la firma de ${formatNombrePersona(medico.nombre)}. El PDF se enviará sin firma.`,
       );
     }
 
@@ -451,7 +528,7 @@ export default function App() {
 
     return {
       paciente,
-      medicoNombre: medico.nombre,
+      medicoNombre: formatNombrePersona(medico.nombre),
       especialidad: medico.especialidad,
       matricula: medico.matricula,
       fecha,
@@ -546,7 +623,7 @@ export default function App() {
       const nextResults: EnvioResultadoItem[] = [
         ...results,
         {
-          pacienteNombre: paciente.paciente,
+          pacienteNombre: formatNombrePersona(paciente.paciente),
           email: paciente.email.trim(),
           ok: false,
           errorMessage:
@@ -611,7 +688,7 @@ export default function App() {
     const nextResults: EnvioResultadoItem[] = [
       ...session.results,
       {
-        pacienteNombre: paciente?.paciente ?? "Paciente",
+        pacienteNombre: formatNombrePersona(paciente?.paciente ?? "") || "Paciente",
         email: result.to,
         ok: true,
       },
@@ -639,7 +716,7 @@ export default function App() {
     const nextResults: EnvioResultadoItem[] = [
       ...session.results,
       {
-        pacienteNombre: paciente?.paciente ?? "Paciente",
+        pacienteNombre: formatNombrePersona(paciente?.paciente ?? "") || "Paciente",
         email: paciente?.email.trim() ?? "",
         ok: false,
         errorMessage,
@@ -648,7 +725,7 @@ export default function App() {
 
     if (session.index + 1 < session.list.length) {
       toast.warning(
-        `No se pudo enviar a ${paciente?.paciente ?? "paciente"}: ${errorMessage}`,
+        `No se pudo enviar a ${formatNombrePersona(paciente?.paciente ?? "") || "paciente"}: ${errorMessage}`,
       );
       void cargarDraftOrdenEmail(
         session.list,
@@ -676,10 +753,32 @@ export default function App() {
   const pacientesConEmail = pacientesActivos.filter((p) => p.email?.trim()).length;
   const puedeEnviarTodas = pacientesConEmail > 0 && puedeImprimir && !emailFlowActive;
 
-  if (loading) {
+  const sidebar = (
+    <AppSidebar
+      module={module}
+      onModuleChange={setModule}
+      allowedModules={allowedModules}
+      userName={user?.nombre}
+      onLogout={() => void logout()}
+    />
+  );
+
+  if (authLoading) {
+    return (
+      <div className="auth-page">
+        <p className="auth-page__loading">Cargando sesión…</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  if (loading && module === "ordenes") {
     return (
       <div className="app-layout">
-        <AppSidebar module={module} onModuleChange={setModule} />
+        {sidebar}
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
@@ -691,10 +790,10 @@ export default function App() {
     );
   }
 
-  if (loadError) {
+  if (loadError && module === "ordenes") {
     return (
       <div className="app-layout">
-        <AppSidebar module={module} onModuleChange={setModule} />
+        {sidebar}
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
@@ -712,12 +811,18 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <AppSidebar module={module} onModuleChange={setModule} />
+      {sidebar}
       <div className="app-main">
         {module === "presupuestos" ? (
           <PresupuestosModule />
         ) : module === "pami" ? (
           <PamiModule />
+        ) : module === "busca-turno" ? (
+          <BuscaTurnoModule />
+        ) : module === "pedidos-sistema" ? (
+          <PedidosSistemaPanel />
+        ) : module === "usuarios" ? (
+          <UsuariosPanel />
         ) : (
           <div className="app-shell">
       <header className="app-header">
@@ -789,7 +894,7 @@ export default function App() {
         </div>
       </header>
 
-      <nav className="app-tabs app-tabs--full" aria-label="Secciones">
+      <ScrollableAppTabs aria-label="Secciones">
         <button
           type="button"
           className={`app-tabs__btn${tab === "pacientes" ? " is-active" : ""}`}
@@ -818,7 +923,7 @@ export default function App() {
         >
           Plantilla email
         </button>
-      </nav>
+      </ScrollableAppTabs>
 
       {tab === "pacientes" ? (
         <section className="fl-table-card">
@@ -872,7 +977,7 @@ export default function App() {
                     return (
                       <tr key={p.id} className={p.activo ? undefined : "is-inactive"}>
                         <td>
-                          <span className="fl-texto-principal">{p.paciente}</span>
+                          <span className="fl-texto-principal">{formatNombrePersona(p.paciente)}</span>
                           {!p.activo ? (
                             <span className="chip chip--muted" style={{ marginLeft: "0.4rem" }}>
                               Inactivo
@@ -1091,9 +1196,9 @@ export default function App() {
                         <td>
                           <span
                             className={`medico-nombre${esPorDefecto ? " medico-nombre--default" : ""}`}
-                            title={m.nombre}
+                            title={formatNombrePersona(m.nombre)}
                           >
-                            <span className="fl-texto-truncado">{m.nombre}</span>
+                            <span className="fl-texto-truncado">{formatNombrePersona(m.nombre)}</span>
                             {esPorDefecto ? (
                               <span
                                 className="medico-default-icon"
@@ -1256,7 +1361,7 @@ export default function App() {
         fields={
           viewingPaciente
             ? [
-                { label: "Nombre", value: viewingPaciente.paciente },
+                { label: "Nombre", value: formatNombrePersona(viewingPaciente.paciente) },
                 {
                   label: "Email",
                   value: viewingPaciente.email?.trim() ? (
@@ -1313,7 +1418,7 @@ export default function App() {
         fields={
           viewingMedico
             ? [
-                { label: "Nombre", value: viewingMedico.nombre },
+                { label: "Nombre", value: formatNombrePersona(viewingMedico.nombre) },
                 { label: "Especialidad", value: viewingMedico.especialidad },
                 { label: "Matrícula", value: viewingMedico.matricula },
                 {

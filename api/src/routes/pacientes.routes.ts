@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { normalizeNombrePersona } from "../lib/nombrePersona.js";
 import {
   createPaciente,
   listPacientes,
@@ -15,7 +16,7 @@ function parsePacienteInput(body: unknown): PacienteInput {
     typeof raw.medicoId === "string" && raw.medicoId.trim() ? raw.medicoId.trim() : null;
 
   return {
-    paciente: String(raw.paciente ?? "").trim(),
+    paciente: normalizeNombrePersona(String(raw.paciente ?? "")),
     email: String(raw.email ?? "").trim(),
     obraSocial: String(raw.obraSocial ?? "").trim(),
     afiliado: String(raw.afiliado ?? "").trim(),

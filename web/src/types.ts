@@ -210,3 +210,67 @@ export const PRESUPUESTO_ESTADO_LABEL: Record<PresupuestoEstado, string> = {
   rechazado: "Rechazado",
   fallido: "Fallido",
 };
+
+export type PedidoSistemaSeccion =
+  | "ordenes"
+  | "presupuestos"
+  | "pami"
+  | "busca-turno"
+  | "nueva";
+
+export type PedidoSistemaPrioridad = "baja" | "media" | "alta";
+export type PedidoSistemaEstado = "pendiente" | "en_proceso" | "finalizado";
+
+export type PedidoSistemaFoto = {
+  url: string;
+  nombre: string;
+};
+
+export type PedidoSistema = {
+  id: string;
+  seccion: PedidoSistemaSeccion;
+  seccionNueva: string;
+  titulo: string;
+  detalle: string;
+  cuando: string;
+  solicitadoPor: string;
+  prioridad: PedidoSistemaPrioridad;
+  estado: PedidoSistemaEstado;
+  fotos: PedidoSistemaFoto[];
+  creadoPorUserId: string | null;
+  creadoPorEmail: string | null;
+  creadoAt: string;
+  actualizadoAt: string;
+};
+
+export type PedidoSistemaCreateInput = {
+  seccion: PedidoSistemaSeccion;
+  seccionNueva?: string;
+  titulo: string;
+  detalle: string;
+  cuando?: string;
+  solicitadoPor: string;
+  prioridad?: PedidoSistemaPrioridad;
+  fotos?: { base64: string; nombre: string; mime?: string }[];
+};
+
+export const PEDIDO_SECCION_LABEL: Record<PedidoSistemaSeccion, string> = {
+  ordenes: "Órdenes",
+  presupuestos: "Presupuestos",
+  pami: "PAMI",
+  "busca-turno": "Busca turno",
+  nueva: "Nueva sección",
+};
+
+export const PEDIDO_PRIORIDAD_LABEL: Record<PedidoSistemaPrioridad, string> = {
+  baja: "Baja",
+  media: "Media",
+  alta: "Alta",
+};
+
+export const PEDIDO_ESTADO_LABEL: Record<PedidoSistemaEstado, string> = {
+  pendiente: "Pendiente",
+  en_proceso: "En proceso",
+  finalizado: "Finalizado",
+};
+

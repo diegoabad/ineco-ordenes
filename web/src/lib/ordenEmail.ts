@@ -1,4 +1,5 @@
 import { formatFechaYmd } from "./fechas";
+import { formatNombrePersona } from "./nombrePersona";
 import type { Paciente } from "../types";
 import type { EmailConfig, EmailTemplateVar } from "../types/email";
 
@@ -32,13 +33,13 @@ export function buildOrdenEmailVars(
 ): Record<EmailTemplateVar, string> {
   const fechaRaw = input.fecha.trim();
   return {
-    nombrePaciente: input.paciente.paciente.trim() || "—",
+    nombrePaciente: formatNombrePersona(input.paciente.paciente) || "—",
     email: input.paciente.email.trim() || "—",
     obraSocial: input.paciente.obraSocial.trim() || "—",
     afiliado: input.paciente.afiliado.trim() || "—",
     diagnostico: input.paciente.diagnostico.trim() || "—",
     prestacion: input.paciente.prestacion.trim() || "—",
-    nombreMedico: input.medicoNombre.trim() || "—",
+    nombreMedico: formatNombrePersona(input.medicoNombre) || "—",
     especialidad: input.especialidad.trim() || "—",
     matricula: input.matricula.trim() || "—",
     fechaOrden: formatFechaYmd(fechaRaw) || fechaRaw || "—",

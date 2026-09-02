@@ -16,7 +16,8 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
-import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion } from "../types.js";
+import { normalizeNombrePersona } from "../lib/nombrePersona.js";
+import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
 import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
@@ -27,6 +28,8 @@ import {
   emailConfigNeedsLegacyBodyUpgrade,
   type EmailConfig,
 } from "./email-templates.js";
+import { savePedidoFoto } from "./pedidos-files.service.js";
+import { sendPedidoSistemaEmail } from "./pedidos-email.service.js";
 import {
   presupuestoEmailConfigWithDefaults,
   type PresupuestoEmailConfig,
@@ -51,6 +54,8 @@ const PRESUPUESTOS_CONFIG_COLLECTION = "presupuestos_config";
 const PRESUPUESTO_EMAIL_CONFIG_DOC = "email";
 const PRESUPUESTO_PLANTILLA_CONFIG_DOC = "plantilla";
 const PRESUPUESTOS_CONFIG_DOC = "presupuestos";
+const BUSCA_TURNO_CONFIG_DOC = "busca_turno";
+const PEDIDOS_SISTEMA = "ordenes_pedidos_sistema";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -120,8 +125,8 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
   return {
     id,
     fecha: String(raw.fecha ?? fechaHoyIso()),
-    nombrePaciente: String(raw.nombrePaciente ?? raw.nombre ?? ""),
-    profesional: String(raw.profesional ?? "").trim(),
+    nombrePaciente: normalizeNombrePersona(String(raw.nombrePaciente ?? raw.nombre ?? "")),
+    profesional: normalizeNombrePersona(String(raw.profesional ?? "")),
     modalidadId: String(raw.modalidadId ?? "").trim(),
     modalidadTitulo: String(raw.modalidadTitulo ?? "").trim(),
     modalidadTextoPdf: String(raw.modalidadTextoPdf ?? "").trim(),
@@ -228,7 +233,7 @@ function normalizeProfesionalesPresupuesto(raw: unknown): ProfesionalPresupuesto
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const obj = item as Record<string, unknown>;
-    const nombreApellido = String(obj.nombreApellido ?? obj.nombre ?? "").trim();
+    const nombreApellido = normalizeNombrePersona(String(obj.nombreApellido ?? obj.nombre ?? ""));
     if (!nombreApellido) continue;
     const id = String(obj.id ?? "").trim() || randomUUID();
     const titulo = String(obj.titulo ?? "").trim();
@@ -287,7 +292,7 @@ function normalizePaciente(id: string, raw: Record<string, unknown>): Paciente {
 
   return {
     id,
-    paciente: String(raw.paciente ?? ""),
+    paciente: normalizeNombrePersona(String(raw.paciente ?? "")),
     email: String(raw.email ?? "").trim(),
     obraSocial: String(raw.obraSocial ?? ""),
     afiliado: String(raw.afiliado ?? ""),
@@ -306,7 +311,7 @@ function normalizeMedico(id: string, raw: Record<string, unknown>): Medico {
 
   return {
     id,
-    nombre: String(raw.nombre ?? ""),
+    nombre: normalizeNombrePersona(String(raw.nombre ?? "")),
     especialidad: String(raw.especialidad ?? ""),
     matricula: String(raw.matricula ?? "").replace(/^MN\s*/i, "").trim(),
     firmaUrl,
@@ -762,7 +767,13 @@ export async function setMedicoSeleccionadoId(medicoSeleccionadoId: string | nul
 
 export async function createPaciente(input: PacienteInput): Promise<Paciente> {
   const id = randomUUID();
-  const paciente: Paciente = { ...input, id, activo: true, creadoAt: nowIso() };
+  const paciente: Paciente = {
+    ...input,
+    paciente: normalizeNombrePersona(input.paciente),
+    id,
+    activo: true,
+    creadoAt: nowIso(),
+  };
   await setDoc(doc(firestore, PACIENTES, id), pacientePayload(paciente));
   return paciente;
 }
@@ -772,7 +783,13 @@ export async function updatePaciente(id: string, input: PacienteInput): Promise<
   if (!existing.exists()) throw new Error("Paciente no encontrado");
 
   const current = normalizePaciente(id, existing.data() as Record<string, unknown>);
-  const paciente: Paciente = { ...input, id, activo: current.activo, creadoAt: current.creadoAt };
+  const paciente: Paciente = {
+    ...input,
+    paciente: normalizeNombrePersona(input.paciente),
+    id,
+    activo: current.activo,
+    creadoAt: current.creadoAt,
+  };
   await setDoc(doc(firestore, PACIENTES, id), pacientePayload(paciente));
   return paciente;
 }
@@ -789,7 +806,14 @@ export async function setPacienteActivo(id: string, activo: boolean): Promise<Pa
 
 export async function createMedico(input: MedicoInput): Promise<Medico> {
   const id = randomUUID();
-  const medico: Medico = { ...input, id, firmaUrl: null, activo: true, creadoAt: nowIso() };
+  const medico: Medico = {
+    ...input,
+    nombre: normalizeNombrePersona(input.nombre),
+    id,
+    firmaUrl: null,
+    activo: true,
+    creadoAt: nowIso(),
+  };
   await setDoc(doc(firestore, MEDICOS, id), medicoPayload(medico));
 
   const config = await getConfigDoc();
@@ -805,7 +829,13 @@ export async function updateMedico(id: string, input: MedicoInput): Promise<Medi
   if (!existing.exists()) throw new Error("Médico no encontrado");
 
   const current = normalizeMedico(id, existing.data() as Record<string, unknown>);
-  const medico: Medico = { ...current, ...input, id, activo: current.activo };
+  const medico: Medico = {
+    ...current,
+    ...input,
+    nombre: normalizeNombrePersona(input.nombre),
+    id,
+    activo: current.activo,
+  };
   await setDoc(doc(firestore, MEDICOS, id), medicoPayload(medico));
   return medico;
 }
@@ -940,7 +970,7 @@ async function loadPresupuestoItemsFromIds(ids: string[]): Promise<PresupuestoIt
 }
 
 export async function createPresupuesto(input: PresupuestoCreateInput): Promise<Presupuesto> {
-  const nombrePaciente = input.nombrePaciente.trim();
+  const nombrePaciente = normalizeNombrePersona(input.nombrePaciente);
   if (!nombrePaciente) throw new Error("El nombre del paciente es obligatorio");
   if (input.enviar && !input.email.trim()) {
     throw new Error("El email es obligatorio para enviar el presupuesto");
@@ -960,7 +990,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     id,
     fecha: fechaHoyIso(),
     nombrePaciente,
-    profesional: input.profesional.trim(),
+    profesional: normalizeNombrePersona(input.profesional),
     ...modalidad,
     email: input.email.trim(),
     items,
@@ -1013,7 +1043,7 @@ export async function updatePresupuesto(
     throw new Error("Solo se pueden editar presupuestos que no fueron enviados");
   }
 
-  const nombrePaciente = input.nombrePaciente.trim();
+  const nombrePaciente = normalizeNombrePersona(input.nombrePaciente);
   if (!nombrePaciente) throw new Error("El nombre del paciente es obligatorio");
   if (input.enviar && !input.email.trim()) {
     throw new Error("El email es obligatorio para enviar el presupuesto");
@@ -1031,7 +1061,7 @@ export async function updatePresupuesto(
   const presupuesto: Presupuesto = {
     ...current,
     nombrePaciente,
-    profesional: input.profesional.trim(),
+    profesional: normalizeNombrePersona(input.profesional),
     ...modalidad,
     email: input.email.trim(),
     items,
@@ -1148,3 +1178,272 @@ export async function deletePresupuesto(id: string): Promise<void> {
   await deleteDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
   await deletePresupuestoPdfFile(id);
 }
+
+function normalizeBuscaTurnoProf(raw: unknown): BuscaTurnoProfesional | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const docId = String(o.doc ?? "").trim();
+  if (!docId) return null;
+  return {
+    doc: docId,
+    nombre: String(o.nombre ?? "").trim(),
+    sede: String(o.sede ?? "INECO").trim() || "INECO",
+    enabled: o.enabled !== false,
+  };
+}
+
+function normalizeBuscaTurnoPrestProf(raw: unknown): BuscaTurnoPrestacionProf | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const docId = String(o.doc ?? "").trim();
+  if (!docId) return null;
+  return {
+    doc: docId,
+    nombre: String(o.nombre ?? "").trim(),
+    sede: String(o.sede ?? "INECO").trim() || "INECO",
+  };
+}
+
+function normalizeBuscaTurnoPrestacion(raw: unknown): BuscaTurnoPrestacion | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const profesionales = Array.isArray(o.profesionales)
+    ? o.profesionales.map(normalizeBuscaTurnoPrestProf).filter((p): p is BuscaTurnoPrestacionProf => !!p)
+    : [];
+  const duracion = Number(o.duracion);
+  return {
+    nombre: String(o.nombre ?? "").trim(),
+    duracion: Number.isFinite(duracion) && duracion > 0 ? duracion : 30,
+    enabled: o.enabled !== false,
+    profesionales,
+  };
+}
+
+function normalizeBuscaTurnoConfig(raw: Record<string, unknown>): BuscaTurnoConfig {
+  const profesionales = Array.isArray(raw.profesionales)
+    ? raw.profesionales.map(normalizeBuscaTurnoProf).filter((p): p is BuscaTurnoProfesional => !!p)
+    : [];
+  const prestaciones: Record<string, BuscaTurnoPrestacion> = {};
+  const prestRaw = raw.prestaciones;
+  if (prestRaw && typeof prestRaw === "object" && !Array.isArray(prestRaw)) {
+    for (const [cod, v] of Object.entries(prestRaw as Record<string, unknown>)) {
+      const key = String(cod).trim();
+      if (!key) continue;
+      const prest = normalizeBuscaTurnoPrestacion(v);
+      if (prest) prestaciones[key] = prest;
+    }
+  }
+  const sedes = Array.isArray(raw.sedesCarga)
+    ? raw.sedesCarga.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  return {
+    version: 2,
+    updatedAt: String(raw.updatedAt ?? "").trim() || nowIso(),
+    updatedBy: raw.updatedBy != null ? String(raw.updatedBy) : null,
+    sedesCarga: sedes.length ? sedes : ["INECO"],
+    profesionales,
+    prestaciones,
+  };
+}
+
+/** null si aún no hay config guardada. */
+export async function getBuscaTurnoConfig(): Promise<BuscaTurnoConfig | null> {
+  const snap = await getDoc(doc(firestore, CONFIG, BUSCA_TURNO_CONFIG_DOC));
+  if (!snap.exists()) return null;
+  return normalizeBuscaTurnoConfig(snap.data() as Record<string, unknown>);
+}
+
+export async function saveBuscaTurnoConfig(
+  input: Omit<BuscaTurnoConfig, "updatedAt" | "version"> & {
+    version?: number;
+    updatedAt?: string;
+    updatedBy?: string | null;
+  },
+): Promise<BuscaTurnoConfig> {
+  const normalized = normalizeBuscaTurnoConfig({
+    ...input,
+    version: 2,
+    updatedAt: nowIso(),
+  } as Record<string, unknown>);
+  if (normalized.profesionales.length === 0 && Object.keys(normalized.prestaciones).length === 0) {
+    throw new Error("La configuración de Busca turno está vacía");
+  }
+  await setDoc(doc(firestore, CONFIG, BUSCA_TURNO_CONFIG_DOC), normalized);
+  return normalized;
+}
+
+function isPedidoSeccion(value: unknown): value is PedidoSistemaSeccion {
+  return (
+    value === "ordenes" ||
+    value === "presupuestos" ||
+    value === "pami" ||
+    value === "busca-turno" ||
+    value === "nueva"
+  );
+}
+
+function isPedidoPrioridad(value: unknown): value is PedidoSistemaPrioridad {
+  return value === "baja" || value === "media" || value === "alta";
+}
+
+function isPedidoEstado(value: unknown): value is PedidoSistemaEstado {
+  return value === "pendiente" || value === "en_proceso" || value === "finalizado";
+}
+
+function normalizePedidoFotos(raw: unknown): PedidoSistemaFoto[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const o = item as Record<string, unknown>;
+      const url = String(o.url ?? "").trim();
+      if (!url) return null;
+      return {
+        url,
+        nombre: String(o.nombre ?? "").trim() || "foto",
+      };
+    })
+    .filter((f): f is PedidoSistemaFoto => Boolean(f));
+}
+
+function normalizePedidoSistema(
+  id: string,
+  raw: Record<string, unknown>,
+): PedidoSistema {
+  const seccion = isPedidoSeccion(raw.seccion) ? raw.seccion : "nueva";
+  return {
+    id,
+    seccion,
+    seccionNueva: String(raw.seccionNueva ?? "").trim(),
+    titulo: String(raw.titulo ?? "").trim(),
+    detalle: String(raw.detalle ?? "").trim(),
+    cuando: String(raw.cuando ?? "").trim(),
+    solicitadoPor: String(raw.solicitadoPor ?? "").trim(),
+    prioridad: isPedidoPrioridad(raw.prioridad) ? raw.prioridad : "media",
+    estado: isPedidoEstado(raw.estado) ? raw.estado : "pendiente",
+    fotos: normalizePedidoFotos(raw.fotos),
+    creadoPorUserId: String(raw.creadoPorUserId ?? "").trim() || null,
+    creadoPorEmail: String(raw.creadoPorEmail ?? "").trim() || null,
+    creadoAt: readCreadoAt(raw) ?? nowIso(),
+    actualizadoAt: String(raw.actualizadoAt ?? "").trim() || readCreadoAt(raw) || nowIso(),
+  };
+}
+
+function pedidoSistemaPayload(pedido: PedidoSistema): Record<string, unknown> {
+  return { ...pedido };
+}
+
+export async function listPedidosSistema(): Promise<PedidoSistema[]> {
+  const snap = await getDocs(collection(firestore, PEDIDOS_SISTEMA));
+  const items = snap.docs.map((d) =>
+    normalizePedidoSistema(d.id, d.data() as Record<string, unknown>),
+  );
+  return sortRecientes(items, (a, b) =>
+    a.titulo.localeCompare(b.titulo, "es", { sensitivity: "base" }),
+  );
+}
+
+export async function getPedidoSistema(id: string): Promise<PedidoSistema> {
+  const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+  if (!existing.exists()) throw new Error("Pedido no encontrado");
+  return normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+}
+
+export async function createPedidoSistema(
+  input: PedidoSistemaCreateInput,
+  meta?: { userId?: string | null; email?: string | null; nombre?: string | null },
+): Promise<PedidoSistema> {
+  const titulo = String(input.titulo ?? "").trim();
+  const solicitadoPor =
+    String(meta?.nombre ?? "").trim() ||
+    String(input.solicitadoPor ?? "").trim() ||
+    String(meta?.email ?? "").trim();
+  const detalle = String(input.detalle ?? "").trim();
+  if (!titulo) throw new Error("El título es obligatorio");
+  if (!solicitadoPor) throw new Error("No se pudo identificar quién pide el pedido");
+  if (!detalle) throw new Error("El detalle es obligatorio");
+  if (!isPedidoSeccion(input.seccion)) throw new Error("Sección inválida");
+  const seccionNueva =
+    input.seccion === "nueva"
+      ? String(input.seccionNueva ?? "").trim() || titulo
+      : "";
+  if (input.seccion === "nueva" && !seccionNueva) {
+    throw new Error("Indicá el nombre de la nueva sección");
+  }
+
+  const id = randomUUID();
+  const now = nowIso();
+  const fotosInput = Array.isArray(input.fotos) ? input.fotos.slice(0, 8) : [];
+  const fotos: PedidoSistemaFoto[] = [];
+  for (let i = 0; i < fotosInput.length; i += 1) {
+    const f = fotosInput[i]!;
+    const saved = await savePedidoFoto(
+      id,
+      i,
+      String(f.base64 ?? ""),
+      String(f.nombre ?? `foto-${i + 1}`),
+      f.mime,
+    );
+    fotos.push(saved);
+  }
+
+  const pedido: PedidoSistema = {
+    id,
+    seccion: input.seccion,
+    seccionNueva,
+    titulo,
+    detalle,
+    cuando: String(input.cuando ?? "").trim(),
+    solicitadoPor,
+    prioridad: isPedidoPrioridad(input.prioridad) ? input.prioridad : "media",
+    estado: "pendiente",
+    fotos,
+    creadoPorUserId: meta?.userId?.trim() || null,
+    creadoPorEmail: meta?.email?.trim() || null,
+    creadoAt: now,
+    actualizadoAt: now,
+  };
+
+  await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
+
+  try {
+    await sendPedidoSistemaEmail(pedido);
+  } catch (error) {
+    console.error("No se pudo enviar el mail de pedido sistema:", error);
+  }
+
+  return pedido;
+}
+
+export async function updatePedidoSistema(
+  id: string,
+  input: PedidoSistemaUpdateInput,
+): Promise<PedidoSistema> {
+  const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+  if (!existing.exists()) throw new Error("Pedido no encontrado");
+  const current = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+
+  const pedido: PedidoSistema = {
+    ...current,
+    titulo:
+      input.titulo !== undefined ? String(input.titulo).trim() || current.titulo : current.titulo,
+    detalle:
+      input.detalle !== undefined
+        ? String(input.detalle).trim() || current.detalle
+        : current.detalle,
+    cuando: input.cuando !== undefined ? String(input.cuando).trim() : current.cuando,
+    prioridad: isPedidoPrioridad(input.prioridad) ? input.prioridad : current.prioridad,
+    estado: isPedidoEstado(input.estado) ? input.estado : current.estado,
+    actualizadoAt: nowIso(),
+  };
+
+  await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
+  return pedido;
+}
+
+export async function deletePedidoSistema(id: string): Promise<void> {
+  const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+  if (!existing.exists()) throw new Error("Pedido no encontrado");
+  await deleteDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+}
+

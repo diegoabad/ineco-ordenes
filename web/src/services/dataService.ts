@@ -8,6 +8,10 @@ import type {
   MedicoFormData,
   Paciente,
   PacienteFormData,
+  PedidoSistema,
+  PedidoSistemaCreateInput,
+  PedidoSistemaEstado,
+  PedidoSistemaPrioridad,
   Prestacion,
   PrestacionFormData,
   Presupuesto,
@@ -364,3 +368,43 @@ export async function savePamiAnalisis(input: {
 export async function deletePamiAnalisis(id: string): Promise<void> {
   await apiFetch(`/api/pami/${id}`, { method: "DELETE" });
 }
+
+export async function fetchPedidosSistema(): Promise<PedidoSistema[]> {
+  const res = await apiFetch<{ ok: boolean; data: PedidoSistema[] }>("/api/pedidos-sistema");
+  return res.data;
+}
+
+export async function createPedidoSistema(
+  data: PedidoSistemaCreateInput,
+): Promise<PedidoSistema> {
+  const res = await apiFetch<{ ok: boolean; data: PedidoSistema }>("/api/pedidos-sistema", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function updatePedidoSistema(
+  id: string,
+  data: {
+    estado?: PedidoSistemaEstado;
+    prioridad?: PedidoSistemaPrioridad;
+    titulo?: string;
+    detalle?: string;
+    cuando?: string;
+  },
+): Promise<PedidoSistema> {
+  const res = await apiFetch<{ ok: boolean; data: PedidoSistema }>(
+    `/api/pedidos-sistema/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    },
+  );
+  return res.data;
+}
+
+export async function deletePedidoSistema(id: string): Promise<void> {
+  await apiFetch(`/api/pedidos-sistema/${id}`, { method: "DELETE" });
+}
+
