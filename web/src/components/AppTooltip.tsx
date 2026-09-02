@@ -67,8 +67,8 @@ export function AppTooltipHost() {
     function place(el: HTMLElement, text: string) {
       clearHide();
       const rect = el.getBoundingClientRect();
-      const gap = 10;
-      const placement: "top" | "bottom" = rect.top < 52 ? "bottom" : "top";
+      const gap = 8;
+      const placement: "top" | "bottom" = rect.top < 40 ? "bottom" : "top";
       const x = rect.left + rect.width / 2;
       const y = placement === "top" ? rect.top - gap : rect.bottom + gap;
       activeRef.current = el;
@@ -151,9 +151,7 @@ export function AppTooltipHost() {
       style={{ left: tip.x, top: tip.y }}
       role="tooltip"
     >
-      <span className="app-tooltip__accent" aria-hidden />
-      <span className="app-tooltip__text">{tip.text}</span>
-      <span className="app-tooltip__arrow" aria-hidden />
+      {tip.text}
     </div>,
     document.body,
   );

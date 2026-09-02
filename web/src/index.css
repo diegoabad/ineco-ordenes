@@ -3974,6 +3974,31 @@ tbody tr.is-inactive td {
   border-color: var(--border);
 }
 
+.pami-upload-actions .btn:disabled,
+.pami-upload-actions .btn:disabled:hover {
+  pointer-events: none;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+.pami-upload-actions .btn-primary:disabled,
+.pami-upload-actions .btn-primary:disabled:hover {
+  background: var(--primary);
+  color: #fff;
+  opacity: 0.55;
+}
+
+.pami-upload-actions .btn-secondary:disabled,
+.pami-upload-actions .btn-secondary:disabled:hover,
+.pami-upload-actions .pami-btn-limpiar:disabled,
+.pami-upload-actions .pami-btn-limpiar:disabled:hover {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border-color: var(--border);
+  opacity: 0.55;
+}
+
 .pami-drops {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -5419,20 +5444,23 @@ tbody tr.is-inactive td {
 .app-tooltip {
   position: fixed;
   z-index: 10050;
-  display: inline-flex;
-  align-items: stretch;
-  max-width: min(18rem, calc(100vw - 1.25rem));
+  max-width: min(14rem, calc(100vw - 1.5rem));
+  padding: 0.28rem 0.55rem;
   transform: translate(-50%, -100%);
   pointer-events: none;
-  border-radius: 0.55rem;
-  overflow: hidden;
-  background: linear-gradient(165deg, #1f2430 0%, #161a22 100%);
-  color: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.6875rem;
+  font-weight: 550;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  text-wrap: pretty;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
-    0 10px 28px rgba(15, 23, 42, 0.38),
-    0 2px 6px rgba(15, 23, 42, 0.2);
-  animation: app-tooltip-in 0.16s ease-out both;
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 6px 16px rgba(15, 23, 42, 0.08);
+  animation: app-tooltip-in 0.12s ease-out both;
 }
 
 .app-tooltip--bottom {
@@ -5440,51 +5468,32 @@ tbody tr.is-inactive td {
   animation-name: app-tooltip-in-bottom;
 }
 
-.app-tooltip__accent {
-  flex: 0 0 3px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--primary) 92%, white),
-    var(--primary)
-  );
-}
-
-.app-tooltip__text {
-  padding: 0.45rem 0.7rem;
-  font-size: 0.75rem;
-  font-weight: 550;
-  line-height: 1.35;
-  letter-spacing: 0.01em;
-  text-wrap: pretty;
-}
-
-.app-tooltip__arrow {
+.app-tooltip::after {
+  content: "";
   position: absolute;
   left: 50%;
-  width: 8px;
-  height: 8px;
-  background: #161a22;
-  border-right: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
-  transform: translate(-50%, 50%) rotate(45deg);
-  bottom: 0;
+  bottom: -3px;
+  width: 6px;
+  height: 6px;
+  background: var(--surface);
+  border-right: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  transform: translateX(-50%) rotate(45deg);
 }
 
-.app-tooltip--bottom .app-tooltip__arrow {
-  top: 0;
+.app-tooltip--bottom::after {
+  top: -3px;
   bottom: auto;
   border-right: none;
   border-bottom: none;
-  border-left: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
-  border-top: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
-  transform: translate(-50%, -50%) rotate(45deg);
-  background: #1f2430;
+  border-left: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-top: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
 }
 
 @keyframes app-tooltip-in {
   from {
     opacity: 0;
-    transform: translate(-50%, calc(-100% + 4px));
+    transform: translate(-50%, calc(-100% + 3px));
   }
   to {
     opacity: 1;
@@ -5495,7 +5504,7 @@ tbody tr.is-inactive td {
 @keyframes app-tooltip-in-bottom {
   from {
     opacity: 0;
-    transform: translate(-50%, -4px);
+    transform: translate(-50%, -3px);
   }
   to {
     opacity: 1;

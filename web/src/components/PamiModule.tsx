@@ -151,17 +151,19 @@ function readInitialDraft(): {
   debitos: FileSlot | null;
   result: PamiAnalisisResult | null;
 } {
+  // Siempre mes actual - 1 (no reusar un mes viejo del borrador)
+  const mes = mesAnteriorKey();
   const draft = loadPamiDraft();
   if (!draft) {
     return {
-      mes: mesAnteriorKey(),
+      mes,
       presentacion: null,
       debitos: null,
       result: null,
     };
   }
   return {
-    mes: draft.mes || mesAnteriorKey(),
+    mes,
     presentacion: draft.presentacion ? fileSlotFromStored(draft.presentacion) : null,
     debitos: draft.debitos ? fileSlotFromStored(draft.debitos) : null,
     result: draft.result ?? null,
@@ -423,7 +425,7 @@ export function PamiModule() {
                   disabled={processing || saving || !presentacion || !debitos}
                   onClick={onProcesar}
                 >
-                  {processing || saving ? "Procesando…" : "Procesar y guardar"}
+                  {processing || saving ? "Procesando…" : "Procesar mes"}
                 </button>
               </div>
             </div>
@@ -455,9 +457,6 @@ export function PamiModule() {
       ) : (
         <div className="pami-historial">
           <section className="fl-table-card">
-            <div className="table-toolbar">
-              <h2 className="pami-section__title">Meses guardados</h2>
-            </div>
             <div className="table-wrap">
               <table className="pami-table pami-table--historial">
                 <thead>
