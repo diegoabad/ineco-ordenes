@@ -97,8 +97,26 @@ type FirebaseIdClaims = {
   name?: string;
   picture?: string;
   sub?: string;
+  preferred_username?: string;
   firebase?: { sign_in_provider?: string };
 };
+
+function pickEmailFromClaims(claims: FirebaseIdClaims): string {
+  const candidates = [claims.email, claims.preferred_username];
+  for (const raw of candidates) {
+    const email = String(raw ?? "")
+      .trim()
+      .toLowerCase();
+    if (email.includes("@") && !email.includes("#ext#")) return email;
+  }
+  // Guest Microsoft: user_domain.com#ext#@tenant.onmicrosoft.com → user@domain.com
+  for (const raw of candidates) {
+    const value = String(raw ?? "").trim().toLowerCase();
+    const m = value.match(/^([^@#]+)_([^#]+)#ext#@/i);
+    if (m) return `${m[1]}@${m[2].replace(/_/g, ".")}`;
+  }
+  return "";
+}
 
 export async function verifyFirebaseIdToken(
   idToken: string,
@@ -132,9 +150,7 @@ export async function loginWithFirebaseIdToken(
   idToken: string,
 ): Promise<AuthResult> {
   const claims = await verifyFirebaseIdToken(idToken);
-  const email = String(claims.email ?? "")
-    .trim()
-    .toLowerCase();
+  const email = pickEmailFromClaims(claims);
   if (!email || !email.includes("@")) {
     throw new Error("La cuenta no tiene un email válido");
   }

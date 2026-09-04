@@ -55,8 +55,6 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const SESSION_POLL_MS = 12_000;
-
 function modulesSignature(user: AuthUser): string {
   return `${user.role}|${[...user.modules].sort().join(",")}`;
 }
@@ -68,6 +66,7 @@ function applyPendingCount(
   notifyIncrease: boolean,
 ): void {
   const prev = prevRef.current;
+  if (prev === count) return;
   if (notifyIncrease && prev !== null && count > prev) {
     const delta = count - prev;
     toast.info(
@@ -130,6 +129,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const prev = userRef.current;
       if (
         prev &&
+        prev.id === next.id &&
+        modulesSignature(prev) === modulesSignature(next) &&
+        prev.email === next.email &&
+        prev.nombre === next.nombre &&
+        prev.status === next.status
+      ) {
+        return;
+      }
+      if (
+        prev &&
         (prev.id !== next.id || modulesSignature(prev) !== modulesSignature(next))
       ) {
         toast.info("Tus permisos se actualizaron.");
@@ -142,7 +151,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (!userRef.current) {
         setUser(null);
       }
-      // Si hay red caída y ya había sesión, no sacar al usuario por un poll fallido
     } finally {
       syncingRef.current = false;
     }
@@ -210,8 +218,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let unsub: (() => void) | undefined;
     let cancelled = false;
-    let seenUserSnap = false;
-    let seenDomainsSnap = false;
 
     void (async () => {
       try {
@@ -222,19 +228,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
           onUserUpdated: () => {
             if (cancelled) return;
-            // Primer snapshot = estado actual; los siguientes = cambio urgente
-            if (!seenUserSnap) {
-              seenUserSnap = true;
-              return;
-            }
             void refresh();
           },
           onDomainsChanged: () => {
             if (cancelled) return;
-            if (!seenDomainsSnap) {
-              seenDomainsSnap = true;
-              return;
-            }
             void refresh();
           },
         });
@@ -247,29 +244,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unsub?.();
     };
-  }, [loading, user?.id, clearSession, refresh]);
-
-  // Poll de sesión + al volver a la pestaña (respaldo)
-  useEffect(() => {
-    if (loading || !user) return;
-
-    const tick = () => {
-      void refresh();
-    };
-    const intervalId = window.setInterval(tick, SESSION_POLL_MS);
-
-    const onVisible = () => {
-      if (document.visibilityState === "visible") tick();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
-    };
-  }, [loading, user?.id, refresh]);
+    // Solo re-suscribir si cambia el usuario logueado (no en cada refresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh/clearSession estables en la práctica; evitar churn
+  }, [loading, user?.id]);
 
   // Pendientes en tiempo real (Firestore) para admins
   useEffect(() => {

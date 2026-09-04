@@ -44,10 +44,27 @@ function mapUserDoc(id: string, raw: Record<string, unknown>): AuthUser | null {
   };
 }
 
+/** Solo lo que afecta acceso (ignora timestamps / ruido de snapshot). */
+function accessSignature(user: AuthUser): string {
+  return [
+    user.status,
+    user.role,
+    user.email,
+    [...user.modules].sort().join(","),
+  ].join("|");
+}
+
+function domainsSignature(raw: Record<string, unknown> | undefined): string {
+  const list = Array.isArray(raw?.allowedDomains)
+    ? raw.allowedDomains.map((d) => String(d).trim().toLowerCase()).sort()
+    : [];
+  return list.join(",");
+}
+
 export type SessionAccessHandlers = {
   /** Usuario eliminado, rechazado, pendiente o sin email válido. */
   onRevoked: () => void;
-  /** Cambió role/modules/email/nombre estando aprobado. */
+  /** Cambió role/modules/email/status estando aprobado. */
   onUserUpdated: (user: AuthUser) => void;
   /** Cambió la lista de dominios → revalidar vía /me. */
   onDomainsChanged: () => void;
@@ -55,7 +72,7 @@ export type SessionAccessHandlers = {
 
 /**
  * Escucha el doc del usuario logueado + config de dominios.
- * Así un corte urgente (borrar, rechazar, quitar dominio/permisos) impacta al toque.
+ * Solo notifica cuando cambia algo relevante (evita “recargas” por snapshots repetidos).
  */
 export async function subscribeSessionAccess(
   userId: string,
@@ -64,19 +81,35 @@ export async function subscribeSessionAccess(
   const { firestore } = await ensureFirebase();
   const unsubs: Unsubscribe[] = [];
 
+  let lastUserSig: string | null = null;
+  let lastDomainsSig: string | null = null;
+  let revoked = false;
+
   unsubs.push(
     onSnapshot(
       doc(firestore, USUARIOS, userId),
       (snap) => {
         if (!snap.exists()) {
-          handlers.onRevoked();
+          if (!revoked) {
+            revoked = true;
+            handlers.onRevoked();
+          }
           return;
         }
         const mapped = mapUserDoc(snap.id, snap.data() as Record<string, unknown>);
         if (!mapped || mapped.status !== "approved" || !mapped.email.includes("@")) {
-          handlers.onRevoked();
+          if (!revoked) {
+            revoked = true;
+            handlers.onRevoked();
+          }
           return;
         }
+        revoked = false;
+        const sig = accessSignature(mapped);
+        if (sig === lastUserSig) return;
+        const isFirst = lastUserSig === null;
+        lastUserSig = sig;
+        if (isFirst) return;
         handlers.onUserUpdated(mapped);
       },
       () => {
@@ -88,7 +121,14 @@ export async function subscribeSessionAccess(
   unsubs.push(
     onSnapshot(
       doc(firestore, CONFIG, AUTH_CONFIG_DOC),
-      () => {
+      (snap) => {
+        const sig = domainsSignature(
+          snap.exists() ? (snap.data() as Record<string, unknown>) : undefined,
+        );
+        if (sig === lastDomainsSig) return;
+        const isFirst = lastDomainsSig === null;
+        lastDomainsSig = sig;
+        if (isFirst) return;
         handlers.onDomainsChanged();
       },
       () => {

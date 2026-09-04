@@ -13,7 +13,7 @@ const FIREBASE_MESSAGES: Record<string, string> = {
     "Hubo demasiados intentos. Esperá unos minutos e intentá otra vez.",
   "auth/user-disabled": "Esta cuenta está deshabilitada. Contactá al administrador.",
   "auth/unauthorized-domain":
-    "Este dominio no está autorizado para iniciar sesión. Pedile a sistemas que lo habilite.",
+    "La URL de este sitio no está autorizada en Firebase. En Firebase Console → Authentication → Settings → Authorized domains, agregá el dominio de producción (sin https://).",
   "auth/operation-not-allowed":
     "Este método de acceso no está habilitado. Pedile a sistemas que active Google o Microsoft.",
   "auth/internal-error":
@@ -39,8 +39,14 @@ const API_FRIENDLY: Array<{ test: RegExp; message: string }> = [
       "Microsoft rechazó el login. Revisá la app en Azure (tenant / redirect) y reintentá.",
   },
   {
+    test: /dominio de email no está autorizado|email no pertenece a un dominio/i,
+    message:
+      "Tu email no está en un dominio permitido. Un admin tiene que agregarlo en Usuarios → Dominios (ej. ineco.ar).",
+  },
+  {
     test: /dominio.*no está autorizado|no está autorizado/i,
-    message: "Tu email no pertenece a un dominio autorizado para esta app.",
+    message:
+      "Dominio no autorizado. Si el mensaje es de Firebase, falta agregar la URL del sitio en Authorized domains; si es del email, falta el dominio en Usuarios → Dominios.",
   },
   {
     test: /email válido|sin un email/i,
