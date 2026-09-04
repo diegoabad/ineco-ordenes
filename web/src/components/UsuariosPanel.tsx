@@ -16,14 +16,16 @@ const SELECTABLE_MODULE_OPTIONS: { id: AppModuleId; label: string }[] = [
   { id: "busca-turno", label: "Busca turno" },
 ];
 
-const SELECTABLE_MODULE_IDS = SELECTABLE_MODULE_OPTIONS.map((m) => m.id);
+const SELECTABLE_MODULE_IDS: AppModuleId[] = SELECTABLE_MODULE_OPTIONS.map(
+  (m) => m.id,
+);
 
 function withFixedModules(modules: AppModuleId[], role: UserRole): AppModuleId[] {
   if (role === "admin") {
     return [...SELECTABLE_MODULE_IDS, "pedidos-sistema", "usuarios"];
   }
   const selectable = modules.filter((m) => SELECTABLE_MODULE_IDS.includes(m));
-  return [...new Set([...selectable, "pedidos-sistema"])];
+  return Array.from(new Set<AppModuleId>([...selectable, "pedidos-sistema"]));
 }
 
 type AccessDraft = {
