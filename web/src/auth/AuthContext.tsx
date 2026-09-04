@@ -9,13 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "react-toastify";
-import { apiFetch, onSessionLost, onSessionRefreshNeeded } from "../config/api";
+import { apiFetch, onSessionLost } from "../config/api";
 import {
   signInWithOAuthProvider,
   signOutFirebase,
   type OAuthProviderId,
 } from "../lib/firebaseAuth";
-import { subscribePendingUsersCount } from "../lib/pendingUsersRealtime";
 import { subscribeSessionAccess } from "../lib/sessionAccessRealtime";
 
 export type AppModuleId =
@@ -48,44 +47,47 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   canAccessModule: (module: AppModuleId) => boolean;
-  /** Solicitudes pendientes (solo admin; se actualiza en vivo). */
-  pendingUsersCount: number;
-  refreshPendingUsersCount: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function modulesSignature(user: AuthUser): string {
+function modulesSignature(user: Pick<AuthUser, "role" | "modules">): string {
   return `${user.role}|${[...user.modules].sort().join(",")}`;
 }
 
-function applyPendingCount(
-  count: number,
-  prevRef: { current: number | null },
-  setCount: (n: number) => void,
-  notifyIncrease: boolean,
-): void {
-  const prev = prevRef.current;
-  if (prev === count) return;
-  if (notifyIncrease && prev !== null && count > prev) {
-    const delta = count - prev;
-    toast.info(
-      delta === 1
-        ? "Hay una nueva solicitud de acceso pendiente"
-        : `Hay ${delta} solicitudes de acceso nuevas`,
-    );
+function normalizeClientModules(
+  role: UserRole,
+  modules: AppModuleId[],
+): AppModuleId[] {
+  if (role === "admin") {
+    return [
+      "ordenes",
+      "presupuestos",
+      "pami",
+      "busca-turno",
+      "pedidos-sistema",
+      "usuarios",
+    ];
   }
-  prevRef.current = count;
-  setCount(count);
+  const selectable = modules.filter(
+    (m) =>
+      m === "ordenes" ||
+      m === "presupuestos" ||
+      m === "pami" ||
+      m === "busca-turno",
+  );
+  return [...new Set<AppModuleId>([...selectable, "pedidos-sistema"])];
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pendingUsersCount, setPendingUsersCount] = useState(0);
   const userRef = useRef<AuthUser | null>(null);
   const syncingRef = useRef(false);
-  const prevPendingRef = useRef<number | null>(null);
+  const clearSessionRef = useRef<(notify: boolean) => Promise<void>>(
+    async () => undefined,
+  );
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
 
   useEffect(() => {
     userRef.current = user;
@@ -95,7 +97,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const hadUser = Boolean(userRef.current);
     if (!hadUser) {
       setUser(null);
-      setPendingUsersCount(0);
       return;
     }
     if (notify) {
@@ -105,7 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     userRef.current = null;
     setUser(null);
-    setPendingUsersCount(0);
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
     } catch {
@@ -156,27 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [clearSession]);
 
-  const refreshPendingUsersCount = useCallback(async () => {
-    const current = userRef.current;
-    if (!current || current.role !== "admin") {
-      setPendingUsersCount(0);
-      prevPendingRef.current = 0;
-      return;
-    }
-    try {
-      const res = await apiFetch<{ ok: boolean; data: AuthUser[] }>(
-        "/api/usuarios?status=pending",
-      );
-      applyPendingCount(
-        res.data.length,
-        prevPendingRef,
-        setPendingUsersCount,
-        false,
-      );
-    } catch {
-      // ignore
-    }
-  }, []);
+  useEffect(() => {
+    clearSessionRef.current = clearSession;
+    refreshRef.current = refresh;
+  }, [clearSession, refresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,21 +181,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Si cualquier request autenticado responde 401 → cerrar sesión en UI
   useEffect(() => {
     return onSessionLost(() => {
-      void clearSession(true);
+      void clearSessionRef.current(true);
     });
-  }, [clearSession]);
+  }, []);
 
-  // 403 → revalidar permisos/dominio al toque
-  useEffect(() => {
-    return onSessionRefreshNeeded(() => {
-      void refresh();
-    });
-  }, [refresh]);
-
-  // Acceso en tiempo real: borrado, rechazo, cambio de permisos o dominios
   useEffect(() => {
     if (loading || !user) return;
 
@@ -224,19 +198,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unsub = await subscribeSessionAccess(user.id, {
           onRevoked: () => {
             if (cancelled) return;
-            void clearSession(true);
+            void clearSessionRef.current(true);
           },
-          onUserUpdated: () => {
+          onUserUpdated: (next) => {
             if (cancelled) return;
-            void refresh();
+            const prev = userRef.current;
+            if (!prev || prev.id !== next.id) return;
+            const modules = normalizeClientModules(next.role, next.modules);
+            const merged: AuthUser = {
+              ...prev,
+              email: next.email,
+              nombre: next.nombre || prev.nombre,
+              role: next.role,
+              modules,
+              status: next.status,
+            };
+            if (
+              modulesSignature(prev) === modulesSignature(merged) &&
+              prev.email === merged.email &&
+              prev.nombre === merged.nombre
+            ) {
+              return;
+            }
+            toast.info("Tus permisos se actualizaron.");
+            setUser(merged);
           },
           onDomainsChanged: () => {
             if (cancelled) return;
-            void refresh();
+            void refreshRef.current();
           },
         });
       } catch {
-        // El poll de /me sigue como respaldo
+        // la API sigue validando en cada request
       }
     })();
 
@@ -244,48 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unsub?.();
     };
-    // Solo re-suscribir si cambia el usuario logueado (no en cada refresh)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh/clearSession estables en la práctica; evitar churn
   }, [loading, user?.id]);
-
-  // Pendientes en tiempo real (Firestore) para admins
-  useEffect(() => {
-    if (loading || !user || user.role !== "admin") {
-      setPendingUsersCount(0);
-      prevPendingRef.current = 0;
-      return;
-    }
-
-    let unsub: (() => void) | undefined;
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        unsub = await subscribePendingUsersCount(
-          (count) => {
-            if (cancelled) return;
-            applyPendingCount(
-              count,
-              prevPendingRef,
-              setPendingUsersCount,
-              true,
-            );
-          },
-          () => {
-            // Fallback si el listener falla
-            if (!cancelled) void refreshPendingUsersCount();
-          },
-        );
-      } catch {
-        if (!cancelled) void refreshPendingUsersCount();
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
-  }, [loading, user?.id, user?.role, refreshPendingUsersCount]);
 
   const loginWithProvider = useCallback(async (provider: OAuthProviderId) => {
     const idToken = await signInWithOAuthProvider(provider);
@@ -310,7 +262,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       await signOutFirebase();
       setUser(null);
-      setPendingUsersCount(0);
     }
   }, []);
 
@@ -333,19 +284,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       canAccessModule,
-      pendingUsersCount,
-      refreshPendingUsersCount,
     }),
-    [
-      user,
-      loading,
-      loginWithProvider,
-      logout,
-      refresh,
-      canAccessModule,
-      pendingUsersCount,
-      refreshPendingUsersCount,
-    ],
+    [user, loading, loginWithProvider, logout, refresh, canAccessModule],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

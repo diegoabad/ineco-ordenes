@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "react-toastify";
 import { useAuth, type AppModuleId, type AuthUser, type UserRole } from "../auth/AuthContext";
+import { usePendingUsers } from "../auth/PendingUsersContext";
 import { apiFetch } from "../config/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconCheck, IconFile, IconPencil, IconPlus, IconTrash, IconX } from "./Icons";
@@ -51,11 +52,8 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 export function UsuariosPanel() {
-  const {
-    user: currentUser,
-    pendingUsersCount,
-    refreshPendingUsersCount,
-  } = useAuth();
+  const { user: currentUser } = useAuth();
+  const { pendingUsersCount, refreshPendingUsersCount } = usePendingUsers();
   const [tab, setTab] = useState<Tab>("pending");
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,9 +111,14 @@ export function UsuariosPanel() {
     }
   }, [tab, load, loadDomains]);
 
-  // Cuando llega un pendiente nuevo (badge en vivo), refrescar la lista al instante
+  // Solo refrescar la lista de pendientes (quiet), no recargar otras pantallas
+  const prevPendingForList = useRef<number | null>(null);
   useEffect(() => {
     if (tab !== "pending") return;
+    if (prevPendingForList.current === pendingUsersCount) return;
+    const isFirst = prevPendingForList.current === null;
+    prevPendingForList.current = pendingUsersCount;
+    if (isFirst) return;
     void load({ quiet: true });
   }, [pendingUsersCount, tab, load]);
 

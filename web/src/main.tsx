@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import { AuthProvider } from "./auth/AuthContext";
+import { PendingUsersProvider } from "./auth/PendingUsersContext";
 import App from "./App";
 import { AppTooltipHost } from "./components/AppTooltip";
 import FirmarPage from "./pages/FirmarPage";
@@ -19,7 +20,9 @@ createRoot(document.getElementById("root")!).render(
           path="/*"
           element={
             <AuthProvider>
-              <App />
+              <PendingUsersProvider>
+                <App />
+              </PendingUsersProvider>
             </AuthProvider>
           }
         />

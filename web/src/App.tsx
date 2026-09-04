@@ -107,7 +107,7 @@ function firstAllowedModule(
 }
 
 export default function App() {
-  const { user, loading: authLoading, logout, canAccessModule, pendingUsersCount } = useAuth();
+  const { user, loading: authLoading, logout, canAccessModule } = useAuth();
   const allowedModules = useMemo(() => {
     const all: AppModule[] = [
       "ordenes",
@@ -206,8 +206,10 @@ export default function App() {
 
   const pacientesActivos = pacientes.filter((p) => p.activo);
 
+  const canAccessOrdenes = canAccessModule("ordenes");
+
   const cargarDatos = useCallback(async () => {
-    if (!canAccessModule("ordenes")) {
+    if (!canAccessOrdenes) {
       setLoading(false);
       setLoadError("");
       return;
@@ -224,12 +226,14 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [canAccessModule]);
+  }, [canAccessOrdenes]);
 
+  // Solo al entrar / cambiar de usuario — no en cada refresh de sesión
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
     void cargarDatos();
-  }, [user, cargarDatos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- evitar recargar toda la app cuando solo cambia el objeto user
+  }, [user?.id]);
 
   const refrescarMedicos = useCallback(async () => {
     try {
@@ -759,7 +763,6 @@ export default function App() {
       onModuleChange={setModule}
       allowedModules={allowedModules}
       isAdmin={user?.role === "admin"}
-      usuariosBadge={pendingUsersCount}
       userName={user?.nombre}
       onLogout={() => void logout()}
     />

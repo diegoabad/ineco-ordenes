@@ -1,4 +1,5 @@
 import { LOGO_INECO_DATA_URL } from "../assets/logoIneco";
+import { usePendingUsers } from "../auth/PendingUsersContext";
 import type { AppModuleId } from "../auth/AuthContext";
 import {
   IconCalendar,
@@ -17,8 +18,6 @@ type Props = {
   allowedModules: AppModule[];
   /** Solo admin ve el ítem Usuarios en el menú. */
   isAdmin?: boolean;
-  /** Solicitudes pendientes de aprobación. */
-  usuariosBadge?: number;
   userName?: string;
   onLogout?: () => void;
 };
@@ -79,10 +78,10 @@ export function AppSidebar({
   onModuleChange,
   allowedModules,
   isAdmin = false,
-  usuariosBadge = 0,
   userName,
   onLogout,
 }: Props) {
+  const { pendingUsersCount } = usePendingUsers();
   const main = MAIN_ITEMS.filter((item) => allowedModules.includes(item.id));
   const config = [
     ...CONFIG_ITEMS.filter((item) => allowedModules.includes(item.id)),
@@ -111,7 +110,7 @@ export function AppSidebar({
               items={config}
               module={module}
               onModuleChange={onModuleChange}
-              badges={{ usuarios: usuariosBadge }}
+              badges={isAdmin ? { usuarios: pendingUsersCount } : undefined}
             />
           </nav>
         ) : null}
