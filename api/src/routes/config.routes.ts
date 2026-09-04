@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth.middleware.js";
+import { requireAuth, requireModule } from "../middleware/auth.middleware.js";
 import {
   getDb,
   getEmailConfig,
@@ -18,8 +18,6 @@ import {
 import { sendOrdenEmail } from "../services/email.service.js";
 
 const router = Router();
-
-router.use(requireAuth);
 
 function parseEmailConfig(body: unknown): EmailConfig {
   const raw = body as Record<string, unknown>;
@@ -41,7 +39,7 @@ function parsePresupuestoEmailConfig(body: unknown): PresupuestoEmailConfig {
   };
 }
 
-router.get("/db", async (_req, res) => {
+router.get("/db", requireAuth, requireModule("ordenes"), async (_req, res) => {
   try {
     const data = await getDb();
     res.json({ ok: true, data });
@@ -53,7 +51,7 @@ router.get("/db", async (_req, res) => {
   }
 });
 
-router.put("/config/medico-seleccionado", async (req, res) => {
+router.put("/config/medico-seleccionado", requireAuth, requireModule("ordenes"), async (req, res) => {
   try {
     const medicoSeleccionadoId =
       typeof req.body?.medicoSeleccionadoId === "string"
@@ -77,7 +75,7 @@ router.put("/config/medico-seleccionado", async (req, res) => {
   }
 });
 
-router.get("/config/email", async (_req, res) => {
+router.get("/config/email", requireAuth, requireModule("ordenes"), async (_req, res) => {
   try {
     const data = await getEmailConfig();
     res.json({ ok: true, data, variables: EMAIL_TEMPLATE_VARS });
@@ -89,7 +87,7 @@ router.get("/config/email", async (_req, res) => {
   }
 });
 
-router.put("/config/email", async (req, res) => {
+router.put("/config/email", requireAuth, requireModule("ordenes"), async (req, res) => {
   try {
     const data = await saveEmailConfig(parseEmailConfig(req.body));
     res.json({ ok: true, data });
@@ -101,7 +99,7 @@ router.put("/config/email", async (req, res) => {
   }
 });
 
-router.get("/config/presupuesto-email", async (_req, res) => {
+router.get("/config/presupuesto-email", requireAuth, requireModule("presupuestos"), async (_req, res) => {
   try {
     const data = await getPresupuestoEmailConfig();
     res.json({ ok: true, data, variables: PRESUPUESTO_EMAIL_TEMPLATE_VARS });
@@ -113,7 +111,7 @@ router.get("/config/presupuesto-email", async (_req, res) => {
   }
 });
 
-router.put("/config/presupuesto-email", async (req, res) => {
+router.put("/config/presupuesto-email", requireAuth, requireModule("presupuestos"), async (req, res) => {
   try {
     const data = await savePresupuestoEmailConfig(parsePresupuestoEmailConfig(req.body));
     res.json({ ok: true, data });
@@ -125,7 +123,7 @@ router.put("/config/presupuesto-email", async (req, res) => {
   }
 });
 
-router.get("/email-envios", async (req, res) => {
+router.get("/email-envios", requireAuth, requireModule("ordenes"), async (req, res) => {
   try {
     const page = Number(req.query.page);
     const pageSize = Number(req.query.pageSize);
@@ -146,7 +144,7 @@ router.get("/email-envios", async (req, res) => {
   }
 });
 
-router.delete("/email-envios/:id", async (req, res) => {
+router.delete("/email-envios/:id", requireAuth, requireModule("ordenes"), async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
     await deleteEmailEnvio(id);
@@ -158,7 +156,7 @@ router.delete("/email-envios/:id", async (req, res) => {
   }
 });
 
-router.post("/pacientes/:id/enviar-orden", async (req, res) => {
+router.post("/pacientes/:id/enviar-orden", requireAuth, requireModule("ordenes"), async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
     const pdfBase64 = String(req.body?.pdfBase64 ?? "").trim();

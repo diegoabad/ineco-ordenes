@@ -20,6 +20,7 @@ router.get("/config", (_req, res) => {
     data: {
       firebase: getPublicFirebaseConfig(),
       authDisabled: env.auth.disabled,
+      microsoftTenantId: env.auth.microsoftTenantId || null,
     },
   });
 });
@@ -74,8 +75,9 @@ router.post("/oauth", async (req, res) => {
     } else if (/permission|insufficient|firestore/i.test(raw)) {
       message =
         "No se pudo guardar tu solicitud de acceso. Pedile a sistemas que revise la configuración.";
-    } else if (/token|jwt|claim|expir/i.test(raw)) {
-      message = "La sesión de acceso expiró o no es válida. Intentá ingresar de nuevo.";
+    } else if (/FIREBASE_TOKEN_INVALID|token|jwt|claim|expir/i.test(raw)) {
+      message =
+        "No se pudo validar el acceso con Google/Microsoft. Revisá que en Firebase estén activos los providers y que localhost esté en Authorized domains.";
     }
     res.status(401).json({ ok: false, message });
   }

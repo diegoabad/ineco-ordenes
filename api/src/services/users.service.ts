@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -23,8 +24,15 @@ const USUARIOS = "ordenes_usuarios";
 const CONFIG = "ordenes_config";
 const AUTH_CONFIG_DOC = "auth";
 
+/** Dominios de email permitidos para login (sin @). */
+export const DEFAULT_ALLOWED_DOMAINS = [
+  "ineco.ar",
+  "ineco.com.ar",
+  "cites-ineco.com.ar",
+] as const;
+
 export type AuthAccessConfig = {
-  /** Dominios permitidos sin @. Vacío = permitir todos. */
+  /** Dominios permitidos sin @. Si no hay config, se usan los defaults Ineco. */
   allowedDomains: string[];
 };
 
@@ -49,12 +57,30 @@ export function normalizeAllowedDomains(raw: unknown): string[] {
 }
 
 export async function getAuthAccessConfig(): Promise<AuthAccessConfig> {
-  const snap = await getDoc(doc(firestore, CONFIG, AUTH_CONFIG_DOC));
+  const ref = doc(firestore, CONFIG, AUTH_CONFIG_DOC);
+  const snap = await getDoc(ref);
   if (!snap.exists()) {
-    return { allowedDomains: [] };
+    const config: AuthAccessConfig = {
+      allowedDomains: normalizeAllowedDomains([...DEFAULT_ALLOWED_DOMAINS]),
+    };
+    await setDoc(ref, config, { merge: true });
+    return config;
   }
   const data = snap.data() as Record<string, unknown>;
-  return { allowedDomains: normalizeAllowedDomains(data.allowedDomains) };
+  const allowedDomains = normalizeAllowedDomains(data.allowedDomains);
+  // Primera vez / lista vacía: sembrar dominios Ineco
+  if (allowedDomains.length === 0 && !("allowedDomains" in data)) {
+    const config: AuthAccessConfig = {
+      allowedDomains: normalizeAllowedDomains([...DEFAULT_ALLOWED_DOMAINS]),
+    };
+    await setDoc(ref, config, { merge: true });
+    return config;
+  }
+  if (allowedDomains.length === 0) {
+    // Doc existe con lista vacía explícita: permitir todos (admin lo vació)
+    return { allowedDomains: [] };
+  }
+  return { allowedDomains };
 }
 
 export async function saveAuthAccessConfig(
@@ -66,6 +92,13 @@ export async function saveAuthAccessConfig(
   await setDoc(doc(firestore, CONFIG, AUTH_CONFIG_DOC), config, { merge: true });
   return config;
 }
+
+const SELECTABLE_MODULES: AppModuleId[] = [
+  "ordenes",
+  "presupuestos",
+  "pami",
+  "busca-turno",
+];
 
 function isModuleId(value: unknown): value is AppModuleId {
   return (
@@ -79,17 +112,26 @@ function isModuleId(value: unknown): value is AppModuleId {
 }
 
 function normalizeModules(raw: unknown, role: UserRole): AppModuleId[] {
+  if (role === "admin") {
+    return [...SELECTABLE_MODULES, "pedidos-sistema", "usuarios"];
+  }
   const list = Array.isArray(raw)
     ? raw.filter(isModuleId)
     : ([] as AppModuleId[]);
-  const unique = [...new Set(list)];
-  if (role === "admin" && !unique.includes("usuarios")) {
-    unique.push("usuarios");
-  }
-  if (role !== "admin") {
-    return unique.filter((m) => m !== "usuarios");
-  }
+  const unique = [
+    ...new Set(list.filter((m) => SELECTABLE_MODULES.includes(m))),
+  ];
+  unique.push("pedidos-sistema");
   return unique;
+}
+
+function assertHasSelectableModule(modules: AppModuleId[], role: UserRole): void {
+  if (role === "admin") return;
+  if (!modules.some((m) => SELECTABLE_MODULES.includes(m))) {
+    throw new Error(
+      "Debés asignar al menos una pantalla (Órdenes, Presupuestos, PAMI o Busca turno)",
+    );
+  }
 }
 
 function normalizeUser(id: string, raw: Record<string, unknown>): AppUser {
@@ -231,9 +273,7 @@ export async function approveUser(
 
   const role: UserRole = input.role === "admin" ? "admin" : "user";
   const modules = normalizeModules(input.modules, role);
-  if (modules.length === 0) {
-    throw new Error("Debés asignar al menos una pantalla");
-  }
+  assertHasSelectableModule(modules, role);
 
   const now = nowIso();
   const next: AppUser = {
@@ -267,6 +307,12 @@ export async function rejectUser(id: string): Promise<AppUser> {
   return next;
 }
 
+export async function deleteUser(id: string): Promise<void> {
+  const user = await getUserById(id);
+  if (!user) throw new Error("Usuario no encontrado");
+  await deleteDoc(doc(firestore, USUARIOS, id));
+}
+
 export async function updateApprovedUser(
   id: string,
   input: ApproveUserInput,
@@ -279,9 +325,7 @@ export async function updateApprovedUser(
 
   const role: UserRole = input.role === "admin" ? "admin" : "user";
   const modules = normalizeModules(input.modules, role);
-  if (modules.length === 0) {
-    throw new Error("Debés asignar al menos una pantalla");
-  }
+  assertHasSelectableModule(modules, role);
 
   const next: AppUser = {
     ...user,

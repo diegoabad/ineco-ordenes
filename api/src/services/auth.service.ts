@@ -97,17 +97,29 @@ type FirebaseIdClaims = {
   name?: string;
   picture?: string;
   sub?: string;
+  firebase?: { sign_in_provider?: string };
 };
 
 export async function verifyFirebaseIdToken(
   idToken: string,
 ): Promise<FirebaseIdClaims> {
   const projectId = env.firebase.projectId;
-  const { payload } = await jwtVerify(idToken, firebaseJwks, {
-    issuer: `https://securetoken.google.com/${projectId}`,
-    audience: projectId,
-  });
-  return payload as FirebaseIdClaims;
+  try {
+    const { payload } = await jwtVerify(idToken, firebaseJwks, {
+      issuer: `https://securetoken.google.com/${projectId}`,
+      audience: projectId,
+      algorithms: ["RS256"],
+      clockTolerance: 60,
+    });
+    return payload as FirebaseIdClaims;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("Firebase ID token verify failed:", {
+      projectId,
+      detail,
+    });
+    throw new Error(`FIREBASE_TOKEN_INVALID:${detail}`);
+  }
 }
 
 function isBootstrapAdminEmail(email: string): boolean {
@@ -126,7 +138,14 @@ export async function loginWithFirebaseIdToken(
   if (!email || !email.includes("@")) {
     throw new Error("La cuenta no tiene un email válido");
   }
-  if (claims.email_verified === false) {
+  const provider = String(claims.firebase?.sign_in_provider ?? "");
+  // Microsoft/Entra suele mandar email_verified=false aunque la cuenta corporativa sea válida
+  const microsoftSignIn = provider.includes("microsoft");
+  if (
+    claims.email_verified === false &&
+    !microsoftSignIn &&
+    !isBootstrapAdminEmail(email)
+  ) {
     throw new Error("Verificá tu email antes de ingresar");
   }
   if (!(await isEmailDomainAllowed(email)) && !isBootstrapAdminEmail(email)) {
@@ -169,9 +188,29 @@ export async function loginWithFirebaseIdToken(
 
 export async function loadSessionUser(
   userId: string,
+  sessionEmail?: string,
 ): Promise<AppUserPublic | null> {
   const user = await getUserById(userId);
+  // Eliminado / pendiente / rechazado → sin acceso
   if (!user || user.status !== "approved") return null;
+
+  const email = String(user.email ?? "")
+    .trim()
+    .toLowerCase();
+  if (!email || !email.includes("@")) return null;
+
+  // El email del JWT debe coincidir con el usuario en Firestore
+  if (sessionEmail) {
+    const tokenEmail = sessionEmail.trim().toLowerCase();
+    if (tokenEmail && tokenEmail !== email) return null;
+  }
+
+  // Dominio permitido (revalidado en cada request)
+  if (!isBootstrapAdminEmail(email) && !(await isEmailDomainAllowed(email))) {
+    return null;
+  }
+
+  // role + modules vienen frescos de Firestore (no del JWT)
   return toPublicUser(user);
 }
 

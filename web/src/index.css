@@ -148,6 +148,7 @@ label {
 .btn:disabled {
   opacity: 0.55;
   cursor: default;
+  pointer-events: none;
 }
 
 .btn-primary {
@@ -157,6 +158,12 @@ label {
 
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-hover);
+}
+
+.btn-primary:disabled,
+.btn-primary:disabled:hover {
+  background: var(--primary);
+  color: #fff;
 }
 
 .btn-secondary {
@@ -305,6 +312,43 @@ label {
   text-align: left;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+}
+
+.app-sidebar__btn-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-nav-badge {
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.app-sidebar__btn.is-active .app-nav-badge {
+  background: #fff;
+  color: var(--primary);
+}
+
+.app-nav-badge--tab {
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-tabs__btn.is-active .app-nav-badge--tab {
+  background: #fff;
+  color: var(--primary);
 }
 
 .app-sidebar__btn:hover:not(.is-active) {
@@ -486,6 +530,8 @@ label {
   border-radius: var(--radius);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
 }
 
 .app-tabs__btn:hover:not(.is-active) {
@@ -1603,9 +1649,9 @@ tbody tr.is-inactive td {
 }
 
 .col-actions--2 {
-  width: 5.1rem;
-  min-width: 5.1rem;
-  max-width: 5.1rem;
+  width: 6.5rem;
+  min-width: 6.5rem;
+  max-width: 6.5rem;
 }
 
 .col-actions--3 {
@@ -2128,7 +2174,7 @@ tbody tr.is-inactive td {
 
 .fl-col-actions {
   width: 11.5rem;
-  min-width: 11.5rem;
+  min-width: 6.5rem; /* al menos el texto "Acciones" */
   max-width: 11.5rem;
   padding-left: 0.5rem;
   padding-right: 0.75rem;
@@ -2139,9 +2185,9 @@ tbody tr.is-inactive td {
 }
 
 .fl-col-actions--2 {
-  width: 5.1rem;
-  min-width: 5.1rem;
-  max-width: 5.1rem;
+  width: 6.5rem;
+  min-width: 6.5rem;
+  max-width: 6.5rem;
 }
 
 .fl-col-actions--3 {
@@ -3168,9 +3214,9 @@ tbody tr.is-inactive td {
 
   .col-actions--2,
   .fl-col-actions--2 {
-    width: 5.1rem;
-    min-width: 5.1rem;
-    max-width: 5.1rem;
+    width: 6.5rem;
+    min-width: 6.5rem;
+    max-width: 6.5rem;
   }
 
   .col-actions--3,
@@ -3210,7 +3256,10 @@ tbody tr.is-inactive td {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  background: var(--bg);
+  background:
+    radial-gradient(ellipse 80% 55% at 18% 8%, color-mix(in srgb, var(--primary) 14%, transparent), transparent),
+    radial-gradient(ellipse 70% 50% at 92% 92%, color-mix(in srgb, var(--primary) 9%, transparent), transparent),
+    var(--bg);
 }
 
 .firmar-page--sign {
@@ -3239,6 +3288,81 @@ tbody tr.is-inactive td {
   gap: 0;
 }
 
+.firmar-card--status {
+  width: min(100%, 26rem);
+  text-align: center;
+  padding: 2rem 1.75rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.firmar-card__logo {
+  width: min(100%, 10.5rem);
+  height: auto;
+  display: block;
+  margin: 0 auto 1.15rem;
+}
+
+.firmar-card__logo--compact {
+  width: min(100%, 8.5rem);
+  margin: 0 auto 0.85rem;
+}
+
+.firmar-card__status-msg {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.firmar-card__title {
+  margin: 0 0 0.55rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.firmar-card__text {
+  margin: 0 0 1.35rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-width: 22rem;
+}
+
+.firmar-card__text strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.firmar-card__cta {
+  width: 100%;
+  text-decoration: none;
+}
+
+.firmar-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: 0 auto 0.85rem;
+  border-radius: 50%;
+}
+
+.firmar-status-icon--error {
+  background: color-mix(in srgb, var(--danger) 12%, white);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, white);
+}
+
+.firmar-status-icon--success {
+  background: color-mix(in srgb, var(--success) 12%, white);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 28%, white);
+}
+
 .firmar-sign-body {
   display: flex;
   flex-direction: column;
@@ -3253,49 +3377,6 @@ tbody tr.is-inactive td {
   flex-shrink: 0;
 }
 
-.firmar-card--success {
-  text-align: center;
-  padding: 2.5rem 2rem;
-  width: min(100%, 30rem);
-  max-width: 30rem;
-}
-
-.firmar-card--success h1 {
-  margin: 0 0 1rem;
-  font-size: 1.625rem;
-}
-
-.firmar-card--success p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 1.0625rem;
-  line-height: 1.6;
-}
-
-.firmar-card--success p strong {
-  color: var(--text);
-  font-weight: 700;
-}
-
-.firmar-success-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 5.5rem;
-  height: 5.5rem;
-  margin: 0 auto 1.5rem;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--success) 12%, white);
-  color: var(--success);
-  border: 2px solid color-mix(in srgb, var(--success) 28%, white);
-}
-
-.firmar-success-icon svg {
-  width: 3rem;
-  height: 3rem;
-  stroke-width: 2.5;
-}
-
 .firmar-card__header {
   display: flex;
   flex-direction: column;
@@ -3304,6 +3385,7 @@ tbody tr.is-inactive td {
   flex-shrink: 0;
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
+  text-align: center;
 }
 
 .firmar-card__eyebrow {
@@ -4540,9 +4622,9 @@ tbody tr.is-inactive td {
 
 .pami-table--historial .fl-col-actions,
 .pami-table--historial .fl-col-actions--2 {
-  width: 5.1rem;
-  min-width: 5.1rem;
-  max-width: 5.1rem;
+  width: 6.5rem;
+  min-width: 6.5rem;
+  max-width: 6.5rem;
   padding-left: 0.35rem;
   padding-right: 0.5rem;
 }
@@ -4977,6 +5059,23 @@ tbody tr.is-inactive td {
   width: auto;
 }
 
+.usuarios-modules-hint {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+.usuarios-modules-admin-note {
+  margin: 0.25rem 0 0;
+  display: block;
+}
+
+.usuarios-draft-email {
+  font-size: 0.85em;
+  font-weight: 400;
+  color: var(--text-muted, #6b7280);
+}
+
 .usuarios-dominios__form {
   display: flex;
   flex-wrap: wrap;
@@ -5159,9 +5258,9 @@ tbody tr.is-inactive td {
 }
 
 .pedidos-col-actions {
-  width: 6.75rem;
-  min-width: 6.75rem;
-  max-width: 6.75rem;
+  width: 6.5rem;
+  min-width: 6.5rem;
+  max-width: 6.5rem;
 }
 
 .pedidos-color-select {

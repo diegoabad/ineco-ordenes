@@ -107,7 +107,7 @@ function firstAllowedModule(
 }
 
 export default function App() {
-  const { user, loading: authLoading, logout, canAccessModule } = useAuth();
+  const { user, loading: authLoading, logout, canAccessModule, pendingUsersCount } = useAuth();
   const allowedModules = useMemo(() => {
     const all: AppModule[] = [
       "ordenes",
@@ -758,6 +758,8 @@ export default function App() {
       module={module}
       onModuleChange={setModule}
       allowedModules={allowedModules}
+      isAdmin={user?.role === "admin"}
+      usuariosBadge={pendingUsersCount}
       userName={user?.nombre}
       onLogout={() => void logout()}
     />
@@ -822,7 +824,7 @@ export default function App() {
         ) : module === "pedidos-sistema" ? (
           <PedidosSistemaPanel />
         ) : module === "usuarios" ? (
-          <UsuariosPanel />
+          user?.role === "admin" ? <UsuariosPanel /> : null
         ) : (
           <div className="app-shell">
       <header className="app-header">

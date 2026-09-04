@@ -72,7 +72,7 @@ export async function optionalAuth(
       return;
     }
     const payload = verifySessionToken(token);
-    const user = await loadSessionUser(payload.sub);
+    const user = await loadSessionUser(payload.sub, payload.email);
     if (user) {
       req.auth = {
         sub: user.id,
@@ -106,11 +106,16 @@ export async function requireAuth(
       return;
     }
     const payload = verifySessionToken(token);
-    const user = await loadSessionUser(payload.sub);
+    const user = await loadSessionUser(payload.sub, payload.email);
     if (!user) {
-      res.status(401).json({ ok: false, message: "Sesión inválida o usuario sin acceso" });
+      res.status(401).json({
+        ok: false,
+        message: "Sesión inválida o usuario sin acceso",
+        code: "SESSION_REVOKED",
+      });
       return;
     }
+    // Siempre usar role/modules/email actuales de Firestore (nunca confiar en el JWT)
     req.auth = {
       sub: user.id,
       email: user.email,
@@ -155,6 +160,11 @@ export function requireModule(...modules: AppModuleId[]) {
       return;
     }
     if (req.user.role === "admin") {
+      next();
+      return;
+    }
+    // Pedidos sistema es acceso fijo para todo usuario autenticado
+    if (modules.includes("pedidos-sistema")) {
       next();
       return;
     }

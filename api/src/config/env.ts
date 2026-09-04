@@ -43,6 +43,11 @@ export const env = {
     bootstrapAdminEmail: process.env.AUTH_BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase() || "",
     /** Solo desarrollo: saltea login hasta configurar Google/Microsoft. */
     disabled: process.env.AUTH_DISABLED === "1",
+    /**
+     * Tenant ID de Entra ID (Azure AD) para login Microsoft single-tenant.
+     * Si está vacío, Firebase usa /common (solo sirve si la app es multi-tenant).
+     */
+    microsoftTenantId: process.env.AUTH_MICROSOFT_TENANT_ID?.trim() || "",
   },
   medexis: {
     baseUrl: (process.env.MEDEXIS_BASE_URL || "").trim().replace(/\/?$/, "") || "",

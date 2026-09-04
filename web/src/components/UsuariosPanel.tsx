@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "react-toastify";
-import type { AppModuleId, AuthUser, UserRole } from "../auth/AuthContext";
+import { useAuth, type AppModuleId, type AuthUser, type UserRole } from "../auth/AuthContext";
 import { apiFetch } from "../config/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconCheck, IconFile, IconPencil, IconPlus, IconTrash, IconX } from "./Icons";
@@ -8,14 +8,23 @@ import { ScrollableAppTabs } from "./ScrollableAppTabs";
 
 type Tab = "approved" | "pending" | "dominios";
 
-const MODULE_OPTIONS: { id: AppModuleId; label: string }[] = [
+/** Pantallas que el admin puede marcar/desmarcar. */
+const SELECTABLE_MODULE_OPTIONS: { id: AppModuleId; label: string }[] = [
   { id: "ordenes", label: "Órdenes" },
   { id: "presupuestos", label: "Presupuestos" },
   { id: "pami", label: "PAMI" },
   { id: "busca-turno", label: "Busca turno" },
-  { id: "pedidos-sistema", label: "Pedidos sistema" },
-  { id: "usuarios", label: "Usuarios" },
 ];
+
+const SELECTABLE_MODULE_IDS = SELECTABLE_MODULE_OPTIONS.map((m) => m.id);
+
+function withFixedModules(modules: AppModuleId[], role: UserRole): AppModuleId[] {
+  if (role === "admin") {
+    return [...SELECTABLE_MODULE_IDS, "pedidos-sistema", "usuarios"];
+  }
+  const selectable = modules.filter((m) => SELECTABLE_MODULE_IDS.includes(m));
+  return [...new Set([...selectable, "pedidos-sistema"])];
+}
 
 type AccessDraft = {
   userId: string;
@@ -40,33 +49,44 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 export function UsuariosPanel() {
+  const {
+    user: currentUser,
+    pendingUsersCount,
+    refreshPendingUsersCount,
+  } = useAuth();
   const [tab, setTab] = useState<Tab>("pending");
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<AccessDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<AuthUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AuthUser | null>(null);
 
   const [domains, setDomains] = useState<string[]>([]);
   const [domainsLoading, setDomainsLoading] = useState(false);
   const [domainInput, setDomainInput] = useState("");
   const [savingDomains, setSavingDomains] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (tab === "dominios") return;
-    setLoading(true);
+    if (!opts?.quiet) setLoading(true);
     try {
       const res = await apiFetch<{ ok: boolean; data: AuthUser[] }>(
         `/api/usuarios?status=${tab}`,
       );
       setUsers(res.data);
+      if (tab === "pending") {
+        void refreshPendingUsersCount();
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudieron cargar usuarios");
-      setUsers([]);
+      if (!opts?.quiet) {
+        toast.error(err instanceof Error ? err.message : "No se pudieron cargar usuarios");
+      }
+      if (!opts?.quiet) setUsers([]);
     } finally {
-      setLoading(false);
+      if (!opts?.quiet) setLoading(false);
     }
-  }, [tab]);
+  }, [tab, refreshPendingUsersCount]);
 
   const loadDomains = useCallback(async () => {
     setDomainsLoading(true);
@@ -91,13 +111,19 @@ export function UsuariosPanel() {
     }
   }, [tab, load, loadDomains]);
 
+  // Cuando llega un pendiente nuevo (badge en vivo), refrescar la lista al instante
+  useEffect(() => {
+    if (tab !== "pending") return;
+    void load({ quiet: true });
+  }, [pendingUsersCount, tab, load]);
+
   function openApprove(user: AuthUser) {
     setDraft({
       userId: user.id,
       nombre: user.nombre,
       email: user.email,
       role: "user",
-      modules: ["ordenes"],
+      modules: withFixedModules([], "user"),
       mode: "approve",
     });
   }
@@ -108,46 +134,47 @@ export function UsuariosPanel() {
       nombre: user.nombre,
       email: user.email,
       role: user.role,
-      modules: [...user.modules],
+      modules: withFixedModules(user.modules, user.role),
       mode: "edit",
     });
   }
 
   function toggleModule(id: AppModuleId) {
+    if (!SELECTABLE_MODULE_IDS.includes(id)) return;
     setDraft((prev) => {
       if (!prev) return prev;
       const has = prev.modules.includes(id);
-      let modules = has
+      const selectable = has
         ? prev.modules.filter((m) => m !== id)
         : [...prev.modules, id];
-      if (prev.role === "admin" && !modules.includes("usuarios")) {
-        modules = [...modules, "usuarios"];
-      }
-      if (prev.role !== "admin") {
-        modules = modules.filter((m) => m !== "usuarios");
-      }
-      return { ...prev, modules };
+      return {
+        ...prev,
+        modules: withFixedModules(selectable, prev.role),
+      };
     });
   }
 
   function setRole(role: UserRole) {
     setDraft((prev) => {
       if (!prev) return prev;
-      let modules = [...prev.modules];
-      if (role === "admin" && !modules.includes("usuarios")) {
-        modules.push("usuarios");
-      }
-      if (role !== "admin") {
-        modules = modules.filter((m) => m !== "usuarios");
-      }
-      return { ...prev, role, modules };
+      // Admin = todo; Usuario = sin pantallas hasta que elijan
+      return {
+        ...prev,
+        role,
+        modules: withFixedModules([], role),
+      };
     });
   }
 
   async function saveDraft() {
     if (!draft) return;
-    if (draft.modules.length === 0) {
-      toast.warning("Asigná al menos una pantalla");
+    if (
+      draft.role !== "admin" &&
+      !draft.modules.some((m) => SELECTABLE_MODULE_IDS.includes(m))
+    ) {
+      toast.warning(
+        "Asigná al menos una pantalla (Órdenes, Presupuestos, PAMI o Busca turno)",
+      );
       return;
     }
     setSaving(true);
@@ -172,6 +199,7 @@ export function UsuariosPanel() {
         toast.success("Acceso actualizado");
       }
       setDraft(null);
+      await refreshPendingUsersCount();
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo guardar");
@@ -195,9 +223,33 @@ export function UsuariosPanel() {
         toast.warning(res.data.emailError || "No se pudo enviar el email de aviso");
       }
       setRejectTarget(null);
+      await refreshPendingUsersCount();
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo rechazar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    if (deleteTarget.id === currentUser?.id) {
+      toast.warning("No podés eliminar tu propio usuario");
+      setDeleteTarget(null);
+      return;
+    }
+    setSaving(true);
+    try {
+      await apiFetch(`/api/usuarios/${encodeURIComponent(deleteTarget.id)}`, {
+        method: "DELETE",
+      });
+      toast.success("Usuario eliminado");
+      setDeleteTarget(null);
+      await refreshPendingUsersCount();
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo eliminar");
     } finally {
       setSaving(false);
     }
@@ -256,6 +308,11 @@ export function UsuariosPanel() {
           onClick={() => setTab("pending")}
         >
           Pendientes
+          {pendingUsersCount > 0 ? (
+            <span className="app-nav-badge app-nav-badge--tab" aria-label={`${pendingUsersCount} pendientes`}>
+              {pendingUsersCount > 99 ? "99+" : pendingUsersCount}
+            </span>
+          ) : null}
         </button>
         <button
           type="button"
@@ -302,7 +359,7 @@ export function UsuariosPanel() {
               <thead>
                 <tr>
                   <th>Dominio</th>
-                  <th>Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
                 </tr>
               </thead>
               {!domainsLoading && domains.length > 0 ? (
@@ -310,8 +367,8 @@ export function UsuariosPanel() {
                   {domains.map((d) => (
                     <tr key={d}>
                       <td>@{d}</td>
-                      <td>
-                        <div className="fl-table-actions">
+                      <td className="fl-col-actions fl-col-actions--2">
+                        <div className="fl-table-actions fl-table-actions--2">
                           <button
                             type="button"
                             className="fl-icon-btn fl-icon-btn--danger"
@@ -339,7 +396,8 @@ export function UsuariosPanel() {
                 </div>
                 <p className="fl-table-empty__title">Sin restricciones</p>
                 <p className="fl-table-empty__hint">
-                  Cualquier dominio puede intentar ingresar (queda en pendientes).
+                  Sin dominios en la lista, cualquier email puede intentar ingresar (queda en
+                  pendientes). Por defecto: ineco.ar, ineco.com.ar y cites-ineco.com.ar.
                 </p>
               </div>
             ) : null}
@@ -354,13 +412,14 @@ export function UsuariosPanel() {
                   <th>Nombre</th>
                   <th>Email</th>
                   <th>{tab === "pending" ? "Solicitado" : "Rol"}</th>
-                  {tab === "approved" && <th>Pantallas</th>}
-                  <th>Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
                 </tr>
               </thead>
               {!loading && users.length > 0 ? (
                 <tbody>
-                  {users.map((u) => (
+                  {users.map((u) => {
+                    const isSelf = u.id === currentUser?.id;
+                    return (
                     <tr key={u.id}>
                       <td>{u.nombre}</td>
                       <td>{u.email}</td>
@@ -375,19 +434,8 @@ export function UsuariosPanel() {
                           </span>
                         )}
                       </td>
-                      {tab === "approved" && (
-                        <td>
-                          <div className="usuarios-modules">
-                            {u.modules.map((m) => (
-                              <span key={m} className="chip chip--muted">
-                                {MODULE_OPTIONS.find((o) => o.id === m)?.label ?? m}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                      )}
-                      <td>
-                        <div className="fl-table-actions">
+                      <td className="fl-col-actions fl-col-actions--2">
+                        <div className="fl-table-actions fl-table-actions--2">
                           {tab === "pending" ? (
                             <>
                               <button
@@ -408,19 +456,35 @@ export function UsuariosPanel() {
                               </button>
                             </>
                           ) : (
-                            <button
-                              type="button"
-                              className="fl-icon-btn fl-icon-btn--edit"
-                              title="Editar acceso"
-                              onClick={() => openEdit(u)}
-                            >
-                              <IconPencil size={16} />
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--edit"
+                                title="Editar acceso"
+                                onClick={() => openEdit(u)}
+                              >
+                                <IconPencil size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--danger"
+                                title={
+                                  isSelf
+                                    ? "No podés eliminarte a vos mismo"
+                                    : "Eliminar usuario"
+                                }
+                                disabled={isSelf}
+                                onClick={() => setDeleteTarget(u)}
+                              >
+                                <IconTrash size={16} />
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               ) : null}
             </table>
@@ -470,9 +534,8 @@ export function UsuariosPanel() {
             </div>
             <div className="fl-modal__body">
               <p className="confirm-dialog__message">
-                <strong>{draft.nombre}</strong>
-                <br />
-                {draft.email}
+                <strong>{draft.nombre}</strong>{" "}
+                <span className="usuarios-draft-email">({draft.email})</span>
               </p>
               <label className="form-group">
                 <span>Rol</span>
@@ -484,22 +547,25 @@ export function UsuariosPanel() {
                   <option value="admin">Administrador</option>
                 </select>
               </label>
-              <fieldset className="usuarios-modules-fieldset">
-                <legend>Pantallas</legend>
-                {MODULE_OPTIONS.filter(
-                  (m) => draft.role === "admin" || m.id !== "usuarios",
-                ).map((m) => (
-                  <label key={m.id} className="usuarios-modules-check">
-                    <input
-                      type="checkbox"
-                      checked={draft.modules.includes(m.id)}
-                      onChange={() => toggleModule(m.id)}
-                      disabled={draft.role === "admin" && m.id === "usuarios"}
-                    />
-                    {m.label}
-                  </label>
-                ))}
-              </fieldset>
+              {draft.role === "admin" ? (
+                <p className="usuarios-modules-hint usuarios-modules-admin-note">
+                  Como administrador tiene acceso a todas las pantallas.
+                </p>
+              ) : (
+                <fieldset className="usuarios-modules-fieldset">
+                  <legend>Pantallas</legend>
+                  {SELECTABLE_MODULE_OPTIONS.map((m) => (
+                    <label key={m.id} className="usuarios-modules-check">
+                      <input
+                        type="checkbox"
+                        checked={draft.modules.includes(m.id)}
+                        onChange={() => toggleModule(m.id)}
+                      />
+                      {m.label}
+                    </label>
+                  ))}
+                </fieldset>
+              )}
             </div>
             <div className="fl-modal__footer">
               <button
@@ -514,7 +580,11 @@ export function UsuariosPanel() {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => void saveDraft()}
-                disabled={saving}
+                disabled={
+                  saving ||
+                  (draft.role !== "admin" &&
+                    !draft.modules.some((m) => SELECTABLE_MODULE_IDS.includes(m)))
+                }
               >
                 {saving
                   ? "Guardando…"
@@ -538,6 +608,19 @@ export function UsuariosPanel() {
         confirmLabel={saving ? "Rechazando…" : "Rechazar"}
         onConfirm={() => void confirmReject()}
         onCancel={() => setRejectTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Eliminar usuario"
+        message={
+          deleteTarget
+            ? `¿Eliminar a ${deleteTarget.nombre} (${deleteTarget.email})? Va a perder el acceso a la app.`
+            : ""
+        }
+        confirmLabel={saving ? "Eliminando…" : "Eliminar"}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
       />
     </div>
   );

@@ -41,6 +41,64 @@ function messageForEmptyResponse(status: number): string {
   return "Respuesta vacía del servidor";
 }
 
+type SessionLostHandler = () => void;
+const sessionLostHandlers = new Set<SessionLostHandler>();
+
+type SessionRefreshHandler = () => void;
+const sessionRefreshHandlers = new Set<SessionRefreshHandler>();
+
+/** Se dispara cuando un request autenticado recibe 401 (sesión inválida / usuario eliminado). */
+export function onSessionLost(handler: SessionLostHandler): () => void {
+  sessionLostHandlers.add(handler);
+  return () => {
+    sessionLostHandlers.delete(handler);
+  };
+}
+
+/** Se dispara en 403 para revalidar permisos/rol al toque. */
+export function onSessionRefreshNeeded(handler: SessionRefreshHandler): () => void {
+  sessionRefreshHandlers.add(handler);
+  return () => {
+    sessionRefreshHandlers.delete(handler);
+  };
+}
+
+function notifySessionLost(path: string): void {
+  if (
+    path.startsWith("/api/auth/me") ||
+    path.startsWith("/api/auth/oauth") ||
+    path.startsWith("/api/auth/logout") ||
+    path.startsWith("/api/auth/config")
+  ) {
+    return;
+  }
+  for (const handler of sessionLostHandlers) {
+    try {
+      handler();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function notifySessionRefreshNeeded(path: string): void {
+  if (
+    path.startsWith("/api/auth/me") ||
+    path.startsWith("/api/auth/oauth") ||
+    path.startsWith("/api/auth/logout") ||
+    path.startsWith("/api/auth/config")
+  ) {
+    return;
+  }
+  for (const handler of sessionRefreshHandlers) {
+    try {
+      handler();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -83,6 +141,11 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      notifySessionLost(path);
+    } else if (response.status === 403) {
+      notifySessionRefreshNeeded(path);
+    }
     const err = new Error(
       data?.message || messageForEmptyResponse(response.status),
     ) as Error & {

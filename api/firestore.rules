@@ -8,7 +8,7 @@ service cloud.firestore {
     //
     // ordenes_usuarios/{id}:
     //   email, nombre, role (user|admin), modules[], status (pending|approved|rejected)
-    // ordenes_config/auth: allowedDomains[]
+    // ordenes_config/auth: allowedDomains[] (ineco.ar, ineco.com.ar, cites-ineco.com.ar)
     // Módulos: ordenes | presupuestos | pami | busca-turno | pedidos-sistema | usuarios
     // ordenes_pedidos_sistema/{id}: pedidos internos (titulo, detalle, estado, prioridad, fotos)
 

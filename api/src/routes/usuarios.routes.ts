@@ -10,6 +10,7 @@ import {
 } from "../services/auth-email.service.js";
 import {
   approveUser,
+  deleteUser,
   getAuthAccessConfig,
   listUsersByStatus,
   rejectUser,
@@ -163,6 +164,26 @@ router.put("/:id", async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : "No se pudo actualizar",
+    });
+  }
+});
+
+router.delete("/:id", async (req: AuthedRequest, res) => {
+  try {
+    const id = paramId(req);
+    if (id === req.user?.id) {
+      res.status(400).json({
+        ok: false,
+        message: "No podés eliminar tu propio usuario",
+      });
+      return;
+    }
+    await deleteUser(id);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "No se pudo eliminar",
     });
   }
 });

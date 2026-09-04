@@ -15,6 +15,10 @@ type Props = {
   module: AppModule;
   onModuleChange: (module: AppModule) => void;
   allowedModules: AppModule[];
+  /** Solo admin ve el ítem Usuarios en el menú. */
+  isAdmin?: boolean;
+  /** Solicitudes pendientes de aprobación. */
+  usuariosBadge?: number;
   userName?: string;
   onLogout?: () => void;
 };
@@ -30,6 +34,9 @@ const MAIN_ITEMS: NavItem[] = [
 
 const CONFIG_ITEMS: NavItem[] = [
   { id: "pedidos-sistema", label: "Pedidos sistema", Icon: IconPedidos },
+];
+
+const ADMIN_ONLY_ITEMS: NavItem[] = [
   { id: "usuarios", label: "Usuarios", Icon: IconUsers },
 ];
 
@@ -37,35 +44,52 @@ function NavButtons({
   items,
   module,
   onModuleChange,
+  badges,
 }: {
   items: NavItem[];
   module: AppModule;
   onModuleChange: (module: AppModule) => void;
+  badges?: Partial<Record<AppModule, number>>;
 }) {
-  return items.map(({ id, label, Icon }) => (
-    <button
-      key={id}
-      type="button"
-      className={`app-sidebar__btn${module === id ? " is-active" : ""}`}
-      onClick={() => onModuleChange(id)}
-    >
-      <span className="app-sidebar__btn-icon" aria-hidden>
-        <Icon size={16} />
-      </span>
-      {label}
-    </button>
-  ));
+  return items.map(({ id, label, Icon }) => {
+    const count = badges?.[id] ?? 0;
+    return (
+      <button
+        key={id}
+        type="button"
+        className={`app-sidebar__btn${module === id ? " is-active" : ""}`}
+        onClick={() => onModuleChange(id)}
+      >
+        <span className="app-sidebar__btn-icon" aria-hidden>
+          <Icon size={16} />
+        </span>
+        <span className="app-sidebar__btn-label">{label}</span>
+        {count > 0 ? (
+          <span className="app-nav-badge" aria-label={`${count} pendientes`}>
+            {count > 99 ? "99+" : count}
+          </span>
+        ) : null}
+      </button>
+    );
+  });
 }
 
 export function AppSidebar({
   module,
   onModuleChange,
   allowedModules,
+  isAdmin = false,
+  usuariosBadge = 0,
   userName,
   onLogout,
 }: Props) {
   const main = MAIN_ITEMS.filter((item) => allowedModules.includes(item.id));
-  const config = CONFIG_ITEMS.filter((item) => allowedModules.includes(item.id));
+  const config = [
+    ...CONFIG_ITEMS.filter((item) => allowedModules.includes(item.id)),
+    ...(isAdmin
+      ? ADMIN_ONLY_ITEMS.filter((item) => allowedModules.includes(item.id))
+      : []),
+  ];
 
   return (
     <aside className="app-sidebar">
@@ -83,7 +107,12 @@ export function AppSidebar({
       <div className="app-sidebar__bottom">
         {config.length > 0 ? (
           <nav className="app-sidebar__nav app-sidebar__nav--config" aria-label="Configuración">
-            <NavButtons items={config} module={module} onModuleChange={onModuleChange} />
+            <NavButtons
+              items={config}
+              module={module}
+              onModuleChange={onModuleChange}
+              badges={{ usuarios: usuariosBadge }}
+            />
           </nav>
         ) : null}
         {(userName || onLogout) && (

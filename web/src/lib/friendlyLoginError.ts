@@ -24,9 +24,20 @@ const FIREBASE_MESSAGES: Record<string, string> = {
     "Falta configurar el acceso en el servidor. Pedile a sistemas que lo revise.",
   "auth/admin-restricted-operation":
     "No se pudo completar el acceso. Contactá al administrador.",
+  "auth/invalid-credential":
+    "No se pudo validar la cuenta. Probá de nuevo o usá el otro método (Google / Microsoft).",
 };
-
 const API_FRIENDLY: Array<{ test: RegExp; message: string }> = [
+  {
+    test: /AADSTS50194|multi-tenant|\/common endpoint|not configured as a multi-tenant/i,
+    message:
+      "Microsoft está configurado como single-tenant. Hay que poner el Tenant ID de Entra ID en AUTH_MICROSOFT_TENANT_ID (o hacer la app multi-tenant en Azure).",
+  },
+  {
+    test: /INVALID_IDP_RESPONSE|microsoft\.com response/i,
+    message:
+      "Microsoft rechazó el login. Revisá la app en Azure (tenant / redirect) y reintentá.",
+  },
   {
     test: /dominio.*no está autorizado|no está autorizado/i,
     message: "Tu email no pertenece a un dominio autorizado para esta app.",
@@ -40,7 +51,12 @@ const API_FRIENDLY: Array<{ test: RegExp; message: string }> = [
     message: "Verificá tu email en Google o Microsoft y volvé a intentar.",
   },
   {
-    test: /token|jwt|expired|invalid/i,
+    test: /FIREBASE_TOKEN_INVALID|No se pudo validar el acceso con Google/i,
+    message:
+      "No se pudo validar el acceso con Google/Microsoft. Revisá providers y Authorized domains en Firebase.",
+  },
+  {
+    test: /sesión expirada|sesión inválida|jwt expired|token expired|jws signature|jwt claim/i,
     message: "La sesión de acceso expiró o no es válida. Intentá ingresar de nuevo.",
   },
   {

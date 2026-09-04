@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import SignatureCanvas from "react-signature-canvas";
 import { toast } from "react-toastify";
-import { IconCheck } from "../components/Icons";
+import { LOGO_INECO_DATA_URL } from "../assets/logoIneco";
+import { IconAlert, IconCheck } from "../components/Icons";
 import { apiFetch } from "../config/api";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { notificarFirmaActualizada } from "../lib/firmaSync";
 import type { Medico } from "../types";
 
@@ -13,6 +15,19 @@ type MedicoFirmaInfo = {
   especialidad: string;
   tieneFirma: boolean;
 };
+
+function friendlyFirmaError(raw: string): string {
+  if (/sesión inválida|sin acceso|no autenticado/i.test(raw)) {
+    return "No pudimos abrir este enlace de firma. Pedile al administrador que te envíe el link de nuevo.";
+  }
+  if (/no encontrado/i.test(raw)) {
+    return "No encontramos al profesional asociado a este enlace.";
+  }
+  if (/link inválido/i.test(raw)) {
+    return "El enlace de firma no es válido.";
+  }
+  return raw;
+}
 
 export default function FirmarPage() {
   const { medicoId } = useParams<{ medicoId: string }>();
@@ -139,8 +154,15 @@ export default function FirmarPage() {
 
   if (loading) {
     return (
-      <div className="firmar-page">
-        <p>Cargando…</p>
+      <div className="firmar-page firmar-page--centered">
+        <div className="firmar-card firmar-card--status">
+          <img
+            src={LOGO_INECO_DATA_URL}
+            alt="Ineco"
+            className="firmar-card__logo"
+          />
+          <p className="firmar-card__status-msg">Cargando enlace de firma…</p>
+        </div>
       </div>
     );
   }
@@ -148,10 +170,19 @@ export default function FirmarPage() {
   if (error && !medico) {
     return (
       <div className="firmar-page firmar-page--centered">
-        <div className="firmar-card">
-          <h1>No se pudo abrir</h1>
-          <p className="text-muted">{error}</p>
-          <Link to="/" className="btn btn-secondary">
+        <div className="firmar-card firmar-card--status firmar-card--error">
+          <img
+            src={LOGO_INECO_DATA_URL}
+            alt="Ineco"
+            className="firmar-card__logo"
+          />
+          <div className="firmar-status-icon firmar-status-icon--error" aria-hidden>
+            <IconAlert size={28} />
+          </div>
+          <p className="firmar-card__eyebrow">Firma digital</p>
+          <h1 className="firmar-card__title">No se pudo abrir el enlace</h1>
+          <p className="firmar-card__text">{friendlyFirmaError(error)}</p>
+          <Link to="/" className="btn btn-primary firmar-card__cta">
             Volver al inicio
           </Link>
         </div>
@@ -162,13 +193,20 @@ export default function FirmarPage() {
   if (ok) {
     return (
       <div className="firmar-page firmar-page--centered">
-        <div className="firmar-card firmar-card--success">
-          <div className="firmar-success-icon" aria-hidden>
-            <IconCheck size={48} />
+        <div className="firmar-card firmar-card--status firmar-card--success">
+          <img
+            src={LOGO_INECO_DATA_URL}
+            alt="Ineco"
+            className="firmar-card__logo"
+          />
+          <div className="firmar-status-icon firmar-status-icon--success" aria-hidden>
+            <IconCheck size={28} />
           </div>
-          <h1>Firma guardada</h1>
-          <p>
-            Gracias, <strong>{medico?.nombre}</strong>. Tu firma quedó registrada correctamente.
+          <p className="firmar-card__eyebrow">Firma digital</p>
+          <h1 className="firmar-card__title">Firma guardada</h1>
+          <p className="firmar-card__text">
+            Gracias, <strong>{formatNombrePersona(medico?.nombre ?? "")}</strong>. Tu firma quedó
+            registrada correctamente.
           </p>
         </div>
       </div>
@@ -179,8 +217,15 @@ export default function FirmarPage() {
     <div className="firmar-page firmar-page--sign">
       <div className="firmar-card firmar-card--sign">
         <header className="firmar-card__header">
+          <img
+            src={LOGO_INECO_DATA_URL}
+            alt="Ineco"
+            className="firmar-card__logo firmar-card__logo--compact"
+          />
           <p className="firmar-card__eyebrow">Firma digital</p>
-          <h1 className="firmar-medico-nombre">{medico?.nombre}</h1>
+          <h1 className="firmar-medico-nombre">
+            {formatNombrePersona(medico?.nombre ?? "")}
+          </h1>
           {medico?.especialidad ? (
             <p className="firmar-medico-esp">{medico.especialidad}</p>
           ) : null}

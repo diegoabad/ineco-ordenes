@@ -11,24 +11,30 @@ import "react-toastify/dist/ReactToastify.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/firmar/:medicoId" element={<FirmarPage />} />
-          <Route path="/*" element={<App />} />
-        </Routes>
-        <AppTooltipHost />
-        <ToastContainer
-          position="top-right"
-          autoClose={3000}
-          hideProgressBar={false}
-          newestOnTop
-          closeOnClick
-          pauseOnHover
-          draggable
-          theme="colored"
+    <BrowserRouter>
+      <Routes>
+        {/* Link público de firma: sin AuthProvider / login */}
+        <Route path="/firmar/:medicoId" element={<FirmarPage />} />
+        <Route
+          path="/*"
+          element={
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          }
         />
-      </BrowserRouter>
-    </AuthProvider>
+      </Routes>
+      <AppTooltipHost />
+      <ToastContainer
+        position="top-right"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        pauseOnHover
+        draggable
+        theme="colored"
+      />
+    </BrowserRouter>
   </StrictMode>,
 );
