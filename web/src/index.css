@@ -297,6 +297,21 @@ label {
   border-top: 1px solid var(--border);
 }
 
+/* Flat items (Pedidos / Usuarios): mismo activo sólido que las subpestañas. */
+.app-sidebar__nav--config .app-sidebar__btn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.app-sidebar__nav--config .app-sidebar__btn.is-active:hover {
+  background: var(--primary-hover);
+  color: #fff;
+}
+
+.app-sidebar__nav--config .app-sidebar__btn.is-active .app-sidebar__btn-icon {
+  opacity: 1;
+}
+
 .app-sidebar__btn {
   display: flex;
   align-items: center;
@@ -370,6 +385,392 @@ label {
   display: inline-flex;
   flex-shrink: 0;
   opacity: 0.9;
+}
+
+.app-sidebar__acc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.app-sidebar__acc-toggle {
+  width: 100%;
+}
+
+.app-sidebar__acc-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+
+.app-sidebar__acc-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.app-sidebar__acc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.15rem 0 0.35rem 0.55rem;
+  margin-left: 0.55rem;
+  border-left: 2px solid color-mix(in srgb, var(--border) 80%, var(--primary-subtle));
+}
+
+.app-sidebar__subbtn {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.app-sidebar__subbtn:hover:not(.is-active) {
+  background: var(--primary-subtle);
+  color: var(--primary-hover);
+}
+
+.app-sidebar__subbtn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.app-sidebar__subbtn.is-active:hover {
+  background: var(--primary-hover);
+  color: #fff;
+}
+
+/* —— Métricas presupuestos —— */
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: auto;
+  padding-bottom: 0.5rem;
+}
+
+.metrics-filters-card {
+  flex: 0 0 auto;
+}
+
+.metrics-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+
+.metrics-filters .form-group {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.metrics-filters .form-group label {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+.metrics-filters--compare {
+  padding: 0 1rem 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.metrics-filters__date {
+  min-width: 10.5rem;
+}
+
+.metrics-filters__date .fl-date-picker {
+  min-width: 10.5rem;
+}
+
+.metrics-filters__date .fl-date-picker__trigger {
+  min-height: 2.35rem;
+  height: 2.35rem;
+  box-sizing: border-box;
+}
+
+.metrics-filters__month {
+  min-width: 12.5rem;
+}
+
+.metrics-filters__month select {
+  box-sizing: border-box;
+  min-height: 2.35rem;
+  height: 2.35rem;
+  margin: 0;
+  min-width: 12.5rem;
+}
+
+.metrics-filters__export {
+  flex: 0 0 auto;
+}
+
+.metrics-filters__export-label {
+  display: block;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  min-height: 0.9rem;
+}
+
+.metrics-filters__export-btns {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.35rem;
+}
+
+.metrics-filters__export .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  box-sizing: border-box;
+  min-height: 2.35rem;
+  height: 2.35rem;
+  min-width: 5.25rem;
+  padding: 0 0.9rem;
+}
+
+.metrics-filters__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.metrics-filters__compare {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8125rem;
+  color: var(--text);
+  margin-left: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.metrics-filters__compare-label {
+  margin: 0;
+  font-size: 0.8125rem;
+  width: 100%;
+}
+
+.metrics-range-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.metrics-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.metrics-kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.75rem 0.85rem;
+}
+
+.metrics-kpi--ok {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--border));
+}
+
+.metrics-kpi--warn {
+  border-color: color-mix(in srgb, #d97706 35%, var(--border));
+}
+
+.metrics-kpi--error {
+  border-color: color-mix(in srgb, #dc2626 35%, var(--border));
+}
+
+.metrics-kpi--muted {
+  border-color: color-mix(in srgb, var(--primary) 25%, var(--border));
+}
+
+.metrics-kpi__label {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.metrics-kpi__value {
+  margin: 0.2rem 0 0;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.metrics-kpi__prev {
+  margin: 0.15rem 0 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.metrics-delta {
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.metrics-delta--up {
+  color: #16a34a;
+}
+
+.metrics-delta--down {
+  color: #dc2626;
+}
+
+.metrics-delta--flat,
+.metrics-delta--new {
+  color: var(--muted);
+}
+
+.metrics-estado-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.55rem;
+}
+
+.metrics-estado-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.metrics-estado-chip--enviado {
+  border-color: color-mix(in srgb, #2563eb 28%, var(--border));
+}
+
+.metrics-estado-chip--enviado .metrics-bars__fill {
+  background: #2563eb;
+}
+
+.metrics-estado-chip--aceptado {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--border));
+}
+
+.metrics-estado-chip--aceptado .metrics-bars__fill {
+  background: #16a34a;
+}
+
+.metrics-estado-chip--rechazado {
+  border-color: color-mix(in srgb, #dc2626 35%, var(--border));
+}
+
+.metrics-estado-chip--rechazado .metrics-bars__fill {
+  background: #dc2626;
+}
+
+.metrics-estado-chip__label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.metrics-estado-chip__value {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.metrics-pct-hint {
+  margin: -0.15rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.metrics-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.metrics-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1rem 1rem;
+}
+
+.metrics-card__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.metrics-card__empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.metrics-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.metrics-bars__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.8125rem;
+}
+
+.metrics-bars__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metrics-bars__count {
+  flex-shrink: 0;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.metrics-bars__track {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, #fff);
+  overflow: hidden;
+}
+
+.metrics-bars__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  min-width: 0;
+  transition: width 0.25s ease;
 }
 
 .app-main {
@@ -1474,10 +1875,9 @@ tbody tr.is-selected-row td {
 
 .table-pagination {
   flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 0.65rem 1rem;
   padding: 0.65rem 1rem;
   border-top: 1px solid var(--border);
@@ -1485,15 +1885,20 @@ tbody tr.is-selected-row td {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
-.table-pagination__info {
-  font-size: 0.8125rem;
-  color: var(--muted);
-}
-
 .table-pagination__nav {
+  grid-column: 2;
+  justify-self: center;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.table-pagination__info {
+  grid-column: 3;
+  justify-self: end;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .table-pagination__page {

@@ -18,6 +18,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconFile, IconPlus, IconSearch, IconTrash, IconX } from "./Icons";
 import { PedidoSistemaFormModal } from "./PedidoSistemaFormModal";
 import { PedidosColorSelect, type PedidosColorOption } from "./PedidosColorSelect";
+import { TablePagination } from "./TablePagination";
+import { useClientPagination } from "../hooks/useClientPagination";
 
 const PRIORIDAD_OPTIONS: PedidosColorOption<PedidoSistemaPrioridad>[] = [
   { value: "baja", label: "Baja", tone: "amarillo" },
@@ -99,6 +101,11 @@ export function PedidosSistemaPanel() {
         .includes(q);
     });
   }, [items, busqueda, filtroEstado]);
+
+  const { page, setPage, pageItems, total, pageSize } = useClientPagination(
+    filtrados,
+    `${filtroEstado}|${busqueda.trim().toLowerCase()}`,
+  );
 
   async function patchPedido(
     id: string,
@@ -189,7 +196,7 @@ export function PedidosSistemaPanel() {
             </thead>
             {!loading && filtrados.length > 0 ? (
               <tbody>
-                {filtrados.map((p) => (
+                {pageItems.map((p) => (
                   <tr key={p.id}>
                     <td
                       className="pedidos-col-fecha"
@@ -274,6 +281,14 @@ export function PedidosSistemaPanel() {
             </div>
           ) : null}
         </div>
+
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={loading ? 0 : total}
+          onPageChange={setPage}
+          disabled={loading}
+        />
       </section>
 
       <PedidoSistemaFormModal

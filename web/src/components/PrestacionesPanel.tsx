@@ -11,8 +11,10 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconPencil, IconSearch, IconTrash } from "./Icons";
 import { PrestacionFormModal } from "./PrestacionFormModal";
 import { RichTextContent } from "./RichTextContent";
+import { TablePagination } from "./TablePagination";
 import { TipoPrestacionChip } from "./TipoPrestacionChip";
 import { ViewDetailModal } from "./ViewDetailModal";
+import { useClientPagination } from "../hooks/useClientPagination";
 import { richTextPreview } from "../lib/richText";
 
 function formatMoney(value: number): string {
@@ -75,6 +77,11 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
       [p.titulo, p.descripcion].join(" ").toLowerCase().includes(q),
     );
   }, [items, busqueda]);
+
+  const { page, setPage, pageItems, total, pageSize } = useClientPagination(
+    filtradas,
+    busqueda.trim().toLowerCase(),
+  );
 
   async function handleSave(data: PrestacionFormData, id?: string) {
     try {
@@ -147,7 +154,7 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
             </thead>
             {!loading && filtradas.length > 0 ? (
               <tbody>
-                {filtradas.map((p) => (
+                {pageItems.map((p) => (
                   <tr key={p.id}>
                     <td className="fl-col-prest-titulo">
                       <span className="fl-texto-principal">{p.titulo}</span>
@@ -214,6 +221,14 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
             </div>
           ) : null}
         </div>
+
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={loading ? 0 : total}
+          onPageChange={setPage}
+          disabled={loading}
+        />
       </section>
 
       <PrestacionFormModal

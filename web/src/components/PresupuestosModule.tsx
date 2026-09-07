@@ -1,24 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
+import type { PresupuestosSection } from "../lib/appNav";
+import { PRESUPUESTOS_SECTIONS } from "../lib/appNav";
+import { mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
+import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
+import {
+  DEFAULT_TIPOS_PRESTACION,
+  type ModalidadPresupuesto,
+  type ProfesionalPresupuesto,
+  type TipoPrestacion,
+} from "../types";
 import { IconPlus } from "./Icons";
 import { PresupuestoEmailConfigPanel } from "./PresupuestoEmailConfigPanel";
 import { PresupuestoPlantillaPanel } from "./PresupuestoPlantillaPanel";
 import { PresupuestosConfigPanel } from "./PresupuestosConfigPanel";
+import { PresupuestosMetricasPanel } from "./PresupuestosMetricasPanel";
 import { PresupuestosPanel } from "./PresupuestosPanel";
 import { PrestacionesPanel } from "./PrestacionesPanel";
-import { ScrollableAppTabs } from "./ScrollableAppTabs";
-import { mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
-import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
-import { DEFAULT_TIPOS_PRESTACION, type ModalidadPresupuesto, type ProfesionalPresupuesto, type TipoPrestacion } from "../types";
 
-type PresupuestoTab =
-  | "presupuestos"
-  | "prestaciones"
-  | "plantillaEmail"
-  | "plantillaPresupuesto"
-  | "config";
+type Props = {
+  section: PresupuestosSection;
+  onSectionChange: (section: PresupuestosSection) => void;
+};
 
-export function PresupuestosModule() {
-  const [tab, setTab] = useState<PresupuestoTab>("presupuestos");
+export function PresupuestosModule({ section, onSectionChange }: Props) {
   const [addPrestacionKey, setAddPrestacionKey] = useState(0);
   const [addPresupuestoKey, setAddPresupuestoKey] = useState(0);
   const [tiposPrestacion, setTiposPrestacion] = useState<TipoPrestacion[]>(
@@ -59,26 +63,33 @@ export function PresupuestosModule() {
   }, [cargarConfig]);
 
   useEffect(() => {
-    if (tab !== "prestaciones") setAddPrestacionKey(0);
-    if (tab !== "presupuestos") setAddPresupuestoKey(0);
-  }, [tab]);
+    if (section !== "prestaciones") setAddPrestacionKey(0);
+    if (section !== "presupuestos") setAddPresupuestoKey(0);
+  }, [section]);
 
   function handleCrearPresupuesto() {
-    setTab("presupuestos");
+    onSectionChange("presupuestos");
     setAddPresupuestoKey((k) => k + 1);
   }
+
+  const sectionLabel =
+    PRESUPUESTOS_SECTIONS.find((s) => s.id === section)?.label ?? "Presupuestos";
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header__brand">
           <div>
-            <h1>Presupuestos</h1>
-            <p>Prestaciones y armado de presupuestos</p>
+            <h1>{sectionLabel}</h1>
+            <p>
+              {section === "metricas"
+                ? "Control visual de envíos, estados, profesionales y prestaciones"
+                : "Prestaciones y armado de presupuestos"}
+            </p>
           </div>
         </div>
         <div className="app-header__actions">
-          {tab === "prestaciones" ? (
+          {section === "prestaciones" ? (
             <button
               type="button"
               className="btn btn-secondary"
@@ -88,52 +99,16 @@ export function PresupuestosModule() {
               Agregar prestación
             </button>
           ) : null}
-          <button type="button" className="btn btn-primary" onClick={handleCrearPresupuesto}>
-            <IconPlus size={16} />
-            Crear presupuesto
-          </button>
+          {section !== "metricas" ? (
+            <button type="button" className="btn btn-primary" onClick={handleCrearPresupuesto}>
+              <IconPlus size={16} />
+              Crear presupuesto
+            </button>
+          ) : null}
         </div>
       </header>
 
-      <ScrollableAppTabs aria-label="Secciones de presupuestos">
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "presupuestos" ? " is-active" : ""}`}
-          onClick={() => setTab("presupuestos")}
-        >
-          Presupuestos
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "prestaciones" ? " is-active" : ""}`}
-          onClick={() => setTab("prestaciones")}
-        >
-          Prestaciones
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "plantillaPresupuesto" ? " is-active" : ""}`}
-          onClick={() => setTab("plantillaPresupuesto")}
-        >
-          Plantilla presupuesto
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "plantillaEmail" ? " is-active" : ""}`}
-          onClick={() => setTab("plantillaEmail")}
-        >
-          Plantilla email
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "config" ? " is-active" : ""}`}
-          onClick={() => setTab("config")}
-        >
-          Configuración
-        </button>
-      </ScrollableAppTabs>
-
-      {tab === "presupuestos" ? (
+      {section === "presupuestos" ? (
         <PresupuestosPanel
           addRequestKey={addPresupuestoKey}
           profesionales={profesionalesPresupuesto}
@@ -141,12 +116,13 @@ export function PresupuestosModule() {
           modalidades={modalidadesPresupuesto}
         />
       ) : null}
-      {tab === "prestaciones" ? (
+      {section === "prestaciones" ? (
         <PrestacionesPanel addRequestKey={addPrestacionKey} tiposPrestacion={tiposPrestacion} />
       ) : null}
-      {tab === "plantillaEmail" ? <PresupuestoEmailConfigPanel /> : null}
-      {tab === "plantillaPresupuesto" ? <PresupuestoPlantillaPanel /> : null}
-      {tab === "config" ? (
+      {section === "metricas" ? <PresupuestosMetricasPanel /> : null}
+      {section === "plantillaEmail" ? <PresupuestoEmailConfigPanel /> : null}
+      {section === "plantillaPresupuesto" ? <PresupuestoPlantillaPanel /> : null}
+      {section === "config" ? (
         <PresupuestosConfigPanel
           onSaved={() => {
             void cargarConfig();

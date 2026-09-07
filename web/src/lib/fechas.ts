@@ -35,9 +35,13 @@ export function fechaHoyIso(): string {
 }
 
 export function formatFechaYmd(ymd: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  // Acepta YYYY-MM-DD o ISO con hora; siempre muestra dd/mm/aaaa.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd.trim());
   if (!m) return ymd;
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  const day = m[3]!;
+  const month = m[2]!;
+  const year = m[1]!;
+  return `${day}/${month}/${year}`;
 }
 
 /** Formatea un ISO datetime a dd/mm/yyyy hh:mm (hora local). */

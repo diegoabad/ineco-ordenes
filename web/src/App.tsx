@@ -22,7 +22,15 @@ import {
   type EnvioResultadoItem,
 } from "./components/EnvioResultadoModal";
 import { creadoAtMs } from "./lib/sortRecientes";
-import { loadLastModule, saveLastModule } from "./lib/lastModuleStorage";
+import { loadLastNav, saveLastNav } from "./lib/lastModuleStorage";
+import {
+  type AppNavTarget,
+  type BuscaTurnoSection,
+  type OrdenesSection,
+  type PamiSection,
+  type PresupuestosSection,
+  ORDENES_SECTIONS,
+} from "./lib/appNav";
 import { FechaOrdenModal } from "./components/FechaOrdenModal";
 import { HistorialEnviosPanel } from "./components/HistorialEnviosPanel";
 import { LoginPage } from "./components/LoginPage";
@@ -37,7 +45,8 @@ import { PamiModule } from "./components/PamiModule";
 import { BuscaTurnoModule } from "./components/BuscaTurnoModule";
 import { UsuariosPanel } from "./components/UsuariosPanel";
 import { PedidosSistemaPanel } from "./components/PedidosSistemaPanel";
-import { ScrollableAppTabs } from "./components/ScrollableAppTabs";
+import { TablePagination } from "./components/TablePagination";
+import { useClientPagination } from "./hooks/useClientPagination";
 import { ViewDetailModal } from "./components/ViewDetailModal";
 import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
@@ -65,8 +74,6 @@ import type {
   Paciente,
   PacienteFormData,
 } from "./types";
-
-type Tab = "pacientes" | "medicos" | "historial" | "config";
 
 type FechaPending =
   | { kind: "imprimir"; list: Paciente[] }
@@ -96,10 +103,10 @@ function firstAllowedModule(
   canAccess: (m: AppModuleId) => boolean,
 ): AppModule {
   const order: AppModule[] = [
+    "busca-turno",
     "ordenes",
     "presupuestos",
     "pami",
-    "busca-turno",
     "pedidos-sistema",
     "usuarios",
   ];
@@ -110,10 +117,10 @@ export default function App() {
   const { user, loading: authLoading, logout, canAccessModule } = useAuth();
   const allowedModules = useMemo(() => {
     const all: AppModule[] = [
+      "busca-turno",
       "ordenes",
       "presupuestos",
       "pami",
-      "busca-turno",
       "pedidos-sistema",
       "usuarios",
     ];
@@ -121,8 +128,12 @@ export default function App() {
   }, [canAccessModule]);
 
   const [module, setModule] = useState<AppModule>("ordenes");
+  const [ordenesSection, setOrdenesSection] = useState<OrdenesSection>("pacientes");
+  const [presupuestosSection, setPresupuestosSection] =
+    useState<PresupuestosSection>("presupuestos");
+  const [pamiSection, setPamiSection] = useState<PamiSection>("historial");
+  const [buscaTurnoSection, setBuscaTurnoSection] = useState<BuscaTurnoSection>("turnos");
   const skipModulePersist = useRef(false);
-  const [tab, setTab] = useState<Tab>("pacientes");
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [medicos, setMedicos] = useState<Medico[]>([]);
   const [medicoSeleccionadoId, setMedicoSeleccionadoId] = useState<string | null>(null);
@@ -164,24 +175,44 @@ export default function App() {
     preparing: boolean;
   } | null>(null);
 
-  // Restaurar última sección usada por este usuario
+  // Restaurar último módulo + pestaña usados por este usuario
   useEffect(() => {
     if (!user) return;
-    const saved = loadLastModule(user.id);
-    const next: AppModule =
-      saved && canAccessModule(saved)
-        ? saved
+    const saved = loadLastNav(user.id);
+    const nextModule: AppModule =
+      saved && canAccessModule(saved.module)
+        ? saved.module
         : canAccessModule(module)
           ? module
           : firstAllowedModule(canAccessModule);
+
+    let nextSection =
+      saved?.module === nextModule ? saved.section : undefined;
+
     skipModulePersist.current = true;
-    setModule(next);
-    saveLastModule(user.id, next);
+    setModule(nextModule);
+    if (nextModule === "ordenes") {
+      if (nextSection) setOrdenesSection(nextSection as OrdenesSection);
+      else nextSection = ordenesSection;
+    } else if (nextModule === "presupuestos") {
+      if (nextSection) setPresupuestosSection(nextSection as PresupuestosSection);
+      else nextSection = presupuestosSection;
+    } else if (nextModule === "pami") {
+      if (nextSection) setPamiSection(nextSection as PamiSection);
+      else nextSection = pamiSection;
+    } else if (nextModule === "busca-turno") {
+      if (nextSection) setBuscaTurnoSection(nextSection as BuscaTurnoSection);
+      else nextSection = buscaTurnoSection;
+    } else {
+      nextSection = undefined;
+    }
+
+    saveLastNav(user.id, { module: nextModule, section: nextSection });
     // Solo al cambiar de usuario (login / refresh de sesión)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // Guardar sección actual por usuario
+  // Guardar módulo + pestaña actuales por usuario
   useEffect(() => {
     if (!user) return;
     if (skipModulePersist.current) {
@@ -189,8 +220,28 @@ export default function App() {
       return;
     }
     if (!canAccessModule(module)) return;
-    saveLastModule(user.id, module);
-  }, [user, module, canAccessModule]);
+    saveLastNav(user.id, {
+      module,
+      section:
+        module === "ordenes"
+          ? ordenesSection
+          : module === "presupuestos"
+            ? presupuestosSection
+            : module === "pami"
+              ? pamiSection
+              : module === "busca-turno"
+                ? buscaTurnoSection
+                : undefined,
+    });
+  }, [
+    user,
+    module,
+    ordenesSection,
+    presupuestosSection,
+    pamiSection,
+    buscaTurnoSection,
+    canAccessModule,
+  ]);
 
   useEffect(() => {
     if (!user) return;
@@ -290,15 +341,26 @@ export default function App() {
   }
 
   const qPacientes = busquedaPacientes.trim().toLowerCase();
-  const pacientesFiltrados = pacientes.filter((p) => {
-    if (filtroPacientes === "activos" && !p.activo) return false;
-    if (filtroPacientes === "inactivos" && p.activo) return false;
-    if (!qPacientes) return true;
-    return [p.paciente, p.email, p.diagnostico, nombreMedico(p.medicoId)]
-      .join(" ")
-      .toLowerCase()
-      .includes(qPacientes);
-  });
+  const pacientesFiltrados = useMemo(
+    () =>
+      pacientes.filter((p) => {
+        if (filtroPacientes === "activos" && !p.activo) return false;
+        if (filtroPacientes === "inactivos" && p.activo) return false;
+        if (!qPacientes) return true;
+        return [p.paciente, p.email, p.diagnostico, nombreMedico(p.medicoId)]
+          .join(" ")
+          .toLowerCase()
+          .includes(qPacientes);
+      }),
+    // nombreMedico usa medicos; incluirlos para recalcular al cambiar profesionales
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pacientes, filtroPacientes, qPacientes, medicos],
+  );
+
+  const pacientesPage = useClientPagination(
+    pacientesFiltrados,
+    `${filtroPacientes}|${qPacientes}`,
+  );
 
   async function handleMedicoSeleccionadoChange(
     id: string | null,
@@ -315,21 +377,30 @@ export default function App() {
   }
 
   const qMedicos = busquedaMedicos.trim().toLowerCase();
-  const medicosFiltrados = medicos
-    .filter((m) => {
-      if (filtroMedicos === "activos" && !m.activo) return false;
-      if (filtroMedicos === "inactivos" && m.activo) return false;
-      if (!qMedicos) return true;
-      return [m.nombre, m.especialidad, m.matricula].join(" ").toLowerCase().includes(qMedicos);
-    })
-    .slice()
-    .sort((a, b) => {
-      if (a.id === medicoSeleccionadoId) return -1;
-      if (b.id === medicoSeleccionadoId) return 1;
-      const diff = creadoAtMs(b.creadoAt) - creadoAtMs(a.creadoAt);
-      if (diff !== 0) return diff;
-      return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
-    });
+  const medicosFiltrados = useMemo(
+    () =>
+      medicos
+        .filter((m) => {
+          if (filtroMedicos === "activos" && !m.activo) return false;
+          if (filtroMedicos === "inactivos" && m.activo) return false;
+          if (!qMedicos) return true;
+          return [m.nombre, m.especialidad, m.matricula].join(" ").toLowerCase().includes(qMedicos);
+        })
+        .slice()
+        .sort((a, b) => {
+          if (a.id === medicoSeleccionadoId) return -1;
+          if (b.id === medicoSeleccionadoId) return 1;
+          const diff = creadoAtMs(b.creadoAt) - creadoAtMs(a.creadoAt);
+          if (diff !== 0) return diff;
+          return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
+        }),
+    [medicos, filtroMedicos, qMedicos, medicoSeleccionadoId],
+  );
+
+  const medicosPage = useClientPagination(
+    medicosFiltrados,
+    `${filtroMedicos}|${qMedicos}`,
+  );
 
   async function handleSavePaciente(data: PacienteFormData, id?: string) {
     try {
@@ -757,10 +828,35 @@ export default function App() {
   const pacientesConEmail = pacientesActivos.filter((p) => p.email?.trim()).length;
   const puedeEnviarTodas = pacientesConEmail > 0 && puedeImprimir && !emailFlowActive;
 
+  function handleNavigate(target: AppNavTarget) {
+    setModule(target.module);
+    if (target.module === "ordenes") {
+      setOrdenesSection(target.section);
+    } else if (target.module === "presupuestos") {
+      setPresupuestosSection(target.section);
+    } else if (target.module === "pami") {
+      setPamiSection(target.section);
+    } else if (target.module === "busca-turno") {
+      setBuscaTurnoSection(target.section);
+    }
+  }
+
+  const sidebarSection =
+    module === "ordenes"
+      ? ordenesSection
+      : module === "presupuestos"
+        ? presupuestosSection
+        : module === "pami"
+          ? pamiSection
+          : module === "busca-turno"
+            ? buscaTurnoSection
+            : null;
+
   const sidebar = (
     <AppSidebar
       module={module}
-      onModuleChange={setModule}
+      section={sidebarSection}
+      onNavigate={handleNavigate}
       allowedModules={allowedModules}
       isAdmin={user?.role === "admin"}
       userName={user?.nombre}
@@ -819,11 +915,17 @@ export default function App() {
       {sidebar}
       <div className="app-main">
         {module === "presupuestos" ? (
-          <PresupuestosModule />
+          <PresupuestosModule
+            section={presupuestosSection}
+            onSectionChange={setPresupuestosSection}
+          />
         ) : module === "pami" ? (
-          <PamiModule />
+          <PamiModule section={pamiSection} onSectionChange={setPamiSection} />
         ) : module === "busca-turno" ? (
-          <BuscaTurnoModule />
+          <BuscaTurnoModule
+            section={buscaTurnoSection}
+            onSectionChange={setBuscaTurnoSection}
+          />
         ) : module === "pedidos-sistema" ? (
           <PedidosSistemaPanel />
         ) : module === "usuarios" ? (
@@ -833,13 +935,15 @@ export default function App() {
       <header className="app-header">
         <div className="app-header__brand">
           <div>
-            <h1>Órdenes</h1>
+            <h1>
+              {ORDENES_SECTIONS.find((s) => s.id === ordenesSection)?.label ?? "Órdenes"}
+            </h1>
             <p>Pacientes y profesionales para generar órdenes</p>
           </div>
         </div>
 
         <div className="app-header__actions">
-          {tab === "pacientes" ? (
+          {ordenesSection === "pacientes" ? (
             <button
               type="button"
               className="btn btn-secondary"
@@ -852,7 +956,7 @@ export default function App() {
               Agregar paciente
             </button>
           ) : null}
-          {tab === "medicos" ? (
+          {ordenesSection === "medicos" ? (
             <button
               type="button"
               className="btn btn-secondary"
@@ -899,38 +1003,7 @@ export default function App() {
         </div>
       </header>
 
-      <ScrollableAppTabs aria-label="Secciones">
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "pacientes" ? " is-active" : ""}`}
-          onClick={() => setTab("pacientes")}
-        >
-          Pacientes
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "medicos" ? " is-active" : ""}`}
-          onClick={() => setTab("medicos")}
-        >
-          Profesionales
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "historial" ? " is-active" : ""}`}
-          onClick={() => setTab("historial")}
-        >
-          Historial
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "config" ? " is-active" : ""}`}
-          onClick={() => setTab("config")}
-        >
-          Plantilla email
-        </button>
-      </ScrollableAppTabs>
-
-      {tab === "pacientes" ? (
+      {ordenesSection === "pacientes" ? (
         <section className="fl-table-card">
           <div className="table-toolbar table-toolbar--filters">
             <div className="table-search">
@@ -977,7 +1050,7 @@ export default function App() {
               </thead>
               {pacientesFiltrados.length > 0 ? (
                 <tbody>
-                  {pacientesFiltrados.map((p) => {
+                  {pacientesPage.pageItems.map((p) => {
                     const medicoNombre = nombreMedico(p.medicoId);
                     return (
                       <tr key={p.id} className={p.activo ? undefined : "is-inactive"}>
@@ -1122,8 +1195,14 @@ export default function App() {
               </div>
             ) : null}
           </div>
+          <TablePagination
+            page={pacientesPage.page}
+            pageSize={pacientesPage.pageSize}
+            total={pacientesPage.total}
+            onPageChange={pacientesPage.setPage}
+          />
         </section>
-      ) : tab === "historial" ? (
+      ) : ordenesSection === "historial" ? (
         <HistorialEnviosPanel
           pacientes={pacientes}
           refreshKey={historialRefresh}
@@ -1135,7 +1214,7 @@ export default function App() {
             solicitarEnviar([paciente]);
           }}
         />
-      ) : tab === "config" ? (
+      ) : ordenesSection === "config" ? (
         <EmailConfigPanel />
       ) : (
         <section className="fl-table-card">
@@ -1186,7 +1265,7 @@ export default function App() {
               </thead>
               {medicosFiltrados.length > 0 ? (
                 <tbody>
-                  {medicosFiltrados.map((m) => {
+                  {medicosPage.pageItems.map((m) => {
                     const esPorDefecto = m.id === medicoSeleccionadoId;
                     return (
                       <tr
@@ -1344,6 +1423,12 @@ export default function App() {
               </div>
             ) : null}
           </div>
+          <TablePagination
+            page={medicosPage.page}
+            pageSize={medicosPage.pageSize}
+            total={medicosPage.total}
+            onPageChange={medicosPage.setPage}
+          />
         </section>
       )}
 
@@ -1471,7 +1556,7 @@ export default function App() {
         items={envioResultado?.items ?? []}
         omitidosSinEmail={envioResultado?.omitidosSinEmail ?? 0}
         onClose={() => setEnvioResultado(null)}
-        onVerHistorial={() => setTab("historial")}
+        onVerHistorial={() => setOrdenesSection("historial")}
       />
 
       <ConfirmDialog

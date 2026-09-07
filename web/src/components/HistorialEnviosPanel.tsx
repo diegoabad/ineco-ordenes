@@ -8,6 +8,7 @@ import type { EmailEnvio, Paciente } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ViewDetailModal } from "./ViewDetailModal";
 import { IconAlert, IconFile, IconPdf, IconRefresh, IconSearch, IconTrash } from "./Icons";
+import { TablePagination, TABLE_PAGE_SIZE } from "./TablePagination";
 
 type Props = {
   pacientes: Paciente[];
@@ -15,7 +16,7 @@ type Props = {
   onRetry: (paciente: Paciente) => void;
 };
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = TABLE_PAGE_SIZE;
 const MES_INICIO_Y = 2026;
 const MES_INICIO_M = 8;
 
@@ -130,8 +131,10 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
   }, [cargar, refreshKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE) || 1);
-  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, total);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   function handleRetry(envio: EmailEnvio) {
     const paciente = pacientes.find((p) => p.id === envio.pacienteId);
@@ -335,34 +338,13 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
           ) : null}
         </div>
 
-        {!loading && total > 0 ? (
-          <div className="table-pagination">
-            <span className="table-pagination__info">
-              {from}–{to} de {total}
-            </span>
-            <div className="table-pagination__nav">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                Anterior
-              </button>
-              <span className="table-pagination__page">
-                Página {page} de {totalPages}
-              </span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Siguiente
-              </button>
-            </div>
-          </div>
-        ) : null}
+        <TablePagination
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={loading ? 0 : total}
+          onPageChange={setPage}
+          disabled={loading}
+        />
       </section>
 
       <ConfirmDialog

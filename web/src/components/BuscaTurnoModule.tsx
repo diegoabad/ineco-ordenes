@@ -1,28 +1,34 @@
 import { useState } from "react";
+import type { BuscaTurnoSection } from "../lib/appNav";
+import { BUSCA_TURNO_SECTIONS } from "../lib/appNav";
 import BuscaTurnoApp from "./busca-turno/BuscaTurnoApp";
-import { ScrollableAppTabs } from "./ScrollableAppTabs";
-
-export type BuscaTurnoTab = "turnos" | "config";
 
 type CatalogStatus = {
   cacheDot: string;
   cacheLabel: string;
 };
 
+type Props = {
+  section: BuscaTurnoSection;
+  onSectionChange: (section: BuscaTurnoSection) => void;
+};
+
 /** Módulo Busca turno (Medexis) — layout alineado al resto de la app. */
-export function BuscaTurnoModule() {
-  const [tab, setTab] = useState<BuscaTurnoTab>("turnos");
+export function BuscaTurnoModule({ section, onSectionChange }: Props) {
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>({
     cacheDot: "loading",
     cacheLabel: "Cargando…",
   });
+
+  const sectionLabel =
+    BUSCA_TURNO_SECTIONS.find((s) => s.id === section)?.label ?? "Busca turno";
 
   return (
     <div className="app-shell app-shell--busca-turno">
       <header className="app-header">
         <div className="app-header__brand">
           <div>
-            <h1>Busca turno</h1>
+            <h1>{sectionLabel}</h1>
             <p>Turnos disponibles por prestación (Medexis)</p>
           </div>
         </div>
@@ -37,26 +43,9 @@ export function BuscaTurnoModule() {
         </div>
       </header>
 
-      <ScrollableAppTabs aria-label="Secciones busca turno">
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "turnos" ? " is-active" : ""}`}
-          onClick={() => setTab("turnos")}
-        >
-          Turnos
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "config" ? " is-active" : ""}`}
-          onClick={() => setTab("config")}
-        >
-          Configuración
-        </button>
-      </ScrollableAppTabs>
-
       <BuscaTurnoApp
-        section={tab}
-        onRequestSection={setTab}
+        section={section}
+        onRequestSection={onSectionChange}
         onCatalogStatus={setCatalogStatus}
       />
     </div>

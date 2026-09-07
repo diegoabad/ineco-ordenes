@@ -10,6 +10,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
+import { TablePagination } from "./TablePagination";
+import { useClientPagination } from "../hooks/useClientPagination";
 
 function presupuestoEsEditable(estado: PresupuestoEstado): boolean {
   return estado === "pendiente" || estado === "fallido";
@@ -154,6 +156,11 @@ export function PresupuestosPanel({
     );
   }, [items, busqueda, filtroEstado]);
 
+  const { page, setPage, pageItems, total, pageSize } = useClientPagination(
+    filtrados,
+    `${filtroEstado}|${busqueda.trim().toLowerCase()}`,
+  );
+
   const maxAcciones = ACCIONES_PRESUPUESTO;
 
   async function marcarEstado(p: Presupuesto, estado: "aceptado" | "rechazado") {
@@ -263,7 +270,7 @@ export function PresupuestosPanel({
             </thead>
             {!loading && filtrados.length > 0 ? (
               <tbody>
-                {filtrados.map((p) => {
+                {pageItems.map((p) => {
                   const puedeEnviar = presupuestoPermiteEnvio(p.estado);
                   const puedeEditar = presupuestoEsEditable(p.estado);
                   const guardandoEstaFila = guardandoEstadoId === p.id;
@@ -285,9 +292,11 @@ export function PresupuestosPanel({
                       <span
                         className={estadoChipClass(p.estado)}
                         title={
-                          (p.estado === "enviado" || p.estado === "fallido") && p.ultimoEnvioAt
-                            ? `Último intento: ${formatFechaHora(p.ultimoEnvioAt)}`
-                            : undefined
+                          p.ultimoEnvioAt && p.estado === "enviado"
+                            ? `Enviado: ${formatFechaHora(p.ultimoEnvioAt)}`
+                            : p.ultimoEnvioAt && p.estado === "fallido"
+                              ? `Último intento: ${formatFechaHora(p.ultimoEnvioAt)}`
+                              : undefined
                         }
                       >
                         {PRESUPUESTO_ESTADO_LABEL[p.estado]}
@@ -422,6 +431,14 @@ export function PresupuestosPanel({
             </div>
           ) : null}
         </div>
+
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={loading ? 0 : total}
+          onPageChange={setPage}
+          disabled={loading}
+        />
       </section>
 
       <PresupuestoFormModal

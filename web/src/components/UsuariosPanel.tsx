@@ -3,18 +3,20 @@ import { toast } from "react-toastify";
 import { useAuth, type AppModuleId, type AuthUser, type UserRole } from "../auth/AuthContext";
 import { usePendingUsers } from "../auth/PendingUsersContext";
 import { apiFetch } from "../config/api";
+import { useClientPagination } from "../hooks/useClientPagination";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconCheck, IconFile, IconPencil, IconPlus, IconTrash, IconX } from "./Icons";
 import { ScrollableAppTabs } from "./ScrollableAppTabs";
+import { TablePagination } from "./TablePagination";
 
 type Tab = "approved" | "pending" | "dominios";
 
 /** Pantallas que el admin puede marcar/desmarcar. */
 const SELECTABLE_MODULE_OPTIONS: { id: AppModuleId; label: string }[] = [
+  { id: "busca-turno", label: "Busca turno" },
   { id: "ordenes", label: "Órdenes" },
   { id: "presupuestos", label: "Presupuestos" },
   { id: "pami", label: "PAMI" },
-  { id: "busca-turno", label: "Busca turno" },
 ];
 
 const SELECTABLE_MODULE_IDS: AppModuleId[] = SELECTABLE_MODULE_OPTIONS.map(
@@ -121,6 +123,9 @@ export function UsuariosPanel() {
     if (isFirst) return;
     void load({ quiet: true });
   }, [pendingUsersCount, tab, load]);
+
+  const usersPage = useClientPagination(users, tab);
+  const domainsPage = useClientPagination(domains, "dominios");
 
   function openApprove(user: AuthUser) {
     setDraft({
@@ -369,7 +374,7 @@ export function UsuariosPanel() {
               </thead>
               {!domainsLoading && domains.length > 0 ? (
                 <tbody>
-                  {domains.map((d) => (
+                  {domainsPage.pageItems.map((d) => (
                     <tr key={d}>
                       <td>@{d}</td>
                       <td className="fl-col-actions fl-col-actions--2">
@@ -407,6 +412,14 @@ export function UsuariosPanel() {
               </div>
             ) : null}
           </div>
+
+          <TablePagination
+            page={domainsPage.page}
+            pageSize={domainsPage.pageSize}
+            total={domainsLoading ? 0 : domainsPage.total}
+            onPageChange={domainsPage.setPage}
+            disabled={domainsLoading}
+          />
         </section>
       ) : (
         <section className="fl-table-card">
@@ -422,7 +435,7 @@ export function UsuariosPanel() {
               </thead>
               {!loading && users.length > 0 ? (
                 <tbody>
-                  {users.map((u) => {
+                  {usersPage.pageItems.map((u) => {
                     const isSelf = u.id === currentUser?.id;
                     return (
                     <tr key={u.id}>
@@ -515,6 +528,14 @@ export function UsuariosPanel() {
               </div>
             ) : null}
           </div>
+
+          <TablePagination
+            page={usersPage.page}
+            pageSize={usersPage.pageSize}
+            total={loading ? 0 : usersPage.total}
+            onPageChange={usersPage.setPage}
+            disabled={loading}
+          />
         </section>
       )}
 

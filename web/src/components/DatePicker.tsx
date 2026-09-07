@@ -123,7 +123,16 @@ function calcularPosicionPopover(trigger: HTMLElement, compact = false): Popover
 }
 
 function textoDesdeValor(value: string): string {
-  return value ? formatFechaYmd(value) : "";
+  if (!value.trim()) return "";
+  // Forzar siempre dd/mm/aaaa (nunca mm/dd).
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const parsed = parseFechaDdMmAaaa(value);
+  if (parsed) {
+    const p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(parsed);
+    if (p) return `${p[3]}/${p[2]}/${p[1]}`;
+  }
+  return formatFechaYmd(value);
 }
 
 export function DatePicker({
@@ -427,14 +436,16 @@ export function DatePicker({
           ref={inputRef}
           type="text"
           id={fieldId}
+          lang="es-AR"
           className="fl-date-picker__field"
           disabled={disabled}
           inputMode="numeric"
           autoComplete="off"
           spellCheck={false}
-          placeholder={placeholder}
-          aria-label={ariaLabel ?? placeholder}
+          placeholder={placeholder || "dd/mm/aaaa"}
+          aria-label={ariaLabel ?? placeholder ?? "Fecha dd/mm/aaaa"}
           aria-invalid={inputInvalido}
+          title="Formato: dd/mm/aaaa"
           value={inputText}
           onChange={onInputChange}
           onFocus={onInputFocus}

@@ -25,9 +25,13 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconTrash } from "./Icons";
 import { PamiDetalleModal } from "./PamiDetalleModal";
 import { PamiResultados } from "./PamiResultados";
-import { ScrollableAppTabs } from "./ScrollableAppTabs";
+import type { PamiSection } from "../lib/appNav";
+import { PAMI_SECTIONS } from "../lib/appNav";
 
-type Tab = "analisis" | "historial";
+type Props = {
+  section: PamiSection;
+  onSectionChange: (section: PamiSection) => void;
+};
 
 type FileSlot = {
   file: File;
@@ -170,9 +174,8 @@ function readInitialDraft(): {
   };
 }
 
-export function PamiModule() {
+export function PamiModule({ section, onSectionChange }: Props) {
   const initial = useMemo(() => readInitialDraft(), []);
-  const [tab, setTab] = useState<Tab>("historial");
   const mesOptions = useMemo(() => buildMesOptions(), []);
   const [mes, setMes] = useState(initial.mes);
   const [presentacion, setPresentacion] = useState<FileSlot | null>(initial.presentacion);
@@ -220,8 +223,8 @@ export function PamiModule() {
   }, [loadHistorial]);
 
   useEffect(() => {
-    if (tab === "historial") void loadHistorial();
-  }, [tab, loadHistorial]);
+    if (section === "historial") void loadHistorial();
+  }, [section, loadHistorial]);
 
   const assignPresentacion = async (file: File | null) => {
     setResult(null);
@@ -311,7 +314,7 @@ export function PamiModule() {
       setError(null);
       clearPamiDraft();
       await loadHistorial();
-      setTab("historial");
+      onSectionChange("historial");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Error al procesar";
       setError(msg);
@@ -366,34 +369,17 @@ export function PamiModule() {
   };
 
   return (
-    <div className={`app-shell${tab === "analisis" ? " app-shell--scroll" : ""}`}>
+    <div className={`app-shell${section === "analisis" ? " app-shell--scroll" : ""}`}>
       <header className="app-header">
         <div className="app-header__brand">
           <div>
-            <h1>PAMI</h1>
+            <h1>{PAMI_SECTIONS.find((s) => s.id === section)?.label ?? "PAMI"}</h1>
             <p>Cruce Presentación INECO × Débitos PAMI</p>
           </div>
         </div>
       </header>
 
-      <ScrollableAppTabs aria-label="Secciones PAMI">
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "historial" ? " is-active" : ""}`}
-          onClick={() => setTab("historial")}
-        >
-          Historial
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "analisis" ? " is-active" : ""}`}
-          onClick={() => setTab("analisis")}
-        >
-          Análisis
-        </button>
-      </ScrollableAppTabs>
-
-      {tab === "analisis" ? (
+      {section === "analisis" ? (
         <>
           <section className="fl-table-card pami-upload-card">
             <div className="pami-upload-toolbar">
