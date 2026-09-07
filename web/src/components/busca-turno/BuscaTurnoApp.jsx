@@ -369,8 +369,6 @@ function profLabelConDoc(nombre, doc) {
   return f ? `${n} (${f})` : n;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 function sortProfesionalesAlfabetico(list) {
   return [...list].sort((a, b) =>
     String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', {
@@ -1042,7 +1040,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
 
       try {
       let allSlots = [];
-      const MAX_INTENTOS = 3;
+      const DAYS_PER_BLOCK = 21;
+      const PARALLEL_DAYS = 7;
+      const LIMITE_POR_DIA = 40;
       const MAX_PRESTADORES_POR_REQUEST = 10;
 
       const grupos = [];
@@ -1072,22 +1072,14 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         });
       };
 
-      for (let intento = 0; intento < MAX_INTENTOS; intento++) {
-        const offset = startOffset + intento * 7;
-        const desde = addDays(new Date(), offset);
-        const hasta = addDays(new Date(), offset + 7);
-
-        setStatus({
-          text: `Buscando del ${fmtDisplay(desde)} al ${fmtDisplay(hasta)}...`,
-          error: false,
-          visible: true,
-        });
-
+      const fetchDay = async (dayOffset) => {
+        const desde = addDays(new Date(), dayOffset);
+        const hasta = addDays(new Date(), dayOffset + 1);
         const fechaDesde = fmtDate(desde);
         const fechaHasta = fmtDate(hasta);
+        const modalidadValor = modalidad || 'PRESENCIAL';
 
         const requests = grupos.map(async (grupo) => {
-          const modalidadValor = modalidad || 'PRESENCIAL';
           const body = {
             prestacionCodigo: prestacionId,
             profesionalDocumentos: grupo.map((p) => String(p.doc)),
@@ -1098,7 +1090,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
               turnoEstado: 'D',
               modalidad: modalidadValor,
             },
-            limite: 20,
+            // Un día por request: con ventana semanal + limite bajo Medexis solo
+            // devolvía el primer día (ej. 7/9) y ocultaba el resto (8/9…).
+            limite: LIMITE_POR_DIA,
           };
           const res = await fetch(url, {
             method: 'POST',
@@ -1122,15 +1116,25 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         });
 
         const results = await Promise.all(requests);
-        for (const sl of results) {
-          allSlots.push(...sl);
+        return results.flat();
+      };
+
+      for (let i = 0; i < DAYS_PER_BLOCK; i += PARALLEL_DAYS) {
+        const batchOffsets = [];
+        for (let j = 0; j < PARALLEL_DAYS && i + j < DAYS_PER_BLOCK; j++) {
+          batchOffsets.push(startOffset + i + j);
         }
+        const batchDesde = addDays(new Date(), batchOffsets[0]);
+        const batchHasta = addDays(new Date(), batchOffsets[batchOffsets.length - 1]);
+        setStatus({
+          text: `Buscando del ${fmtDisplay(batchDesde)} al ${fmtDisplay(batchHasta)}...`,
+          error: false,
+          visible: true,
+        });
 
-        if (allSlots.length > 0) break;
-
-        if (intento < MAX_INTENTOS - 1) {
-          setStatus({ text: 'Sin resultados en ese rango, ampliando búsqueda...', error: false, visible: true });
-          await sleep(200);
+        const batchResults = await Promise.all(batchOffsets.map((offset) => fetchDay(offset)));
+        for (const sl of batchResults) {
+          allSlots.push(...sl);
         }
       }
 
@@ -1142,7 +1146,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         } else {
           setStatus({ text: 'No hay más turnos en ese rango.', error: false, visible: true });
         }
-        setSearchOffset(startOffset + 21);
+        setSearchOffset(startOffset + DAYS_PER_BLOCK);
         return;
       }
 
@@ -1151,7 +1155,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       );
 
       setSearchReturnedEmpty(false);
-      setSearchOffset(startOffset + 21);
+      setSearchOffset(startOffset + DAYS_PER_BLOCK);
       clearStatus();
       } catch (e) {
         setStatus({
