@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
-import { resolveAssetUrl } from "../config/api";
+import { blobToBase64 } from "../lib/blob";
 import { formatFechaHora, formatFechaYmd } from "../lib/fechas";
 import { formatNombrePersona } from "../lib/nombrePersona";
-import { deletePresupuesto, fetchPresupuestos, updatePresupuestoEstado } from "../services/dataService";
+import { renderPresupuestoPlantillaBody } from "../lib/presupuestoPlantilla";
+import { generarPdfPresupuesto, pdfBlobFromDoc } from "../pdf/generarPresupuestoPdf";
+import {
+  deletePresupuesto,
+  fetchPresupuestoPdfBlob,
+  fetchPresupuestoPlantillaConfig,
+  fetchPresupuestos,
+  restorePresupuestoPdf,
+  updatePresupuestoEstado,
+} from "../services/dataService";
 import type { ModalidadPresupuesto, Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -99,6 +108,7 @@ export function PresupuestosPanel({
   const [aBorrar, setABorrar] = useState<Presupuesto | null>(null);
   const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
+  const [viendoPdfId, setViendoPdfId] = useState<string | null>(null);
   const lastAddRequestKey = useRef(0);
 
   function upsertPresupuesto(saved: Presupuesto) {
@@ -179,18 +189,56 @@ export function PresupuestosPanel({
     }
   }
 
-  function handleVerPdf(p: Presupuesto) {
-    const url = resolveAssetUrl(p.pdfUrl);
-    if (!url) {
-      toast.warning("Este presupuesto no tiene PDF guardado");
-      return;
-    }
-    // Bustear caché: al editar se sobrescribe el mismo archivo en disco.
-    const sep = url.includes("?") ? "&" : "?";
-    window.open(`${url}${sep}t=${Date.now()}`, "_blank", "noopener,noreferrer");
+  function openPdfBlob(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
-  function handleEnviar(p: Presupuesto) {
+  async function regenerarYRestaurarPdf(p: Presupuesto): Promise<Blob> {
+    const plantilla = await fetchPresupuestoPlantillaConfig();
+    const body = renderPresupuestoPlantillaBody(plantilla.data.body, {
+      nombrePaciente: p.nombrePaciente,
+      email: p.email,
+      nombreProfesional: p.profesional,
+      modalidadTitulo: p.modalidadTitulo,
+      lugarEvaluacion: p.modalidadTextoPdf,
+      fecha: p.fecha,
+      items: p.items,
+      totalEfectivo: p.totalEfectivo,
+      total3Cuotas: p.total3Cuotas,
+    });
+    const blob = pdfBlobFromDoc(generarPdfPresupuesto({ fecha: p.fecha, body }));
+    const pdfBase64 = await blobToBase64(blob);
+    const updated = await restorePresupuestoPdf(p.id, pdfBase64);
+    upsertPresupuesto(updated);
+    return blob;
+  }
+
+  async function handleVerPdf(p: Presupuesto) {
+    if (viendoPdfId) return;
+    setViendoPdfId(p.id);
+    try {
+      try {
+        openPdfBlob(await fetchPresupuestoPdfBlob(p.id));
+        return;
+      } catch (error) {
+        const status = (error as Error & { status?: number; code?: string }).status;
+        const code = (error as Error & { code?: string }).code;
+        if (status !== 404 && code !== "PDF_MISSING") throw error;
+      }
+
+      toast.info("El PDF no estaba en el servidor; regenerándolo…");
+      openPdfBlob(await regenerarYRestaurarPdf(p));
+      toast.success("PDF restaurado en el servidor");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo abrir el PDF");
+    } finally {
+      setViendoPdfId(null);
+    }
+  }
+
+  async function handleEnviar(p: Presupuesto) {
     if (!p.email.trim()) {
       toast.warning("El presupuesto no tiene email cargado");
       return;
@@ -199,7 +247,27 @@ export function PresupuestosPanel({
       toast.warning("Este presupuesto no tiene PDF guardado");
       return;
     }
-    setEmailPreview(p);
+    if (viendoPdfId) return;
+    setViendoPdfId(p.id);
+    try {
+      try {
+        await fetchPresupuestoPdfBlob(p.id);
+        setEmailPreview(p);
+        return;
+      } catch (error) {
+        const status = (error as Error & { status?: number; code?: string }).status;
+        const code = (error as Error & { code?: string }).code;
+        if (status !== 404 && code !== "PDF_MISSING") throw error;
+      }
+      toast.info("El PDF no estaba en el servidor; regenerándolo antes de enviar…");
+      await regenerarYRestaurarPdf(p);
+      setEmailPreview(p);
+      toast.success("PDF restaurado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo preparar el envío");
+    } finally {
+      setViendoPdfId(null);
+    }
   }
 
   async function confirmarBorrar() {
@@ -363,7 +431,8 @@ export function PresupuestosPanel({
                             !puedeEnviar ||
                             !p.email.trim() ||
                             !p.pdfUrl ||
-                            emailPreview?.id === p.id
+                            emailPreview?.id === p.id ||
+                            viendoPdfId === p.id
                           }
                           onClick={() => void handleEnviar(p)}
                         >
@@ -376,10 +445,16 @@ export function PresupuestosPanel({
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--print"
-                          title={p.pdfUrl ? "Ver PDF" : "Sin PDF"}
+                          title={
+                            viendoPdfId === p.id
+                              ? "Abriendo PDF…"
+                              : p.pdfUrl
+                                ? "Ver PDF"
+                                : "Sin PDF"
+                          }
                           aria-label="Ver PDF"
-                          disabled={!p.pdfUrl || emailPreview?.id === p.id}
-                          onClick={() => handleVerPdf(p)}
+                          disabled={!p.pdfUrl || emailPreview?.id === p.id || viendoPdfId === p.id}
+                          onClick={() => void handleVerPdf(p)}
                         >
                           <IconPdf size={16} />
                         </button>

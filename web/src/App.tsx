@@ -48,6 +48,7 @@ import { PedidosSistemaPanel } from "./components/PedidosSistemaPanel";
 import { TablePagination } from "./components/TablePagination";
 import { useClientPagination } from "./hooks/useClientPagination";
 import { ViewDetailModal } from "./components/ViewDetailModal";
+import { Modal } from "./components/Modal";
 import { firmaSrc, firmaToDataUrlForPdf } from "./lib/firma";
 import { copiarLinkFirma } from "./lib/firmaLink";
 import { formatNombrePersona } from "./lib/nombrePersona";
@@ -152,6 +153,7 @@ export default function App() {
   const [medicoFormOpen, setMedicoFormOpen] = useState(false);
   const [editingMedico, setEditingMedico] = useState<Medico | null>(null);
   const [viewingMedico, setViewingMedico] = useState<Medico | null>(null);
+  const [previewFirma, setPreviewFirma] = useState<{ src: string; nombre: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
     message: string;
@@ -1304,15 +1306,28 @@ export default function App() {
                         </td>
                         <td>{m.matricula || "—"}</td>
                         <td className="fl-col-firma">
-                          {firmaSrc(m.firmaUrl, firmaCacheBust[m.id]) ? (
-                            <img
-                              src={firmaSrc(m.firmaUrl, firmaCacheBust[m.id])!}
-                              alt="Firma"
-                              className="firma-preview"
-                            />
-                          ) : (
-                            <span className="text-muted">Sin firma</span>
-                          )}
+                          {(() => {
+                            const src = firmaSrc(m.firmaUrl, firmaCacheBust[m.id]);
+                            if (!src) {
+                              return <span className="text-muted">Sin firma</span>;
+                            }
+                            return (
+                              <button
+                                type="button"
+                                className="firma-preview-btn"
+                                title="Ver firma ampliada"
+                                aria-label={`Ver firma de ${formatNombrePersona(m.nombre)}`}
+                                onClick={() =>
+                                  setPreviewFirma({
+                                    src,
+                                    nombre: formatNombrePersona(m.nombre),
+                                  })
+                                }
+                              >
+                                <img src={src} alt="" className="firma-preview" />
+                              </button>
+                            );
+                          })()}
                         </td>
                         <td className="fl-col-actions">
                           <div className="fl-table-actions">
@@ -1514,11 +1529,29 @@ export default function App() {
                 {
                   label: "Firma",
                   value: firmaSrc(viewingMedico.firmaUrl, firmaCacheBust[viewingMedico.id]) ? (
-                    <img
-                      src={firmaSrc(viewingMedico.firmaUrl, firmaCacheBust[viewingMedico.id])!}
-                      alt="Firma"
-                      className="firma-preview firma-preview--modal"
-                    />
+                    <button
+                      type="button"
+                      className="firma-preview-btn firma-preview-btn--modal"
+                      title="Ver firma ampliada"
+                      aria-label="Ver firma ampliada"
+                      onClick={() => {
+                        const src = firmaSrc(
+                          viewingMedico.firmaUrl,
+                          firmaCacheBust[viewingMedico.id],
+                        );
+                        if (!src) return;
+                        setPreviewFirma({
+                          src,
+                          nombre: formatNombrePersona(viewingMedico.nombre),
+                        });
+                      }}
+                    >
+                      <img
+                        src={firmaSrc(viewingMedico.firmaUrl, firmaCacheBust[viewingMedico.id])!}
+                        alt="Firma"
+                        className="firma-preview firma-preview--modal"
+                      />
+                    </button>
                   ) : (
                     <span className="text-muted">Sin firma</span>
                   ),
@@ -1527,6 +1560,18 @@ export default function App() {
             : []
         }
       />
+
+      <Modal
+        open={previewFirma !== null}
+        title={previewFirma ? `Firma · ${previewFirma.nombre}` : "Firma"}
+        onClose={() => setPreviewFirma(null)}
+      >
+        {previewFirma ? (
+          <div className="firma-lightbox">
+            <img src={previewFirma.src} alt={`Firma de ${previewFirma.nombre}`} />
+          </div>
+        ) : null}
+      </Modal>
 
       <FechaOrdenModal
         open={fechaPending !== null}

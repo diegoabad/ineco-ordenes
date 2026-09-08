@@ -1179,6 +1179,22 @@ export async function deletePresupuesto(id: string): Promise<void> {
   await deletePresupuestoPdfFile(id);
 }
 
+/** Reemplaza el PDF en disco y actualiza pdfUrl (sirve para recuperar archivos perdidos). */
+export async function restorePresupuestoPdf(
+  id: string,
+  pdfBase64: string,
+): Promise<Presupuesto> {
+  const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
+  if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
+  if (!pdfBase64.trim()) throw new Error("Falta el PDF");
+
+  const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
+  const saved = await savePresupuestoPdf(id, pdfBase64);
+  const presupuesto: Presupuesto = { ...current, pdfUrl: saved.publicUrl };
+  await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
+  return presupuesto;
+}
+
 function normalizeBuscaTurnoProf(raw: unknown): BuscaTurnoProfesional | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;

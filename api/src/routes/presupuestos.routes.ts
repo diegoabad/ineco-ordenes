@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { Router } from "express";
 import { normalizeNombrePersona } from "../lib/nombrePersona.js";
 import {
@@ -9,11 +10,13 @@ import {
   getPresupuestosConfig,
   listPresupuestos,
   PresupuestoEnvioError,
+  restorePresupuestoPdf,
   savePresupuestoPlantillaConfig,
   savePresupuestosConfig,
   updatePresupuesto,
   updatePresupuestoEstado,
 } from "../services/db.service.js";
+import { resolvePresupuestoPdfPath } from "../services/presupuesto-pdf.service.js";
 import { PRESUPUESTO_PLANTILLA_VARS } from "../services/presupuesto-plantilla-templates.js";
 import type { PresupuestoPlantillaConfig } from "../services/presupuesto-plantilla-templates.js";
 import {
@@ -270,6 +273,47 @@ router.post("/:id/enviar", async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : "Error al enviar presupuesto",
+    });
+  }
+});
+
+router.get("/:id/pdf", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const filePath = await resolvePresupuestoPdfPath(id);
+    if (!filePath) {
+      res.status(404).json({
+        ok: false,
+        code: "PDF_MISSING",
+        message: "El PDF no está en el servidor. Se puede regenerar desde el listado.",
+      });
+      return;
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="presupuesto-${id}.pdf"`,
+    );
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al leer el PDF",
+    });
+  }
+});
+
+router.put("/:id/pdf", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const pdfBase64 = String((req.body as { pdfBase64?: unknown })?.pdfBase64 ?? "").trim();
+    const data = await restorePresupuestoPdf(id, pdfBase64);
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al restaurar el PDF",
     });
   }
 });

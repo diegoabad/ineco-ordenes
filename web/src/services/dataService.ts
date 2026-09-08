@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, getApiUrl } from "../config/api";
 import type { EmailConfig } from "../types/email";
 import type { PresupuestoEmailConfig } from "../types/presupuestoEmail";
 import type { PresupuestoPlantillaConfig } from "../types/presupuestoPlantilla";
@@ -330,6 +330,41 @@ export async function updatePresupuestoEstado(
   const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/estado`, {
     method: "PATCH",
     body: JSON.stringify({ estado }),
+  });
+  return res.data;
+}
+
+export async function fetchPresupuestoPdfBlob(id: string): Promise<Blob> {
+  const response = await fetch(`${getApiUrl()}/api/presupuestos/${id}/pdf`, {
+    credentials: "include",
+  });
+  if (response.ok) {
+    return response.blob();
+  }
+
+  let message = `Error del servidor (${response.status})`;
+  let code: string | undefined;
+  try {
+    const raw = await response.text();
+    if (raw.trim()) {
+      const data = JSON.parse(raw) as { message?: string; code?: string };
+      if (data.message) message = data.message;
+      if (data.code) code = data.code;
+    }
+  } catch {
+    // ignore
+  }
+
+  throw Object.assign(new Error(message), { status: response.status, code });
+}
+
+export async function restorePresupuestoPdf(
+  id: string,
+  pdfBase64: string,
+): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/pdf`, {
+    method: "PUT",
+    body: JSON.stringify({ pdfBase64 }),
   });
   return res.data;
 }

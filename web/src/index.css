@@ -462,6 +462,18 @@ label {
   flex: 0 0 auto;
 }
 
+/* Gana a `.fl-table-card { flex: 1 }`: la barra de filtros no debe ocupar todo el alto. */
+.fl-table-card.metrics-filters-card {
+  flex: 0 0 auto;
+  min-height: auto;
+  align-self: stretch;
+}
+
+.fl-table-card.metrics-filters-card > .table-toolbar:only-child {
+  border-bottom: none;
+  border-radius: var(--radius-lg);
+}
+
 .metrics-filters {
   display: flex;
   flex-wrap: wrap;
@@ -1797,6 +1809,49 @@ tbody tr.is-selected-row td {
   padding: 2px 6px;
 }
 
+.firma-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 6px;
+  line-height: 0;
+}
+
+.firma-preview-btn:hover .firma-preview,
+.firma-preview-btn:focus-visible .firma-preview {
+  outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.firma-preview-btn--modal {
+  cursor: zoom-in;
+}
+
+.firma-lightbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 12rem;
+  padding: 0.75rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.firma-lightbox img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 36rem);
+  max-height: min(70vh, 28rem);
+  object-fit: contain;
+}
+
 .firma-preview--modal {
   height: auto;
   max-height: 180px;
@@ -2627,6 +2682,11 @@ tbody tr.is-inactive td {
   height: 32px;
   max-width: 72px;
   padding: 1px 2px;
+  pointer-events: none;
+}
+
+.fl-col-firma .firma-preview-btn {
+  vertical-align: middle;
 }
 
 .fl-col-firma .text-muted {
@@ -3600,6 +3660,11 @@ tbody tr.is-inactive td {
   .fl-table-card {
     flex: none;
     min-height: 20rem;
+  }
+
+  .fl-table-card.metrics-filters-card {
+    flex: 0 0 auto;
+    min-height: auto;
   }
 
   .table-wrap {

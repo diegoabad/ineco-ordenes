@@ -21,7 +21,12 @@ done
 export PORT="${PORT:-3000}"
 export UPLOADS_DIR="${UPLOADS_DIR:-/app/api/uploads/firmas}"
 
-mkdir -p /app/api/uploads/firmas
+mkdir -p \
+  /app/api/uploads/firmas \
+  /app/api/uploads/presupuestos \
+  /app/api/uploads/envios \
+  /app/api/uploads/pami \
+  /app/api/uploads/pedidos
 
 cd /app/api
 node dist/index.js &
