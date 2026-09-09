@@ -78,6 +78,7 @@ export function PacienteFormModal({
               id="paciente"
               value={form.paciente}
               onChange={(e) => set("paciente", e.target.value)}
+              onBlur={() => set("paciente", formatNombrePersona(form.paciente))}
               required
               autoFocus
             />
@@ -126,7 +127,7 @@ export function PacienteFormModal({
                 .filter((m) => m.activo || m.id === form.medicoId)
                 .map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.nombre}
+                  {formatNombrePersona(m.nombre)}
                   {m.especialidad ? ` · ${m.especialidad}` : ""}
                   {!m.activo ? " (inactivo)" : ""}
                 </option>

@@ -107,6 +107,7 @@ export function MedicoFormModal({
             id="medico-nombre"
             value={form.nombre}
             onChange={(e) => set("nombre", e.target.value)}
+            onBlur={() => set("nombre", formatNombrePersona(form.nombre))}
             required
             autoFocus
           />

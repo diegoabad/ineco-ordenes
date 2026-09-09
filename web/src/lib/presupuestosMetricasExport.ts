@@ -14,11 +14,17 @@ export type MetricasExportData = {
   mesLabel?: string;
   total: number;
   enviados: number;
+  pendientesEnvio: number;
   aceptados: number;
   rechazados: number;
   byEstado: { label: string; count: number; pct: number; tone?: "muted" | "ok" | "error" }[];
   byProfesional: { name: string; count: number }[];
   byPrestacion: { name: string; count: number }[];
+  byMotivoRechazo: {
+    name: string;
+    count: number;
+    detail?: { name: string; count: number }[];
+  }[];
 };
 
 const MARGIN = 42;
@@ -45,6 +51,11 @@ const KPI_ENVIADOS: KpiColors = {
   border: [191, 219, 254],
   accent: [37, 99, 235],
   bg: [239, 246, 255],
+};
+const KPI_WARN: KpiColors = {
+  border: [253, 230, 138],
+  accent: [217, 119, 6],
+  bg: [255, 251, 235],
 };
 const KPI_OK: KpiColors = {
   border: [187, 247, 208],
@@ -220,31 +231,45 @@ export function exportMetricasExcel(data: MetricasExportData): void {
     ["Periodo", periodoLabel(data)],
     ["Exportado", formatFechaYmd(fileStamp())],
     [],
-    ["Indicador", "Valor"],
-    ["Total", data.total],
-    ["Enviados", data.enviados],
-    ["Aceptados", data.aceptados],
-    ["Rechazados", data.rechazados],
-  ];
-  XLSX.utils.book_append_sheet(wb, sheetFromAoA(resumen, false), "Resumen");
-
-  const estados: (string | number)[][] = [
+    ["Resumen del periodo"],
+    ["Indicador", "Valor", "Nota"],
+    ["Total", data.total, "Todos los presupuestos del periodo"],
+    ["Enviados", data.enviados, "Incluye pendiente de respuesta, aceptados y rechazados"],
+    ["Pendientes de envío", data.pendientesEnvio, "Aún no enviados o con envío fallido"],
+    [],
+    ["De los enviados"],
     ["Estado", "Cantidad", "% sobre enviados"],
     ...data.byEstado.map((e) => [e.label, e.count, e.pct]),
   ];
-  XLSX.utils.book_append_sheet(wb, sheetFromAoA(estados), "Por estado");
+  XLSX.utils.book_append_sheet(wb, sheetFromAoA(resumen, false), "Resumen");
 
   const profs: (string | number)[][] = [
     ["Profesional", "Cantidad"],
-    ...data.byProfesional.map((p) => [p.name, p.count]),
+    ...(data.byProfesional.length
+      ? data.byProfesional.map((p) => [p.name, p.count])
+      : [["Sin datos", 0]]),
   ];
   XLSX.utils.book_append_sheet(wb, sheetFromAoA(profs), "Por profesional");
 
   const prests: (string | number)[][] = [
     ["Prestación", "Cantidad"],
-    ...data.byPrestacion.map((p) => [p.name, p.count]),
+    ...(data.byPrestacion.length
+      ? data.byPrestacion.map((p) => [p.name, p.count])
+      : [["Sin datos", 0]]),
   ];
   XLSX.utils.book_append_sheet(wb, sheetFromAoA(prests), "Por prestación");
+
+  const otrosDetalle = data.byMotivoRechazo.find((m) => m.name === "Otros")?.detail ?? [];
+  const motivos: (string | number)[][] = [
+    ["Motivo de rechazo", "Cantidad"],
+    ...data.byMotivoRechazo.map((m) => [m.name, m.count]),
+    [],
+    ["Detalle de Otros", "Cantidad"],
+    ...(otrosDetalle.length > 0
+      ? otrosDetalle.map((d) => [d.name, d.count] as (string | number)[])
+      : [["No hay textos en Otros", "—"]]),
+  ];
+  XLSX.utils.book_append_sheet(wb, sheetFromAoA(motivos), "Motivos rechazo");
 
   XLSX.writeFile(wb, `${baseName(data)}.xlsx`);
 }
@@ -268,11 +293,14 @@ function drawKpiCards(ctx: PdfCtx, data: MetricasExportData) {
   const items = [
     { label: "Total", value: String(data.total), colors: KPI_TOTAL },
     { label: "Enviados", value: String(data.enviados), colors: KPI_ENVIADOS },
-    { label: "Aceptados", value: String(data.aceptados), colors: KPI_OK },
-    { label: "Rechazados", value: String(data.rechazados), colors: KPI_ERROR },
+    {
+      label: "Pend. envío",
+      value: String(data.pendientesEnvio),
+      colors: KPI_WARN,
+    },
   ];
   const gap = 10;
-  const cols = 4;
+  const cols = 3;
   const cardW = (CONTENT_W - gap * (cols - 1)) / cols;
   const cardH = 52;
   ensureSpace(ctx, cardH + 8);
@@ -308,12 +336,14 @@ function drawTable(
   rows: string[][],
   toneForRow?: (rowIndex: number) => "muted" | "ok" | "error" | undefined,
 ) {
-  ensureSpace(ctx, 36);
+  // Espacio extra arriba de cada título de sección
+  ctx.y += 10;
+  ensureSpace(ctx, 46);
   ctx.doc.setFont("helvetica", "bold");
   ctx.doc.setFontSize(12);
   ctx.doc.setTextColor(...TEXT);
   ctx.doc.text(title, MARGIN, ctx.y);
-  ctx.y += 14;
+  ctx.y += 16;
 
   const colW = CONTENT_W / headers.length;
   const rowH = 18;
@@ -390,23 +420,13 @@ export function exportMetricasPdf(data: MetricasExportData): void {
   doc.setFontSize(10);
   doc.setTextColor(...MUTED);
   doc.text(`Periodo: ${periodo}`, MARGIN, ctx.y);
-  ctx.y += 14;
-  doc.setFontSize(8);
-  doc.text(`Exportado: ${formatFechaYmd(fileStamp())}`, MARGIN, ctx.y);
   ctx.y += 18;
 
   drawKpiCards(ctx, data);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(...MUTED);
-  ensureSpace(ctx, 12);
-  doc.text("% sobre enviados (sin pendientes ni fallidos)", MARGIN, ctx.y);
-  ctx.y += 12;
-
   drawTable(
     ctx,
-    "Por estado",
+    "De los enviados",
     ["Estado", "Cantidad", "%"],
     data.byEstado.map((e) => [e.label, String(e.count), `${e.pct}%`]),
     (i) => data.byEstado[i]?.tone,
@@ -415,13 +435,33 @@ export function exportMetricasPdf(data: MetricasExportData): void {
     ctx,
     "Por profesional",
     ["Profesional", "Cantidad"],
-    data.byProfesional.map((p) => [p.name, String(p.count)]),
+    data.byProfesional.length
+      ? data.byProfesional.map((p) => [p.name, String(p.count)])
+      : [["Sin datos", "0"]],
   );
   drawTable(
     ctx,
     "Por prestación",
     ["Prestación", "Cantidad"],
-    data.byPrestacion.map((p) => [p.name, String(p.count)]),
+    data.byPrestacion.length
+      ? data.byPrestacion.map((p) => [p.name, String(p.count)])
+      : [["Sin datos", "0"]],
+  );
+  drawTable(
+    ctx,
+    "Motivos de rechazo",
+    ["Motivo", "Cantidad"],
+    data.byMotivoRechazo.map((m) => [m.name, String(m.count)]),
+  );
+
+  const otrosDetalle = data.byMotivoRechazo.find((m) => m.name === "Otros")?.detail ?? [];
+  drawTable(
+    ctx,
+    "Detalle de Otros",
+    ["Texto escrito", "Cantidad"],
+    otrosDetalle.length > 0
+      ? otrosDetalle.map((d) => [d.name, String(d.count)])
+      : [["No hay textos en Otros", "—"]],
   );
 
   drawFootersOnAllPages(doc);

@@ -27,6 +27,7 @@ import { PamiDetalleModal } from "./PamiDetalleModal";
 import { PamiResultados } from "./PamiResultados";
 import type { PamiSection } from "../lib/appNav";
 import { PAMI_SECTIONS } from "../lib/appNav";
+import { formatNombrePersona } from "../lib/nombrePersona";
 
 type Props = {
   section: PamiSection;
@@ -498,8 +499,11 @@ export function PamiModule({ section, onSectionChange }: Props) {
                                   <ul className="pami-tip__list pami-tip__list--coinc">
                                     {coincidencias.slice(0, 12).map((c) => (
                                       <li key={c.afiliadoNormalizado}>
-                                        <span className="pami-tip__nombre" title={c.nombre}>
-                                          {c.nombre}
+                                        <span
+                                          className="pami-tip__nombre"
+                                          title={formatNombrePersona(c.nombre)}
+                                        >
+                                          {formatNombrePersona(c.nombre)}
                                         </span>
                                         <span className="pami-tip__meta" title={c.afiliadoOriginal}>
                                           {c.afiliadoOriginal}

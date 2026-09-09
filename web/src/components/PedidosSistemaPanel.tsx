@@ -18,6 +18,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconFile, IconPlus, IconSearch, IconTrash, IconX } from "./Icons";
 import { PedidoSistemaFormModal } from "./PedidoSistemaFormModal";
 import { PedidosColorSelect, type PedidosColorOption } from "./PedidosColorSelect";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
 
@@ -209,8 +210,11 @@ export function PedidosSistemaPanel() {
                     >
                       {formatDateOnly(p.creadoAt)}
                     </td>
-                    <td className="pedidos-col-usuario" title={p.solicitadoPor}>
-                      {p.solicitadoPor}
+                    <td
+                      className="pedidos-col-usuario"
+                      title={formatNombrePersona(p.solicitadoPor)}
+                    >
+                      {formatNombrePersona(p.solicitadoPor)}
                     </td>
                     <td className="pedidos-col-titulo" title={p.titulo}>
                       {p.titulo}
@@ -343,7 +347,7 @@ export function PedidosSistemaPanel() {
                 </div>
                 <div className="detail-list__row">
                   <dt>Usuario</dt>
-                  <dd>{viewing.solicitadoPor}</dd>
+                  <dd>{formatNombrePersona(viewing.solicitadoPor)}</dd>
                 </div>
                 <div className="detail-list__row">
                   <dt>Sección</dt>

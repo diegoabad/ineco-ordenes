@@ -557,6 +557,12 @@ export function PresupuestoFormModal({
                 id="presup-nombre"
                 value={form.nombrePaciente}
                 onChange={(e) => setForm((f) => ({ ...f, nombrePaciente: e.target.value }))}
+                onBlur={() =>
+                  setForm((f) => ({
+                    ...f,
+                    nombrePaciente: formatNombrePersona(f.nombrePaciente),
+                  }))
+                }
                 required
                 autoFocus
               />

@@ -476,9 +476,10 @@ label {
 
 .metrics-filters {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-end;
   gap: 0.75rem 1rem;
+  width: 100%;
 }
 
 .metrics-filters .form-group {
@@ -502,6 +503,7 @@ label {
 }
 
 .metrics-filters__date {
+  flex: 0 0 auto;
   min-width: 10.5rem;
 }
 
@@ -516,19 +518,26 @@ label {
 }
 
 .metrics-filters__month {
-  min-width: 12.5rem;
+  flex: 0 0 auto;
+  min-width: 15.5rem;
 }
 
 .metrics-filters__month select {
   box-sizing: border-box;
+  width: 100%;
+  min-width: 15.5rem;
   min-height: 2.35rem;
   height: 2.35rem;
   margin: 0;
-  min-width: 12.5rem;
+  /* Sin padding vertical: el de form controls + height fija cortaba "Septiembre". */
+  padding: 0 2.25rem 0 0.85rem;
+  line-height: 2.35rem;
 }
 
 .metrics-filters__export {
-  flex: 0 0 auto;
+  /* Solo el espacio libre del mismo renglón; no bajar a una fila full-width. */
+  flex: 1 1 auto;
+  min-width: 10.5rem;
 }
 
 .metrics-filters__export-label {
@@ -543,6 +552,7 @@ label {
   align-items: center;
   gap: 0.45rem;
   min-height: 2.35rem;
+  width: 100%;
 }
 
 .metrics-filters__export .btn {
@@ -551,9 +561,10 @@ label {
   justify-content: center;
   gap: 0.4rem;
   box-sizing: border-box;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 2.35rem;
   height: 2.35rem;
-  min-width: 5.25rem;
   padding: 0 0.9rem;
 }
 
@@ -658,7 +669,7 @@ label {
 
 .metrics-estado-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
   gap: 0.55rem;
 }
 
@@ -713,10 +724,19 @@ label {
   color: var(--muted);
 }
 
-.metrics-grid-2 {
+.metrics-grid-2,
+.metrics-grid-detail {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: 0.75rem;
+}
+
+.metrics-grid-2 {
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.metrics-grid-detail {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
 }
 
 .metrics-card {
@@ -724,6 +744,19 @@ label {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 0.85rem 1rem 1rem;
+  min-width: 0;
+}
+
+.metrics-card--estados {
+  padding-bottom: 0.95rem;
+}
+
+.metrics-card--estados .metrics-estado-row {
+  margin: 0;
+}
+
+.metrics-card--error {
+  border-color: color-mix(in srgb, #dc2626 22%, var(--border));
 }
 
 .metrics-card__title {
@@ -745,6 +778,15 @@ label {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  cursor: default;
+}
+
+.metrics-bars__row {
+  cursor: default;
+}
+
+.metrics-bars__row--has-detail {
+  cursor: default;
 }
 
 .metrics-bars__meta {
@@ -783,6 +825,22 @@ label {
   background: var(--primary);
   min-width: 0;
   transition: width 0.25s ease;
+}
+
+.metrics-bars--error .metrics-bars__fill {
+  background: #dc2626;
+}
+
+@media (max-width: 1100px) {
+  .metrics-grid-detail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .metrics-grid-detail {
+    grid-template-columns: 1fr;
+  }
 }
 
 .app-main {
@@ -986,6 +1044,28 @@ label {
   background: var(--bg-subtle, var(--bg));
   color: var(--text-muted);
   cursor: default;
+}
+
+button.chip.chip--button {
+  /* Mismo tamaño que .chip; no usar font:inherit (pisa font-size del chip). */
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 550;
+  line-height: 1.3;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+button.chip--button:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+button.chip--button:disabled {
+  opacity: 0.7;
+  cursor: wait;
 }
 
 .chip--muted {
@@ -2039,6 +2119,7 @@ td {
   text-overflow: ellipsis;
   white-space: nowrap;
   box-sizing: border-box;
+  cursor: default;
 }
 
 th {
@@ -2874,6 +2955,11 @@ tbody tr.is-inactive td {
   color: var(--primary);
 }
 
+.fl-texto-principal,
+.fl-texto-truncado {
+  cursor: default;
+}
+
 .fl-texto-principal {
   font-weight: 600;
   color: var(--text);
@@ -3665,6 +3751,15 @@ tbody tr.is-inactive td {
   .fl-table-card.metrics-filters-card {
     flex: 0 0 auto;
     min-height: auto;
+  }
+
+  .metrics-filters {
+    flex-wrap: wrap;
+  }
+
+  .metrics-filters__export {
+    flex: 1 1 auto;
+    min-width: min(100%, 12rem);
   }
 
   .table-wrap {

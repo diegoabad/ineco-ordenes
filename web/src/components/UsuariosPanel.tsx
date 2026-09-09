@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { IconCheck, IconFile, IconPencil, IconPlus, IconTrash, IconX } from "./Icons";
 import { ScrollableAppTabs } from "./ScrollableAppTabs";
 import { TablePagination } from "./TablePagination";
+import { formatNombrePersona } from "../lib/nombrePersona";
 
 type Tab = "approved" | "pending" | "dominios";
 
@@ -439,7 +440,7 @@ export function UsuariosPanel() {
                     const isSelf = u.id === currentUser?.id;
                     return (
                     <tr key={u.id}>
-                      <td>{u.nombre}</td>
+                      <td>{formatNombrePersona(u.nombre)}</td>
                       <td>{u.email}</td>
                       <td>
                         {tab === "pending" ? (
@@ -560,7 +561,7 @@ export function UsuariosPanel() {
             </div>
             <div className="fl-modal__body">
               <p className="confirm-dialog__message">
-                <strong>{draft.nombre}</strong>{" "}
+                <strong>{formatNombrePersona(draft.nombre)}</strong>{" "}
                 <span className="usuarios-draft-email">({draft.email})</span>
               </p>
               <label className="form-group">
@@ -628,7 +629,7 @@ export function UsuariosPanel() {
         title="Rechazar solicitud"
         message={
           rejectTarget
-            ? `¿Rechazar a ${rejectTarget.nombre} (${rejectTarget.email})? Se le enviará un email.`
+            ? `¿Rechazar a ${formatNombrePersona(rejectTarget.nombre)} (${rejectTarget.email})? Se le enviará un email.`
             : ""
         }
         confirmLabel={saving ? "Rechazando…" : "Rechazar"}
@@ -641,7 +642,7 @@ export function UsuariosPanel() {
         title="Eliminar usuario"
         message={
           deleteTarget
-            ? `¿Eliminar a ${deleteTarget.nombre} (${deleteTarget.email})? Va a perder el acceso a la app.`
+            ? `¿Eliminar a ${formatNombrePersona(deleteTarget.nombre)} (${deleteTarget.email})? Va a perder el acceso a la app.`
             : ""
         }
         confirmLabel={saving ? "Eliminando…" : "Eliminar"}

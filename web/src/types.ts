@@ -105,6 +105,12 @@ export type PresupuestosConfig = {
   tiposPrestacion: TipoPrestacion[];
   profesionales: ProfesionalPresupuesto[];
   modalidades: ModalidadPresupuesto[];
+  motivosRechazo: MotivoRechazoPresupuesto[];
+};
+
+export type MotivoRechazoPresupuesto = {
+  id: string;
+  label: string;
 };
 
 export type ProfesionalPresupuesto = {
@@ -190,6 +196,8 @@ export type Presupuesto = {
   total3Cuotas: number;
   estado: PresupuestoEstado;
   pdfUrl: string | null;
+  /** Motivo elegido o escrito al marcar como rechazado. */
+  motivoRechazo: string | null;
   /** ISO del último intento de envío (éxito o fallo). */
   ultimoEnvioAt: string | null;
   creadoAt?: string;

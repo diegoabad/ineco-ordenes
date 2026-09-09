@@ -861,7 +861,7 @@ export default function App() {
       onNavigate={handleNavigate}
       allowedModules={allowedModules}
       isAdmin={user?.role === "admin"}
-      userName={user?.nombre}
+      userName={formatNombrePersona(user?.nombre ?? "") || undefined}
       onLogout={() => void logout()}
     />
   );
@@ -1083,7 +1083,7 @@ export default function App() {
                               className="chip chip--default"
                               title={
                                 medicoPorDefecto?.nombre
-                                  ? `Profesional por defecto: ${medicoPorDefecto.nombre}`
+                                  ? `Profesional por defecto: ${formatNombrePersona(medicoPorDefecto.nombre)}`
                                   : "Sin profesional por defecto"
                               }
                             >
@@ -1482,7 +1482,7 @@ export default function App() {
                       className="chip chip--default"
                       title={
                         medicoPorDefecto?.nombre
-                          ? `Profesional por defecto: ${medicoPorDefecto.nombre}`
+                          ? `Profesional por defecto: ${formatNombrePersona(medicoPorDefecto.nombre)}`
                           : "Sin profesional por defecto"
                       }
                     >

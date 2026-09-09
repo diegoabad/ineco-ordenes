@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
 import { normalizeNombrePersona } from "../lib/nombrePersona.js";
-import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
+import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, MotivoRechazoPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
 import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
@@ -122,6 +122,10 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     typeof raw.ultimoEnvioAt === "string" && raw.ultimoEnvioAt.trim()
       ? raw.ultimoEnvioAt.trim()
       : null;
+  const motivoRechazo =
+    typeof raw.motivoRechazo === "string" && raw.motivoRechazo.trim()
+      ? raw.motivoRechazo.trim()
+      : null;
   return {
     id,
     fecha: String(raw.fecha ?? fechaHoyIso()),
@@ -136,6 +140,7 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     total3Cuotas: toMoney(raw.total3Cuotas),
     estado,
     pdfUrl,
+    motivoRechazo: estado === "rechazado" ? motivoRechazo : null,
     ultimoEnvioAt,
     creadoAt: readCreadoAt(raw),
   };
@@ -155,6 +160,7 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     total3Cuotas: p.total3Cuotas,
     estado: p.estado,
     pdfUrl: p.pdfUrl,
+    motivoRechazo: p.estado === "rechazado" ? p.motivoRechazo : null,
     ultimoEnvioAt: p.ultimoEnvioAt,
     ...(p.creadoAt ? { creadoAt: p.creadoAt } : {}),
   };
@@ -262,6 +268,24 @@ function normalizeModalidadesPresupuesto(raw: unknown): ModalidadPresupuesto[] {
   return result.length > 0
     ? result
     : DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m }));
+}
+
+function normalizeMotivosRechazoPresupuesto(raw: unknown): MotivoRechazoPresupuesto[] {
+  if (!Array.isArray(raw)) return [];
+  const result: MotivoRechazoPresupuesto[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const label = String(obj.label ?? obj.nombre ?? "").trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const id = String(obj.id ?? "").trim() || randomUUID();
+    result.push({ id, label });
+  }
+  return result;
 }
 
 async function resolveModalidadPresupuesto(modalidadId: string): Promise<{
@@ -707,6 +731,7 @@ export async function getPresupuestosConfig(): Promise<PresupuestosConfig> {
       tiposPrestacion: DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })),
       profesionales: [],
       modalidades: DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
+      motivosRechazo: [],
     };
   }
   const data = snap.data() as Record<string, unknown>;
@@ -714,6 +739,7 @@ export async function getPresupuestosConfig(): Promise<PresupuestosConfig> {
     tiposPrestacion: normalizeTiposPrestacion(data.tiposPrestacion),
     profesionales: normalizeProfesionalesPresupuesto(data.profesionales),
     modalidades: normalizeModalidadesPresupuesto(data.modalidades),
+    motivosRechazo: normalizeMotivosRechazoPresupuesto(data.motivosRechazo),
   };
 }
 
@@ -727,7 +753,13 @@ export async function savePresupuestosConfig(input: PresupuestosConfig): Promise
   if (modalidades.length === 0) {
     throw new Error("Debe haber al menos una modalidad");
   }
-  const config: PresupuestosConfig = { tiposPrestacion: tipos, profesionales, modalidades };
+  const motivosRechazo = normalizeMotivosRechazoPresupuesto(input.motivosRechazo);
+  const config: PresupuestosConfig = {
+    tiposPrestacion: tipos,
+    profesionales,
+    modalidades,
+    motivosRechazo,
+  };
   await setDoc(doc(firestore, CONFIG, PRESUPUESTOS_CONFIG_DOC), config, { merge: true });
   return config;
 }
@@ -947,6 +979,7 @@ async function marcarPresupuestoEnvioFallido(presupuesto: Presupuesto): Promise<
   const fallido: Presupuesto = {
     ...presupuesto,
     estado: "fallido",
+    motivoRechazo: null,
     ultimoEnvioAt: nowIso(),
   };
   await setDoc(
@@ -998,6 +1031,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     total3Cuotas: items.reduce((s, i) => s + i.precio3Cuotas, 0),
     estado: "pendiente",
     pdfUrl,
+    motivoRechazo: null,
     ultimoEnvioAt: null,
     creadoAt: nowIso(),
   };
@@ -1069,6 +1103,7 @@ export async function updatePresupuesto(
     total3Cuotas: items.reduce((s, i) => s + i.precio3Cuotas, 0),
     estado: "pendiente",
     pdfUrl,
+    motivoRechazo: null,
   };
 
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
@@ -1156,6 +1191,7 @@ const PRESUPUESTO_ESTADOS_MANUALES: PresupuestoEstado[] = ["aceptado", "rechazad
 export async function updatePresupuestoEstado(
   id: string,
   estado: PresupuestoEstado,
+  motivoRechazo?: string | null,
 ): Promise<Presupuesto> {
   const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
   if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
@@ -1165,9 +1201,20 @@ export async function updatePresupuestoEstado(
   }
 
   const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
-  if (current.estado === estado) return current;
+  const motivo =
+    estado === "rechazado"
+      ? String(motivoRechazo ?? "").trim() || null
+      : null;
 
-  const presupuesto: Presupuesto = { ...current, estado };
+  if (current.estado === estado && current.motivoRechazo === motivo) {
+    return current;
+  }
+
+  const presupuesto: Presupuesto = {
+    ...current,
+    estado,
+    motivoRechazo: motivo,
+  };
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
   return presupuesto;
 }
