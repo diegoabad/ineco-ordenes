@@ -3,8 +3,10 @@ import path from "node:path";
 import { Router } from "express";
 import { normalizeNombrePersona } from "../lib/nombrePersona.js";
 import {
+  aceptarPresupuesto,
   createPresupuesto,
   deletePresupuesto,
+  ensurePresupuestoLinkPago,
   enviarPresupuesto,
   getPresupuestoPlantillaConfig,
   getPresupuestosConfig,
@@ -343,6 +345,36 @@ router.put("/:id/pdf", async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : "Error al restaurar el PDF",
+    });
+  }
+});
+
+router.post("/:id/preparar-link-pago", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const data = await ensurePresupuestoLinkPago(id);
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al preparar el link de pago",
+    });
+  }
+});
+
+router.post("/:id/aceptar", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const enviarEmail = raw.enviarEmail === true;
+    const subject = typeof raw.subject === "string" ? raw.subject : undefined;
+    const body = typeof raw.body === "string" ? raw.body : undefined;
+    const data = await aceptarPresupuesto(id, { enviarEmail, subject, body });
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al aceptar el presupuesto",
     });
   }
 });

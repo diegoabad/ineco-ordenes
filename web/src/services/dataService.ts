@@ -338,6 +338,28 @@ export async function updatePresupuestoEstado(
   return res.data;
 }
 
+export async function prepararPresupuestoLinkPago(id: string): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(
+    `/api/presupuestos/${id}/preparar-link-pago`,
+    { method: "POST", body: "{}" },
+  );
+  return res.data;
+}
+
+export async function aceptarPresupuesto(
+  id: string,
+  input: { enviarEmail: boolean; subject?: string; body?: string },
+): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(
+    `/api/presupuestos/${id}/aceptar`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return res.data;
+}
+
 export async function fetchPresupuestoPdfBlob(id: string): Promise<Blob> {
   const response = await fetch(`${getApiUrl()}/api/presupuestos/${id}/pdf`, {
     credentials: "include",

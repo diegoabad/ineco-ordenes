@@ -17,6 +17,7 @@ import {
   IconTrash,
 } from "./components/Icons";
 import { LoadingBlock } from "./components/InecoMark";
+import { InicioPanel } from "./components/InicioPanel";
 import {
   EnvioResultadoModal,
   type EnvioResultadoItem,
@@ -105,6 +106,7 @@ function firstAllowedModule(
   canAccess: (m: AppModuleId) => boolean,
 ): AppModule {
   const order: AppModule[] = [
+    "inicio",
     "busca-turno",
     "ordenes",
     "presupuestos",
@@ -112,13 +114,14 @@ function firstAllowedModule(
     "pedidos-sistema",
     "usuarios",
   ];
-  return order.find((m) => canAccess(m)) ?? "ordenes";
+  return order.find((m) => canAccess(m)) ?? "inicio";
 }
 
 export default function App() {
   const { user, loading: authLoading, logout, canAccessModule } = useAuth();
   const allowedModules = useMemo(() => {
     const all: AppModule[] = [
+      "inicio",
       "busca-turno",
       "ordenes",
       "presupuestos",
@@ -129,7 +132,7 @@ export default function App() {
     return all.filter((m) => canAccessModule(m));
   }, [canAccessModule]);
 
-  const [module, setModule] = useState<AppModule>("ordenes");
+  const [module, setModule] = useState<AppModule>("inicio");
   const [ordenesSection, setOrdenesSection] = useState<OrdenesSection>("pacientes");
   const [presupuestosSection, setPresupuestosSection] =
     useState<PresupuestosSection>("presupuestos");
@@ -917,7 +920,9 @@ export default function App() {
     <div className="app-layout">
       {sidebar}
       <div className="app-main">
-        {module === "presupuestos" ? (
+        {module === "inicio" ? (
+          <InicioPanel userName={formatNombrePersona(user?.nombre ?? "") || undefined} />
+        ) : module === "presupuestos" ? (
           <PresupuestosModule
             section={presupuestosSection}
             onSectionChange={setPresupuestosSection}

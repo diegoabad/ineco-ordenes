@@ -200,6 +200,9 @@ export type Presupuesto = {
   motivoRechazo: string | null;
   /** ISO del último intento de envío (éxito o fallo). */
   ultimoEnvioAt: string | null;
+  mpPreferenceId: string | null;
+  mpInitPoint: string | null;
+  linkPagoEnviadoAt: string | null;
   creadoAt?: string;
 };
 

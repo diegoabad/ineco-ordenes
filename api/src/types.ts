@@ -142,6 +142,12 @@ export type Presupuesto = {
   motivoRechazo: string | null;
   /** ISO del último intento de envío (éxito o fallo). */
   ultimoEnvioAt: string | null;
+  /** Preferencia Checkout Pro de Mercado Pago. */
+  mpPreferenceId: string | null;
+  /** Link de pago (init_point) de Mercado Pago. */
+  mpInitPoint: string | null;
+  /** ISO del último envío del mail con link de pago. */
+  linkPagoEnviadoAt: string | null;
   creadoAt?: string;
 };
 
@@ -225,6 +231,7 @@ export type PamiAnalisisCreateInput = {
 
 /** Módulos / pantallas de la app. */
 export type AppModuleId =
+  | "inicio"
   | "ordenes"
   | "presupuestos"
   | "pami"
@@ -233,6 +240,7 @@ export type AppModuleId =
   | "usuarios";
 
 export const ALL_APP_MODULES: AppModuleId[] = [
+  "inicio",
   "ordenes",
   "presupuestos",
   "pami",

@@ -163,8 +163,8 @@ export function requireModule(...modules: AppModuleId[]) {
       next();
       return;
     }
-    // Pedidos sistema es acceso fijo para todo usuario autenticado
-    if (modules.includes("pedidos-sistema")) {
+    // Inicio y Pedidos sistema: acceso fijo para todo usuario autenticado
+    if (modules.includes("inicio") || modules.includes("pedidos-sistema")) {
       next();
       return;
     }

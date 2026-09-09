@@ -285,6 +285,15 @@ label {
   gap: 0.3rem;
 }
 
+.app-sidebar__nav-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-bottom: 0.55rem;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
 .app-sidebar__bottom {
   margin-top: auto;
   display: flex;
@@ -450,6 +459,40 @@ label {
 .app-sidebar__subbtn.is-active {
   background: var(--primary-subtle);
   color: var(--primary);
+}
+
+/* —— Inicio —— */
+.inicio-panel {
+  gap: 1rem;
+}
+
+.inicio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.85rem;
+  align-content: start;
+}
+
+.inicio-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.9rem 1rem 1.05rem;
+  min-height: 8.5rem;
+}
+
+.inicio-card__title {
+  margin: 0 0 0.55rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.inicio-card__empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 /* —— Métricas presupuestos —— */
@@ -4468,6 +4511,25 @@ tbody tr.is-inactive td {
 .config-section__head {
   margin-bottom: 0.95rem;
   flex-shrink: 0;
+}
+
+.config-section__head--with-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.config-section__kind {
+  margin: 0;
+  flex: 0 1 auto;
+  min-width: 10.5rem;
+}
+
+.config-section__kind select {
+  width: 100%;
+  max-width: 14rem;
 }
 
 .config-section__title {

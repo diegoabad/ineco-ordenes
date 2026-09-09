@@ -20,11 +20,11 @@ export type AppSection =
   | BuscaTurnoSection;
 
 export type AppNavTarget =
+  | { module: "inicio" | "pedidos-sistema" | "usuarios"; section?: undefined }
   | { module: "ordenes"; section: OrdenesSection }
   | { module: "presupuestos"; section: PresupuestosSection }
   | { module: "pami"; section: PamiSection }
-  | { module: "busca-turno"; section: BuscaTurnoSection }
-  | { module: "pedidos-sistema" | "usuarios"; section?: undefined };
+  | { module: "busca-turno"; section: BuscaTurnoSection };
 
 export const ORDENES_SECTIONS: { id: OrdenesSection; label: string }[] = [
   { id: "pacientes", label: "Pacientes" },

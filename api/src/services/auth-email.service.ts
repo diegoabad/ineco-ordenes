@@ -10,6 +10,7 @@ function ensureSendGrid(): void {
 }
 
 const MODULE_LABELS: Record<AppModuleId, string> = {
+  inicio: "Inicio",
   ordenes: "Órdenes",
   presupuestos: "Presupuestos",
   pami: "PAMI",

@@ -341,3 +341,15 @@ export function IconPedidos(p: IconProps) {
   );
 }
 
+/** Inicio / home. */
+export function IconHome(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 10v10h14V10" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
+  );
+}
+

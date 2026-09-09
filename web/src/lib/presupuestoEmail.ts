@@ -11,6 +11,7 @@ const TEMPLATE_VAR_ALIASES: Record<string, PresupuestoEmailTemplateVar> = {
   nombre: "nombrePaciente",
   fecha: "fechaPresupuesto",
   profesional: "nombreProfesional",
+  link: "linkPago",
 };
 
 const moneyFormatter = new Intl.NumberFormat("es-AR", {
@@ -44,6 +45,7 @@ export type PresupuestoEmailVarsInput = {
   totalEfectivo: number;
   total3Cuotas: number;
   items: PresupuestoItem[];
+  linkPago?: string;
 };
 
 export function buildPresupuestoEmailVars(
@@ -58,11 +60,13 @@ export function buildPresupuestoEmailVars(
     total3Cuotas: formatMoney(input.total3Cuotas),
     cantidadPrestaciones: String(input.items.length),
     listaPrestaciones: formatListaPrestaciones(input.items),
+    linkPago: input.linkPago?.trim() || "",
   };
 }
 
 export function buildPresupuestoEmailVarsFromPresupuesto(
   p: Presupuesto,
+  linkPago?: string,
 ): Record<PresupuestoEmailTemplateVar, string> {
   return buildPresupuestoEmailVars({
     nombrePaciente: p.nombrePaciente,
@@ -72,6 +76,7 @@ export function buildPresupuestoEmailVarsFromPresupuesto(
     totalEfectivo: p.totalEfectivo,
     total3Cuotas: p.total3Cuotas,
     items: p.items,
+    linkPago,
   });
 }
 
@@ -84,5 +89,18 @@ export function renderPresupuestoEmailPreview(
     subject:
       applyPresupuestoEmailTemplate(config.subject, vars).trim() || `Presupuesto - ${nombre}`,
     body: applyPresupuestoEmailTemplate(config.body, vars),
+  };
+}
+
+export function renderLinkPagoEmailPreview(
+  config: Pick<PresupuestoEmailConfig, "linkPagoSubject" | "linkPagoBody">,
+  vars: Record<PresupuestoEmailTemplateVar, string>,
+): { subject: string; body: string } {
+  const nombre = vars.nombrePaciente || "paciente";
+  return {
+    subject:
+      applyPresupuestoEmailTemplate(config.linkPagoSubject, vars).trim() ||
+      `Link de pago - ${nombre}`,
+    body: applyPresupuestoEmailTemplate(config.linkPagoBody, vars),
   };
 }

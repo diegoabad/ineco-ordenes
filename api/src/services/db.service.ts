@@ -31,6 +31,11 @@ import {
 import { savePedidoFoto } from "./pedidos-files.service.js";
 import { sendPedidoSistemaEmail } from "./pedidos-email.service.js";
 import {
+  createPreference,
+  initPointPreference,
+  MercadoPagoError,
+} from "./mercadopago.client.js";
+import {
   presupuestoEmailConfigWithDefaults,
   type PresupuestoEmailConfig,
 } from "./presupuesto-email-templates.js";
@@ -40,7 +45,7 @@ import {
 } from "./presupuesto-plantilla-templates.js";
 import { deleteEnvioPdfFile } from "./envio-pdf.service.js";
 import { deletePresupuestoPdfFile, readPresupuestoPdfBase64, savePresupuestoPdf } from "./presupuesto-pdf.service.js";
-import { sendPresupuestoEmail } from "./email.service.js";
+import { sendLinkPagoEmail, sendPresupuestoEmail } from "./email.service.js";
 
 const MEDICOS = "ordenes_medicos";
 const PACIENTES = "ordenes_pacientes";
@@ -126,6 +131,18 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     typeof raw.motivoRechazo === "string" && raw.motivoRechazo.trim()
       ? raw.motivoRechazo.trim()
       : null;
+  const mpPreferenceId =
+    typeof raw.mpPreferenceId === "string" && raw.mpPreferenceId.trim()
+      ? raw.mpPreferenceId.trim()
+      : null;
+  const mpInitPoint =
+    typeof raw.mpInitPoint === "string" && raw.mpInitPoint.trim()
+      ? raw.mpInitPoint.trim()
+      : null;
+  const linkPagoEnviadoAt =
+    typeof raw.linkPagoEnviadoAt === "string" && raw.linkPagoEnviadoAt.trim()
+      ? raw.linkPagoEnviadoAt.trim()
+      : null;
   return {
     id,
     fecha: String(raw.fecha ?? fechaHoyIso()),
@@ -142,6 +159,9 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     pdfUrl,
     motivoRechazo: estado === "rechazado" ? motivoRechazo : null,
     ultimoEnvioAt,
+    mpPreferenceId,
+    mpInitPoint,
+    linkPagoEnviadoAt,
     creadoAt: readCreadoAt(raw),
   };
 }
@@ -162,6 +182,9 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     pdfUrl: p.pdfUrl,
     motivoRechazo: p.estado === "rechazado" ? p.motivoRechazo : null,
     ultimoEnvioAt: p.ultimoEnvioAt,
+    mpPreferenceId: p.mpPreferenceId,
+    mpInitPoint: p.mpInitPoint,
+    linkPagoEnviadoAt: p.linkPagoEnviadoAt,
     ...(p.creadoAt ? { creadoAt: p.creadoAt } : {}),
   };
 }
@@ -673,6 +696,9 @@ export async function getPresupuestoEmailConfig(): Promise<PresupuestoEmailConfi
     fromName: typeof data.fromName === "string" ? data.fromName : undefined,
     subject: typeof data.subject === "string" ? data.subject : undefined,
     body: typeof data.body === "string" ? data.body : undefined,
+    linkPagoSubject:
+      typeof data.linkPagoSubject === "string" ? data.linkPagoSubject : undefined,
+    linkPagoBody: typeof data.linkPagoBody === "string" ? data.linkPagoBody : undefined,
   });
 }
 
@@ -683,13 +709,24 @@ export async function savePresupuestoEmailConfig(
   const fromName = input.fromName.trim();
   const subject = input.subject.trim();
   const body = input.body.trim();
+  const linkPagoSubject = input.linkPagoSubject.trim();
+  const linkPagoBody = input.linkPagoBody.trim();
 
   if (!fromEmail) throw new Error("El email remitente es obligatorio");
   if (!fromName) throw new Error("El nombre remitente es obligatorio");
-  if (!subject) throw new Error("El asunto es obligatorio");
-  if (!body) throw new Error("El cuerpo del mail es obligatorio");
+  if (!subject) throw new Error("El asunto del presupuesto es obligatorio");
+  if (!body) throw new Error("El cuerpo del presupuesto es obligatorio");
+  if (!linkPagoSubject) throw new Error("El asunto del link de pago es obligatorio");
+  if (!linkPagoBody) throw new Error("El cuerpo del link de pago es obligatorio");
 
-  const config: PresupuestoEmailConfig = { fromEmail, fromName, subject, body };
+  const config: PresupuestoEmailConfig = {
+    fromEmail,
+    fromName,
+    subject,
+    body,
+    linkPagoSubject,
+    linkPagoBody,
+  };
   await setDoc(
     doc(firestore, PRESUPUESTOS_CONFIG_COLLECTION, PRESUPUESTO_EMAIL_CONFIG_DOC),
     config,
@@ -1033,6 +1070,9 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     pdfUrl,
     motivoRechazo: null,
     ultimoEnvioAt: null,
+    mpPreferenceId: null,
+    mpInitPoint: null,
+    linkPagoEnviadoAt: null,
     creadoAt: nowIso(),
   };
 
@@ -1217,6 +1257,122 @@ export async function updatePresupuestoEstado(
   };
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
   return presupuesto;
+}
+
+/** Crea (o reutiliza) el link de Checkout Pro para el total en 3 cuotas. */
+export async function ensurePresupuestoLinkPago(id: string): Promise<Presupuesto> {
+  const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
+  if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
+
+  const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
+  if (current.mpPreferenceId && current.mpInitPoint) {
+    return current;
+  }
+
+  const monto = current.total3Cuotas;
+  if (!(monto > 0)) {
+    throw new Error("El presupuesto no tiene un total en 3 cuotas válido para generar el link");
+  }
+
+  const title =
+    `Presupuesto ${current.nombrePaciente}`.trim().slice(0, 256) || "Presupuesto INECO";
+
+  let preference;
+  try {
+    preference = await createPreference({
+      items: [
+        {
+          title,
+          quantity: 1,
+          unit_price: monto,
+          currency_id: "ARS",
+        },
+      ],
+      external_reference: `ineco-presupuesto-${id}`,
+      payer: current.email ? { email: current.email } : undefined,
+      payment_methods: {
+        installments: 3,
+        default_installments: 3,
+      },
+      metadata: {
+        ineco_presupuesto_id: id,
+      },
+      auto_return: "approved",
+    });
+  } catch (error) {
+    if (error instanceof MercadoPagoError) {
+      throw new Error(`Mercado Pago no pudo crear el link de pago: ${error.message}`);
+    }
+    throw error;
+  }
+
+  const link = initPointPreference(preference);
+  if (!link || !preference.id) {
+    throw new Error("Mercado Pago no devolvió un link de pago válido");
+  }
+
+  const presupuesto: Presupuesto = {
+    ...current,
+    mpPreferenceId: preference.id,
+    mpInitPoint: link,
+  };
+  await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
+  return presupuesto;
+}
+
+export type AceptarPresupuestoInput = {
+  enviarEmail: boolean;
+  subject?: string;
+  body?: string;
+};
+
+/** Marca aceptado y, si corresponde, genera link MP y envía el mail de pago. */
+export async function aceptarPresupuesto(
+  id: string,
+  input: AceptarPresupuestoInput,
+): Promise<Presupuesto> {
+  const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
+  if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
+
+  let current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
+  if (current.estado === "aceptado" && !input.enviarEmail) {
+    return current;
+  }
+
+  if (input.enviarEmail) {
+    if (!current.email.trim()) {
+      throw new Error("El presupuesto no tiene email cargado");
+    }
+    current = await ensurePresupuestoLinkPago(id);
+    await sendLinkPagoEmail({
+      toEmail: current.email,
+      nombrePaciente: current.nombrePaciente,
+      profesional: current.profesional,
+      fechaPresupuesto: current.fecha,
+      totalEfectivo: current.totalEfectivo,
+      total3Cuotas: current.total3Cuotas,
+      cantidadPrestaciones: current.items.length,
+      items: current.items,
+      linkPago: current.mpInitPoint || "",
+      subject: input.subject,
+      body: input.body,
+    });
+    current = {
+      ...current,
+      estado: "aceptado",
+      motivoRechazo: null,
+      linkPagoEnviadoAt: nowIso(),
+    };
+  } else {
+    current = {
+      ...current,
+      estado: "aceptado",
+      motivoRechazo: null,
+    };
+  }
+
+  await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(current));
+  return current;
 }
 
 export async function deletePresupuesto(id: string): Promise<void> {

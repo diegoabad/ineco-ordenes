@@ -17,6 +17,7 @@ const STORAGE_KEY = "ineco-ordenes.lastNavByUser";
 const LEGACY_STORAGE_KEY = "ineco-ordenes.lastModuleByUser";
 
 const VALID_MODULES = new Set<AppModuleId>([
+  "inicio",
   "ordenes",
   "presupuestos",
   "pami",
