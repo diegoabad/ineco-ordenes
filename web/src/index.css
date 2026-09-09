@@ -816,6 +816,8 @@ label {
   width: min(22rem, 70vw);
   min-width: min(14rem, 70vw);
   max-width: min(22rem, calc(100vw - 2rem));
+  max-height: none;
+  overflow: visible;
 }
 
 .metrics-bars__tip-wrap:hover .pami-tip__bubble,
