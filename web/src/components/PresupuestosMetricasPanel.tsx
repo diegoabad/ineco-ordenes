@@ -203,7 +203,7 @@ function computeStats(
     {
       name: "Otros",
       count: otrosTotal,
-      detail: otrosDetalle.length > 0 ? otrosDetalle : undefined,
+      detail: otrosDetalle,
     },
   ];
 
@@ -261,22 +261,66 @@ function BarList({
         <ul className={`metrics-bars${accent ? ` metrics-bars--${accent}` : ""}`}>
           {rows.map((row) => {
             const width = `${Math.round((row.count / max) * 100)}%`;
-            const detailTitle =
-              row.detail && row.detail.length > 0
-                ? row.detail.map((d) => `${d.name} (${d.count})`).join("\n")
-                : row.name;
-            return (
-              <li
-                key={row.name}
-                className={`metrics-bars__row${row.detail?.length ? " metrics-bars__row--has-detail" : ""}`}
-                title={detailTitle}
-              >
+            const isOtros = row.name === "Otros";
+            const detail = row.detail ?? [];
+            const detailTotal = Math.max(
+              1,
+              detail.reduce((acc, d) => acc + d.count, 0),
+            );
+            const tipId = `metrics-motivo-detail-${row.name.replace(/\s+/g, "-").toLowerCase()}`;
+
+            const meta = (
+              <>
                 <div className="metrics-bars__meta">
                   <span className="metrics-bars__name">{row.name}</span>
                   <span className="metrics-bars__count">{row.count}</span>
                 </div>
                 <div className="metrics-bars__track" aria-hidden>
                   <div className="metrics-bars__fill" style={{ width }} />
+                </div>
+              </>
+            );
+
+            if (!isOtros) {
+              return (
+                <li key={row.name} className="metrics-bars__row">
+                  {meta}
+                </li>
+              );
+            }
+
+            return (
+              <li key={row.name} className="metrics-bars__row metrics-bars__row--has-detail">
+                <div className="pami-tip metrics-bars__tip-wrap">
+                  <div
+                    className="metrics-bars__tip-hit"
+                    tabIndex={0}
+                    aria-describedby={tipId}
+                  >
+                    {meta}
+                  </div>
+                  <span id={tipId} className="pami-tip__bubble" role="tooltip">
+                    <span className="pami-tip__title">Detalle de Otros</span>
+                    {detail.length > 0 ? (
+                      <ul className="pami-tip__list pami-tip__list--motivos">
+                        {detail.map((d) => (
+                          <li key={d.name}>
+                            <span className="pami-tip__motivo" title={d.name}>
+                              {d.name}
+                            </span>
+                            <span className="pami-tip__stats">
+                              <span className="pami-tip__cant">{d.count}</span>
+                              <span className="pami-tip__pct">
+                                {((d.count / detailTotal) * 100).toFixed(0)}%
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="pami-tip__fallback">No hay otros motivos</p>
+                    )}
+                  </span>
                 </div>
               </li>
             );

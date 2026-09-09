@@ -602,9 +602,9 @@ export function PamiModule({ section, onSectionChange }: Props) {
                   </tbody>
                 ) : null}
               </table>
-              {loadingHist && historial.length === 0 ? (
+              {loadingHist ? (
                 <div className="fl-table-empty fl-table-empty--fill">
-                  <LoadingBlock label="Cargando…" />
+                  <LoadingBlock label="Cargando historial…" />
                 </div>
               ) : historial.length === 0 ? (
                 <div className="fl-table-empty fl-table-empty--fill">

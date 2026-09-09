@@ -297,14 +297,14 @@ label {
   border-top: 1px solid var(--border);
 }
 
-/* Flat items (Pedidos / Usuarios): mismo activo sólido que las subpestañas. */
+/* Flat items (Pedidos / Usuarios): mismo activo sólido que el acordeón. */
 .app-sidebar__nav--config .app-sidebar__btn.is-active {
   background: var(--primary);
   color: #fff;
 }
 
 .app-sidebar__nav--config .app-sidebar__btn.is-active:hover {
-  background: var(--primary-hover);
+  background: var(--primary);
   color: #fff;
 }
 
@@ -366,19 +366,29 @@ label {
   color: var(--primary);
 }
 
-.app-sidebar__btn:hover:not(.is-active) {
-  background: var(--primary-subtle);
-  color: var(--primary-hover);
+.app-sidebar__btn:hover {
+  background: var(--primary);
+  color: #fff;
 }
 
-.app-sidebar__btn.is-active {
-  background: var(--primary-subtle);
+.app-sidebar__btn:hover .app-sidebar__btn-icon,
+.app-sidebar__btn:hover .app-sidebar__acc-chevron {
+  opacity: 1;
+}
+
+.app-sidebar__btn:hover .app-nav-badge {
+  background: #fff;
   color: var(--primary);
 }
 
-.app-sidebar__btn.is-active:hover {
-  background: color-mix(in srgb, var(--primary-subtle) 70%, var(--primary));
-  color: var(--primary-hover);
+.app-sidebar__btn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.app-sidebar__btn.is-active .app-sidebar__btn-icon,
+.app-sidebar__btn.is-active .app-sidebar__acc-chevron {
+  opacity: 1;
 }
 
 .app-sidebar__btn-icon {
@@ -432,19 +442,14 @@ label {
   transition: background 0.15s, color 0.15s;
 }
 
-.app-sidebar__subbtn:hover:not(.is-active) {
+.app-sidebar__subbtn:hover {
   background: var(--primary-subtle);
-  color: var(--primary-hover);
+  color: var(--primary);
 }
 
 .app-sidebar__subbtn.is-active {
-  background: var(--primary);
-  color: #fff;
-}
-
-.app-sidebar__subbtn.is-active:hover {
-  background: var(--primary-hover);
-  color: #fff;
+  background: var(--primary-subtle);
+  color: var(--primary);
 }
 
 /* —— Métricas presupuestos —— */
@@ -454,7 +459,8 @@ label {
   gap: 0.85rem;
   min-height: 0;
   flex: 1 1 0%;
-  overflow: auto;
+  overflow-x: clip;
+  overflow-y: auto;
   padding-bottom: 0.5rem;
 }
 
@@ -786,7 +792,64 @@ label {
 }
 
 .metrics-bars__row--has-detail {
-  cursor: default;
+  position: relative;
+  z-index: 1;
+}
+
+.metrics-bars__row--has-detail:hover,
+.metrics-bars__row--has-detail:focus-within {
+  z-index: 20;
+}
+
+.metrics-bars__tip-wrap {
+  display: block;
+  width: 100%;
+  justify-content: stretch;
+}
+
+.metrics-bars__tip-wrap .pami-tip__bubble {
+  left: auto;
+  right: 0;
+  top: auto;
+  bottom: calc(100% + 0.45rem);
+  transform: translateY(0.15rem);
+  width: min(22rem, 70vw);
+  min-width: min(14rem, 70vw);
+  max-width: min(22rem, calc(100vw - 2rem));
+}
+
+.metrics-bars__tip-wrap:hover .pami-tip__bubble,
+.metrics-bars__tip-wrap:focus-within .pami-tip__bubble {
+  transform: translateY(0);
+}
+
+.metrics-bars__tip-wrap .pami-tip__bubble::after {
+  left: auto;
+  right: 0.85rem;
+  top: 100%;
+  bottom: auto;
+  border: 6px solid transparent;
+  border-top-color: var(--surface);
+  border-bottom-color: transparent;
+  filter: drop-shadow(0 1px 0 var(--border));
+}
+
+.metrics-bars__tip-hit {
+  display: block;
+  width: 100%;
+  cursor: help;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.metrics-bars__tip-hit:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.metrics-card:has(.pami-tip:hover),
+.metrics-card:has(.pami-tip:focus-within) {
+  position: relative;
+  z-index: 6;
 }
 
 .metrics-bars__meta {
@@ -795,6 +858,7 @@ label {
   gap: 0.5rem;
   margin-bottom: 0.2rem;
   font-size: 0.8125rem;
+  align-items: center;
 }
 
 .metrics-bars__name {
@@ -2092,6 +2156,11 @@ tbody tr.is-selected-row td {
   background: var(--surface);
 }
 
+/* Con empty/loading: altura útil para centrar el contenido bajo la cabecera */
+.table-wrap:has(> .fl-table-empty--fill) {
+  min-height: 16rem;
+}
+
 .fl-table-card > .table-wrap:last-child {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
@@ -3085,15 +3154,19 @@ tbody tr.is-inactive td {
 
 .fl-table-empty--fill {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Debajo de la cabecera sticky: se ve thead + cuerpo con el loader al medio */
+  top: 2.85rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  min-height: 0;
+  min-height: 12rem;
   background: var(--surface);
-  z-index: 2;
+  z-index: 1;
 }
 
 .fl-table-empty .ineco-loading {
@@ -5235,6 +5308,8 @@ tbody tr.is-inactive td {
 .pami-historial > .fl-table-card {
   flex: 1 1 0%;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
 }
 
@@ -5244,6 +5319,12 @@ tbody tr.is-inactive td {
   flex: none;
   max-height: none;
   min-height: 0;
+}
+
+/* Loading / vacío: ocupar el alto de la card y centrar el bloque */
+.pami-historial .table-wrap:has(> .fl-table-empty--fill) {
+  flex: 1 1 0%;
+  min-height: 16rem;
 }
 
 .pami-table--historial {

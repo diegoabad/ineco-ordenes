@@ -276,23 +276,11 @@ export function EmailConfigPanel() {
                     <div className="config-vars__list">
                       {group.keys.map((v) => {
                         const enUso = usedVars.has(v);
-                        const enAsunto = usedInSubject.has(v);
-                        const enCuerpo = usedInBody.has(v);
-                        const donde = enUso
-                          ? [enAsunto ? "asunto" : null, enCuerpo ? "cuerpo" : null]
-                              .filter(Boolean)
-                              .join(" y ")
-                          : "";
                         return (
                           <button
                             key={v}
                             type="button"
                             className={`config-var${enUso ? " is-used" : " is-unused"}`}
-                            title={
-                              enUso
-                                ? `En uso (${donde}) · Insertar {{${v}}}`
-                                : `Sin usar · Insertar {{${v}}}`
-                            }
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => insertVariable(v)}
                           >
