@@ -5,6 +5,7 @@ import { usePendingUsers } from "../auth/PendingUsersContext";
 import { apiFetch } from "../config/api";
 import { useClientPagination } from "../hooks/useClientPagination";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { LoadingBlock } from "./InecoMark";
 import { IconCheck, IconFile, IconPencil, IconPlus, IconTrash, IconX } from "./Icons";
 import { ScrollableAppTabs } from "./ScrollableAppTabs";
 import { TablePagination } from "./TablePagination";
@@ -398,7 +399,7 @@ export function UsuariosPanel() {
             </table>
             {domainsLoading ? (
               <div className="fl-table-empty fl-table-empty--fill">
-                <p className="fl-table-empty__title">Cargando dominios…</p>
+                <LoadingBlock label="Cargando dominios…" />
               </div>
             ) : domains.length === 0 ? (
               <div className="fl-table-empty fl-table-empty--fill">
@@ -509,7 +510,7 @@ export function UsuariosPanel() {
             </table>
             {loading ? (
               <div className="fl-table-empty fl-table-empty--fill">
-                <p className="fl-table-empty__title">Cargando usuarios…</p>
+                <LoadingBlock label="Cargando usuarios…" />
               </div>
             ) : users.length === 0 ? (
               <div className="fl-table-empty fl-table-empty--fill">

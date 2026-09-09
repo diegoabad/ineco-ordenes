@@ -197,39 +197,217 @@ function ensureSpace(ctx: PdfCtx, needed: number): void {
   ctx.y = drawHeader(ctx.doc, ctx.periodo);
 }
 
-const HEADER_STYLE: XLSX.CellStyle = {
-  font: { bold: true, sz: 11, color: { rgb: "111827" } },
-  fill: { patternType: "solid", fgColor: { rgb: "F3F4F6" } },
+/** Estilos Excel (xlsx-js-style). */
+const XL = {
+  bordo: "A61948",
+  text: "111827",
+  muted: "6B7280",
+  white: "FFFFFF",
+  headerBg: "A61948",
+  sectionBg: "FCE7EF",
+  titleBg: "FFF5F8",
+  rowAlt: "F9FAFB",
+  border: "E5E7EB",
+  thin: {
+    top: { style: "thin", color: { rgb: "E5E7EB" } },
+    bottom: { style: "thin", color: { rgb: "E5E7EB" } },
+    left: { style: "thin", color: { rgb: "E5E7EB" } },
+    right: { style: "thin", color: { rgb: "E5E7EB" } },
+  } as XLSX.CellStyle["border"],
 };
 
-function sheetFromAoA(rows: (string | number)[][], boldFirst = true): XLSX.WorkSheet {
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  if (boldFirst && rows.length > 0) {
-    const cols = rows[0]!.length;
-    for (let c = 0; c < cols; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
-      if (cell) cell.s = HEADER_STYLE;
+type XlRowKind = "title" | "meta" | "section" | "header" | "data" | "empty";
+
+type XlBuiltSheet = {
+  rows: (string | number)[][];
+  kinds: XlRowKind[];
+  colWidths: number[];
+};
+
+function styleCell(
+  cell: XLSX.CellObject,
+  kind: XlRowKind,
+  col: number,
+  altRow = false,
+): void {
+  const base: XLSX.CellStyle = {
+    alignment: {
+      vertical: "center",
+      wrapText: kind === "title" || kind === "section",
+      horizontal: col > 0 && kind === "data" ? "right" : "left",
+    },
+    border: kind === "header" || kind === "data" ? XL.thin : undefined,
+  };
+
+  if (kind === "title") {
+    cell.s = {
+      ...base,
+      font: { bold: true, sz: 18, color: { rgb: XL.bordo } },
+      fill: { patternType: "solid", fgColor: { rgb: XL.titleBg } },
+      alignment: { vertical: "center", horizontal: "left" },
+    };
+    return;
+  }
+  if (kind === "meta") {
+    cell.s = {
+      ...base,
+      font: {
+        bold: col === 0,
+        sz: 11,
+        color: { rgb: col === 0 ? XL.text : XL.muted },
+      },
+    };
+    return;
+  }
+  if (kind === "section") {
+    cell.s = {
+      ...base,
+      font: { bold: true, sz: 13, color: { rgb: XL.bordo } },
+      fill: { patternType: "solid", fgColor: { rgb: XL.sectionBg } },
+      alignment: { vertical: "center", horizontal: "left" },
+    };
+    return;
+  }
+  if (kind === "header") {
+    cell.s = {
+      ...base,
+      font: { bold: true, sz: 11, color: { rgb: XL.white } },
+      fill: { patternType: "solid", fgColor: { rgb: XL.headerBg } },
+      alignment: {
+        vertical: "center",
+        horizontal: col === 0 ? "left" : "center",
+      },
+    };
+    return;
+  }
+  if (kind === "data") {
+    cell.s = {
+      ...base,
+      font: { sz: 11, color: { rgb: XL.text } },
+      fill: altRow
+        ? { patternType: "solid", fgColor: { rgb: XL.rowAlt } }
+        : { patternType: "solid", fgColor: { rgb: XL.white } },
+      alignment: {
+        vertical: "center",
+        horizontal: col === 0 ? "left" : "right",
+      },
+    };
+    return;
+  }
+  cell.s = base;
+}
+
+function buildSheet(built: XlBuiltSheet): XLSX.WorkSheet {
+  const { rows, kinds, colWidths } = built;
+  const maxCols = Math.max(1, ...rows.map((r) => r.length), colWidths.length);
+  const padded = rows.map((r) => {
+    const copy = [...r];
+    while (copy.length < maxCols) copy.push("");
+    return copy;
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(padded.length ? padded : [[""]]);
+  const merges: XLSX.Range[] = [];
+  let dataIndex = 0;
+
+  for (let r = 0; r < kinds.length; r++) {
+    const kind = kinds[r]!;
+    if (kind === "title" || kind === "section") {
+      merges.push({ s: { r, c: 0 }, e: { r, c: maxCols - 1 } });
+    }
+    const altRow = kind === "data" ? dataIndex % 2 === 1 : false;
+    if (kind === "data") dataIndex += 1;
+    if (kind === "header" || kind === "section") dataIndex = 0;
+
+    for (let c = 0; c < maxCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      let cell = ws[addr] as XLSX.CellObject | undefined;
+      if (!cell) {
+        cell = { t: "s", v: "" };
+        ws[addr] = cell;
+      }
+      styleCell(cell, kind, c, altRow);
     }
   }
-  const widths = rows[0]!.map((_, i) => {
-    let max = 10;
-    for (const row of rows) {
-      const v = row[i];
-      max = Math.max(max, String(v ?? "").length + 2);
-    }
-    return { wch: Math.min(40, max) };
+
+  if (merges.length) ws["!merges"] = merges;
+  ws["!cols"] = colWidths.map((w) => ({ wch: w }));
+  ws["!rows"] = kinds.map((k) => {
+    if (k === "title") return { hpt: 28 };
+    if (k === "section") return { hpt: 22 };
+    if (k === "header") return { hpt: 20 };
+    if (k === "empty") return { hpt: 10 };
+    return { hpt: 18 };
   });
-  ws["!cols"] = widths;
   return ws;
+}
+
+function colWidthsFromRows(
+  rows: (string | number)[][],
+  mins: number[],
+  max = 48,
+): number[] {
+  const cols = Math.max(mins.length, ...rows.map((r) => r.length), 1);
+  const widths: number[] = [];
+  for (let i = 0; i < cols; i++) {
+    let w = mins[i] ?? 12;
+    for (const row of rows) {
+      w = Math.max(w, String(row[i] ?? "").length + 2);
+    }
+    widths.push(Math.min(max, Math.max(mins[i] ?? 10, w)));
+  }
+  return widths;
+}
+
+function sheetTable(
+  title: string,
+  headers: string[],
+  dataRows: (string | number)[][],
+  opts?: { subtitle?: [string, string]; extraSection?: { title: string; headers: string[]; rows: (string | number)[][] } },
+): XLSX.WorkSheet {
+  const rows: (string | number)[][] = [[title]];
+  const kinds: XlRowKind[] = ["title"];
+
+  if (opts?.subtitle) {
+    rows.push(opts.subtitle);
+    kinds.push("meta");
+  }
+  rows.push([]);
+  kinds.push("empty");
+  rows.push(headers);
+  kinds.push("header");
+  for (const r of dataRows) {
+    rows.push(r);
+    kinds.push("data");
+  }
+
+  if (opts?.extraSection) {
+    rows.push([]);
+    kinds.push("empty");
+    rows.push([opts.extraSection.title]);
+    kinds.push("section");
+    rows.push(opts.extraSection.headers);
+    kinds.push("header");
+    for (const r of opts.extraSection.rows) {
+      rows.push(r);
+      kinds.push("data");
+    }
+  }
+
+  const mins = headers.map((_, i) => (i === 0 ? 28 : 12));
+  return buildSheet({
+    rows,
+    kinds,
+    colWidths: colWidthsFromRows(rows, mins),
+  });
 }
 
 export function exportMetricasExcel(data: MetricasExportData): void {
   const wb = XLSX.utils.book_new();
 
-  const resumen: (string | number)[][] = [
+  const resumenRows: (string | number)[][] = [
     ["Métricas de presupuestos"],
     ["Periodo", periodoLabel(data)],
-    ["Exportado", formatFechaYmd(fileStamp())],
     [],
     ["Resumen del periodo"],
     ["Indicador", "Valor", "Nota"],
@@ -241,35 +419,77 @@ export function exportMetricasExcel(data: MetricasExportData): void {
     ["Estado", "Cantidad", "% sobre enviados"],
     ...data.byEstado.map((e) => [e.label, e.count, e.pct]),
   ];
-  XLSX.utils.book_append_sheet(wb, sheetFromAoA(resumen, false), "Resumen");
-
-  const profs: (string | number)[][] = [
-    ["Profesional", "Cantidad"],
-    ...(data.byProfesional.length
-      ? data.byProfesional.map((p) => [p.name, p.count])
-      : [["Sin datos", 0]]),
+  const resumenKinds: XlRowKind[] = [
+    "title",
+    "meta",
+    "empty",
+    "section",
+    "header",
+    "data",
+    "data",
+    "data",
+    "empty",
+    "section",
+    "header",
+    ...data.byEstado.map(() => "data" as const),
   ];
-  XLSX.utils.book_append_sheet(wb, sheetFromAoA(profs), "Por profesional");
+  XLSX.utils.book_append_sheet(
+    wb,
+    buildSheet({
+      rows: resumenRows,
+      kinds: resumenKinds,
+      colWidths: colWidthsFromRows(resumenRows, [28, 14, 52], 56),
+    }),
+    "Resumen",
+  );
 
-  const prests: (string | number)[][] = [
-    ["Prestación", "Cantidad"],
-    ...(data.byPrestacion.length
-      ? data.byPrestacion.map((p) => [p.name, p.count])
-      : [["Sin datos", 0]]),
-  ];
-  XLSX.utils.book_append_sheet(wb, sheetFromAoA(prests), "Por prestación");
+  XLSX.utils.book_append_sheet(
+    wb,
+    sheetTable(
+      "Por profesional",
+      ["Profesional", "Cantidad"],
+      data.byProfesional.length
+        ? data.byProfesional.map((p) => [p.name, p.count])
+        : [["Sin datos", 0]],
+      { subtitle: ["Periodo", periodoLabel(data)] },
+    ),
+    "Por profesional",
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    sheetTable(
+      "Por prestación",
+      ["Prestación", "Cantidad"],
+      data.byPrestacion.length
+        ? data.byPrestacion.map((p) => [p.name, p.count])
+        : [["Sin datos", 0]],
+      { subtitle: ["Periodo", periodoLabel(data)] },
+    ),
+    "Por prestación",
+  );
 
   const otrosDetalle = data.byMotivoRechazo.find((m) => m.name === "Otros")?.detail ?? [];
-  const motivos: (string | number)[][] = [
-    ["Motivo de rechazo", "Cantidad"],
-    ...data.byMotivoRechazo.map((m) => [m.name, m.count]),
-    [],
-    ["Detalle de Otros", "Cantidad"],
-    ...(otrosDetalle.length > 0
-      ? otrosDetalle.map((d) => [d.name, d.count] as (string | number)[])
-      : [["No hay textos en Otros", "—"]]),
-  ];
-  XLSX.utils.book_append_sheet(wb, sheetFromAoA(motivos), "Motivos rechazo");
+  XLSX.utils.book_append_sheet(
+    wb,
+    sheetTable(
+      "Motivos de rechazo",
+      ["Motivo de rechazo", "Cantidad"],
+      data.byMotivoRechazo.map((m) => [m.name, m.count]),
+      {
+        subtitle: ["Periodo", periodoLabel(data)],
+        extraSection: {
+          title: "Detalle de Otros",
+          headers: ["Texto escrito", "Cantidad"],
+          rows:
+            otrosDetalle.length > 0
+              ? otrosDetalle.map((d) => [d.name, d.count])
+              : [["No hay textos en Otros", "—"]],
+        },
+      },
+    ),
+    "Motivos rechazo",
+  );
 
   XLSX.writeFile(wb, `${baseName(data)}.xlsx`);
 }

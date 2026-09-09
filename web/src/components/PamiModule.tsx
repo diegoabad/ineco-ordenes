@@ -23,6 +23,7 @@ import {
 import { resumenFromResult, type PamiAnalisisGuardado } from "../types/pami";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconTrash } from "./Icons";
+import { LoadingBlock } from "./InecoMark";
 import { PamiDetalleModal } from "./PamiDetalleModal";
 import { PamiResultados } from "./PamiResultados";
 import type { PamiSection } from "../lib/appNav";
@@ -603,7 +604,7 @@ export function PamiModule({ section, onSectionChange }: Props) {
               </table>
               {loadingHist && historial.length === 0 ? (
                 <div className="fl-table-empty fl-table-empty--fill">
-                  <p className="fl-table-empty__title">Cargando…</p>
+                  <LoadingBlock label="Cargando…" />
                 </div>
               ) : historial.length === 0 ? (
                 <div className="fl-table-empty fl-table-empty--fill">

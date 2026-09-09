@@ -16,6 +16,7 @@ import {
 } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconFile, IconPlus, IconSearch, IconTrash, IconX } from "./Icons";
+import { LoadingBlock } from "./InecoMark";
 import { PedidoSistemaFormModal } from "./PedidoSistemaFormModal";
 import { PedidosColorSelect, type PedidosColorOption } from "./PedidosColorSelect";
 import { formatNombrePersona } from "../lib/nombrePersona";
@@ -265,7 +266,7 @@ export function PedidosSistemaPanel() {
 
           {loading ? (
             <div className="fl-table-empty fl-table-empty--fill">
-              <p className="fl-table-empty__title">Cargando pedidos…</p>
+              <LoadingBlock label="Cargando pedidos…" />
             </div>
           ) : filtrados.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">

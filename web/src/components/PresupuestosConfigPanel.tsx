@@ -17,6 +17,7 @@ import {
   type TipoPrestacion,
 } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { LoadingBlock } from "./InecoMark";
 import { IconPlus, IconTrash } from "./Icons";
 import { TipoPrestacionChip } from "./TipoPrestacionChip";
 
@@ -309,7 +310,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   if (loading) {
     return (
       <div className="fl-table-empty fl-table-empty--inline">
-        <p className="fl-table-empty__title">Cargando configuración…</p>
+        <LoadingBlock label="Cargando configuración…" />
       </div>
     );
   }

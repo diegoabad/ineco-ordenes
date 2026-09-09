@@ -23,6 +23,7 @@ import type {
 } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { LoadingBlock } from "./InecoMark";
 import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
@@ -560,7 +561,7 @@ export function PresupuestosPanel({
           </table>
           {loading ? (
             <div className="fl-table-empty fl-table-empty--fill">
-              <p className="fl-table-empty__title">Cargando presupuestos…</p>
+              <LoadingBlock label="Cargando presupuestos…" />
             </div>
           ) : filtrados.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">

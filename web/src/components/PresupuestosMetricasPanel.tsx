@@ -10,6 +10,7 @@ import {
   type PresupuestoEstado,
 } from "../types";
 import { DatePicker } from "./DatePicker";
+import { LoadingBlock } from "./InecoMark";
 import { IconDownload, IconPdf } from "./Icons";
 import {
   exportMetricasExcel,
@@ -494,7 +495,7 @@ export function PresupuestosMetricasPanel() {
 
       {loading ? (
         <div className="fl-table-empty">
-          <p className="fl-table-empty__title">Cargando métricas…</p>
+          <LoadingBlock label="Cargando métricas…" />
         </div>
       ) : (
         <>
