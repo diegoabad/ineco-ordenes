@@ -878,6 +878,12 @@ label {
   gap: 0.3rem;
 }
 
+.metrics-bars__pct {
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .metrics-bars__track {
   height: 0.45rem;
   border-radius: 999px;
