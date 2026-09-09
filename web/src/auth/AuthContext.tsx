@@ -22,6 +22,7 @@ export type AppModuleId =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "whatsapp"
   | "pedidos-sistema"
   | "usuarios";
 export type UserRole = "user" | "admin";
@@ -65,6 +66,7 @@ function normalizeClientModules(
       "presupuestos",
       "pami",
       "busca-turno",
+      "whatsapp",
       "pedidos-sistema",
       "usuarios",
     ];
@@ -74,7 +76,8 @@ function normalizeClientModules(
       m === "ordenes" ||
       m === "presupuestos" ||
       m === "pami" ||
-      m === "busca-turno",
+      m === "busca-turno" ||
+      m === "whatsapp",
   );
   return [...new Set<AppModuleId>([...selectable, "pedidos-sistema"])];
 }

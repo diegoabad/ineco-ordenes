@@ -8,6 +8,7 @@ import {
   ORDENES_SECTIONS,
   PAMI_SECTIONS,
   PRESUPUESTOS_SECTIONS,
+  WHATSAPP_SECTIONS,
   isAccordionModule,
   type AccordionModuleId,
   type AppNavTarget,
@@ -21,6 +22,7 @@ import {
   IconPedidos,
   IconPresupuesto,
   IconUsers,
+  IconWhatsapp,
 } from "./Icons";
 
 export type AppModule = AppModuleId;
@@ -141,6 +143,7 @@ export function AppSidebar({
   const showPresupuestos = allowedModules.includes("presupuestos");
   const showPami = allowedModules.includes("pami");
   const showBuscaTurno = allowedModules.includes("busca-turno");
+  const showWhatsapp = allowedModules.includes("whatsapp");
   const config = [
     ...CONFIG_ITEMS.filter((item) => allowedModules.includes(item.id)),
     ...(isAdmin
@@ -178,6 +181,32 @@ export function AppSidebar({
         <img className="app-sidebar__logo" src={LOGO_INECO_DATA_URL} alt="Ineco" />
       </div>
       <nav className="app-sidebar__nav" aria-label="Módulos">
+        {showWhatsapp ? (
+          <AccordionGroup
+            id="whatsapp"
+            label="WhatsApp"
+            Icon={IconWhatsapp}
+            open={expanded === "whatsapp"}
+            active={module === "whatsapp"}
+            onToggle={() => toggleGroup("whatsapp")}
+          >
+            {WHATSAPP_SECTIONS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`app-sidebar__subbtn${
+                  module === "whatsapp" && section === item.id ? " is-active" : ""
+                }`}
+                onClick={() =>
+                  navigateSection({ module: "whatsapp", section: item.id })
+                }
+              >
+                {item.label}
+              </button>
+            ))}
+          </AccordionGroup>
+        ) : null}
+
         {showBuscaTurno ? (
           <AccordionGroup
             id="busca-turno"

@@ -4,12 +4,14 @@ import {
   ORDENES_SECTIONS,
   PAMI_SECTIONS,
   PRESUPUESTOS_SECTIONS,
+  WHATSAPP_SECTIONS,
   isAccordionModule,
   type AppSection,
   type BuscaTurnoSection,
   type OrdenesSection,
   type PamiSection,
   type PresupuestosSection,
+  type WhatsappSection,
 } from "./appNav";
 
 const STORAGE_KEY = "ineco-ordenes.lastNavByUser";
@@ -21,6 +23,7 @@ const VALID_MODULES = new Set<AppModuleId>([
   "presupuestos",
   "pami",
   "busca-turno",
+  "whatsapp",
   "pedidos-sistema",
   "usuarios",
 ]);
@@ -29,6 +32,7 @@ const ORDENES_IDS = new Set(ORDENES_SECTIONS.map((s) => s.id));
 const PRESUPUESTOS_IDS = new Set(PRESUPUESTOS_SECTIONS.map((s) => s.id));
 const PAMI_IDS = new Set(PAMI_SECTIONS.map((s) => s.id));
 const BUSCA_TURNO_IDS = new Set(BUSCA_TURNO_SECTIONS.map((s) => s.id));
+const WHATSAPP_IDS = new Set(WHATSAPP_SECTIONS.map((s) => s.id));
 
 export type LastNav = {
   module: AppModuleId;
@@ -52,6 +56,9 @@ function normalizeSection(module: AppModuleId, section: unknown): AppSection | u
   }
   if (module === "busca-turno" && BUSCA_TURNO_IDS.has(section as BuscaTurnoSection)) {
     return section as BuscaTurnoSection;
+  }
+  if (module === "whatsapp" && WHATSAPP_IDS.has(section as WhatsappSection)) {
+    return section as WhatsappSection;
   }
   return undefined;
 }

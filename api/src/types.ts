@@ -221,6 +221,7 @@ export type AppModuleId =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "whatsapp"
   | "pedidos-sistema"
   | "usuarios";
 
@@ -229,6 +230,7 @@ export const ALL_APP_MODULES: AppModuleId[] = [
   "presupuestos",
   "pami",
   "busca-turno",
+  "whatsapp",
   "pedidos-sistema",
   "usuarios",
 ];
@@ -238,6 +240,7 @@ export type PedidoSistemaSeccion =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "whatsapp"
   | "nueva";
 
 export type PedidoSistemaPrioridad = "baja" | "media" | "alta";

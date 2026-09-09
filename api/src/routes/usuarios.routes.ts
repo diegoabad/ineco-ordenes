@@ -40,6 +40,7 @@ function parseApproveBody(body: unknown): ApproveUserInput {
           m === "presupuestos" ||
           m === "pami" ||
           m === "busca-turno" ||
+          m === "whatsapp" ||
           m === "pedidos-sistema" ||
           m === "usuarios",
       ) as AppModuleId[])

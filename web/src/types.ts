@@ -216,6 +216,7 @@ export type PedidoSistemaSeccion =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "whatsapp"
   | "nueva";
 
 export type PedidoSistemaPrioridad = "baja" | "media" | "alta";
@@ -259,6 +260,7 @@ export const PEDIDO_SECCION_LABEL: Record<PedidoSistemaSeccion, string> = {
   presupuestos: "Presupuestos",
   pami: "PAMI",
   "busca-turno": "Busca turno",
+  whatsapp: "WhatsApp",
   nueva: "Nueva sección",
 };
 

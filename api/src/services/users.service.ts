@@ -98,6 +98,7 @@ const SELECTABLE_MODULES: AppModuleId[] = [
   "presupuestos",
   "pami",
   "busca-turno",
+  "whatsapp",
 ];
 
 function isModuleId(value: unknown): value is AppModuleId {
@@ -106,6 +107,7 @@ function isModuleId(value: unknown): value is AppModuleId {
     value === "presupuestos" ||
     value === "pami" ||
     value === "busca-turno" ||
+    value === "whatsapp" ||
     value === "pedidos-sistema" ||
     value === "usuarios"
   );
@@ -129,7 +131,7 @@ function assertHasSelectableModule(modules: AppModuleId[], role: UserRole): void
   if (role === "admin") return;
   if (!modules.some((m) => SELECTABLE_MODULES.includes(m))) {
     throw new Error(
-      "Debés asignar al menos una pantalla (Órdenes, Presupuestos, PAMI o Busca turno)",
+      "Debés asignar al menos una pantalla (Órdenes, Presupuestos, PAMI, Busca turno o WhatsApp)",
     );
   }
 }

@@ -29,6 +29,7 @@ import {
   type OrdenesSection,
   type PamiSection,
   type PresupuestosSection,
+  type WhatsappSection,
   ORDENES_SECTIONS,
 } from "./lib/appNav";
 import { FechaOrdenModal } from "./components/FechaOrdenModal";
@@ -43,6 +44,7 @@ import { PacienteFormModal } from "./components/PacienteFormModal";
 import { PresupuestosModule } from "./components/PresupuestosModule";
 import { PamiModule } from "./components/PamiModule";
 import { BuscaTurnoModule } from "./components/BuscaTurnoModule";
+import { WhatsAppModule } from "./components/WhatsAppModule";
 import { UsuariosPanel } from "./components/UsuariosPanel";
 import { PedidosSistemaPanel } from "./components/PedidosSistemaPanel";
 import { TablePagination } from "./components/TablePagination";
@@ -104,6 +106,7 @@ function firstAllowedModule(
   canAccess: (m: AppModuleId) => boolean,
 ): AppModule {
   const order: AppModule[] = [
+    "whatsapp",
     "busca-turno",
     "ordenes",
     "presupuestos",
@@ -118,6 +121,7 @@ export default function App() {
   const { user, loading: authLoading, logout, canAccessModule } = useAuth();
   const allowedModules = useMemo(() => {
     const all: AppModule[] = [
+      "whatsapp",
       "busca-turno",
       "ordenes",
       "presupuestos",
@@ -134,6 +138,8 @@ export default function App() {
     useState<PresupuestosSection>("presupuestos");
   const [pamiSection, setPamiSection] = useState<PamiSection>("historial");
   const [buscaTurnoSection, setBuscaTurnoSection] = useState<BuscaTurnoSection>("turnos");
+  const [whatsappSection, setWhatsappSection] =
+    useState<WhatsappSection>("conversaciones");
   const skipModulePersist = useRef(false);
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [medicos, setMedicos] = useState<Medico[]>([]);
@@ -205,6 +211,9 @@ export default function App() {
     } else if (nextModule === "busca-turno") {
       if (nextSection) setBuscaTurnoSection(nextSection as BuscaTurnoSection);
       else nextSection = buscaTurnoSection;
+    } else if (nextModule === "whatsapp") {
+      if (nextSection) setWhatsappSection(nextSection as WhatsappSection);
+      else nextSection = whatsappSection;
     } else {
       nextSection = undefined;
     }
@@ -233,7 +242,9 @@ export default function App() {
               ? pamiSection
               : module === "busca-turno"
                 ? buscaTurnoSection
-                : undefined,
+                : module === "whatsapp"
+                  ? whatsappSection
+                  : undefined,
     });
   }, [
     user,
@@ -242,6 +253,7 @@ export default function App() {
     presupuestosSection,
     pamiSection,
     buscaTurnoSection,
+    whatsappSection,
     canAccessModule,
   ]);
 
@@ -840,6 +852,8 @@ export default function App() {
       setPamiSection(target.section);
     } else if (target.module === "busca-turno") {
       setBuscaTurnoSection(target.section);
+    } else if (target.module === "whatsapp") {
+      setWhatsappSection(target.section);
     }
   }
 
@@ -852,7 +866,9 @@ export default function App() {
           ? pamiSection
           : module === "busca-turno"
             ? buscaTurnoSection
-            : null;
+            : module === "whatsapp"
+              ? whatsappSection
+              : null;
 
   const sidebar = (
     <AppSidebar
@@ -928,6 +944,8 @@ export default function App() {
             section={buscaTurnoSection}
             onSectionChange={setBuscaTurnoSection}
           />
+        ) : module === "whatsapp" ? (
+          <WhatsAppModule section={whatsappSection} />
         ) : module === "pedidos-sistema" ? (
           <PedidosSistemaPanel />
         ) : module === "usuarios" ? (
