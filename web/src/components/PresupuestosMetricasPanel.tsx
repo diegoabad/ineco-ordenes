@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "react-toastify";
-import { compareYmd, fechaHoyIso, formatFechaYmd, toYmd } from "../lib/fechas";
+import { compareYmd, fechaHoyIso, toYmd } from "../lib/fechas";
 import { formatNombrePersona } from "../lib/nombrePersona";
-import { fetchPresupuestos } from "../services/dataService";
+import { fetchPresupuestos, fetchPresupuestosConfig } from "../services/dataService";
 import {
   PRESUPUESTO_ESTADO_LABEL,
+  type MotivoRechazoPresupuesto,
   type Presupuesto,
   type PresupuestoEstado,
 } from "../types";
 import { DatePicker } from "./DatePicker";
+import { LoadingBlock } from "./InecoMark";
 import { IconDownload, IconPdf } from "./Icons";
 import {
   exportMetricasExcel,
@@ -16,11 +18,19 @@ import {
   type MetricasExportData,
 } from "../lib/presupuestosMetricasExport";
 
+type MetricasCountRow = {
+  name: string;
+  count: number;
+  /** Detalle al pasar el mouse / export (p. ej. textos de “Otros”). */
+  detail?: { name: string; count: number }[];
+};
+
 type PeriodStats = {
   total: number;
   byEstado: Record<PresupuestoEstado, number>;
-  byProfesional: { name: string; count: number }[];
-  byPrestacion: { name: string; count: number }[];
+  byProfesional: MetricasCountRow[];
+  byPrestacion: MetricasCountRow[];
+  byMotivoRechazo: MetricasCountRow[];
 };
 
 const MES_INICIO_METRICAS = "2026-08";
@@ -122,11 +132,36 @@ function emptyByEstado(): Record<PresupuestoEstado, number> {
   return { pendiente: 0, enviado: 0, aceptado: 0, rechazado: 0, fallido: 0 };
 }
 
-function computeStats(items: Presupuesto[], desde: string, hasta: string): PeriodStats {
+function computeStats(
+  items: Presupuesto[],
+  desde: string,
+  hasta: string,
+  motivosConfigurados: string[] = [],
+): PeriodStats {
   const filtered = items.filter((p) => inRange(presupuestoDateKey(p), desde, hasta));
   const byEstado = emptyByEstado();
   const profMap = new Map<string, number>();
   const prestMap = new Map<string, number>();
+
+  const motivosNorm = motivosConfigurados
+    .map((m) => m.trim())
+    .filter(Boolean)
+    .map((label) => ({
+      label,
+      key: label.toLocaleLowerCase("es-AR"),
+    }));
+  // Evitar duplicados de label en config
+  const motivosUnicos: { label: string; key: string }[] = [];
+  const seenMotivo = new Set<string>();
+  for (const m of motivosNorm) {
+    if (seenMotivo.has(m.key)) continue;
+    seenMotivo.add(m.key);
+    motivosUnicos.push(m);
+  }
+
+  let sinMotivo = 0;
+  const configCounts = new Map<string, number>(motivosUnicos.map((m) => [m.key, 0]));
+  const otrosMap = new Map<string, { label: string; count: number }>();
 
   for (const p of filtered) {
     byEstado[p.estado] += 1;
@@ -136,9 +171,41 @@ function computeStats(items: Presupuesto[], desde: string, hasta: string): Perio
       const name = item.titulo?.trim() || "Sin título";
       prestMap.set(name, (prestMap.get(name) ?? 0) + 1);
     }
+    if (p.estado === "rechazado") {
+      const raw = p.motivoRechazo?.trim() ?? "";
+      if (!raw) {
+        sinMotivo += 1;
+        continue;
+      }
+      const key = raw.toLocaleLowerCase("es-AR");
+      if (configCounts.has(key)) {
+        configCounts.set(key, (configCounts.get(key) ?? 0) + 1);
+      } else {
+        const prev = otrosMap.get(key);
+        if (prev) prev.count += 1;
+        else otrosMap.set(key, { label: raw, count: 1 });
+      }
+    }
   }
 
   const sortDesc = (a: { count: number }, b: { count: number }) => b.count - a.count;
+  const otrosDetalle = [...otrosMap.values()]
+    .map((o) => ({ name: o.label, count: o.count }))
+    .sort(sortDesc);
+  const otrosTotal = otrosDetalle.reduce((acc, o) => acc + o.count, 0);
+
+  const byMotivoRechazo: MetricasCountRow[] = [
+    { name: "Sin motivo", count: sinMotivo },
+    ...motivosUnicos.map((m) => ({
+      name: m.label,
+      count: configCounts.get(m.key) ?? 0,
+    })),
+    {
+      name: "Otros",
+      count: otrosTotal,
+      detail: otrosDetalle,
+    },
+  ];
 
   return {
     total: filtered.length,
@@ -151,6 +218,7 @@ function computeStats(items: Presupuesto[], desde: string, hasta: string): Perio
       .map(([name, count]) => ({ name, count }))
       .sort(sortDesc)
       .slice(0, 12),
+    byMotivoRechazo,
   };
 }
 
@@ -174,31 +242,85 @@ function KpiCard({
 function BarList({
   title,
   rows,
+  emptyLabel = "Sin datos en el rango",
+  accent,
 }: {
   title: string;
-  rows: { name: string; count: number }[];
+  rows: MetricasCountRow[];
+  emptyLabel?: string;
+  accent?: "error";
 }) {
   const max = Math.max(1, ...rows.map((r) => r.count));
 
   return (
-    <section className="metrics-card">
+    <section className={`metrics-card${accent ? ` metrics-card--${accent}` : ""}`}>
       <h3 className="metrics-card__title">{title}</h3>
       {rows.length === 0 ? (
-        <p className="metrics-card__empty">Sin datos en el rango</p>
+        <p className="metrics-card__empty">{emptyLabel}</p>
       ) : (
-        <ul className="metrics-bars">
+        <ul className={`metrics-bars${accent ? ` metrics-bars--${accent}` : ""}`}>
           {rows.map((row) => {
             const width = `${Math.round((row.count / max) * 100)}%`;
-            return (
-              <li key={row.name} className="metrics-bars__row">
+            const isOtros = row.name === "Otros";
+            const detail = row.detail ?? [];
+            const detailTotal = Math.max(
+              1,
+              detail.reduce((acc, d) => acc + d.count, 0),
+            );
+            const tipId = `metrics-motivo-detail-${row.name.replace(/\s+/g, "-").toLowerCase()}`;
+
+            const meta = (
+              <>
                 <div className="metrics-bars__meta">
-                  <span className="metrics-bars__name" title={row.name}>
-                    {row.name}
-                  </span>
+                  <span className="metrics-bars__name">{row.name}</span>
                   <span className="metrics-bars__count">{row.count}</span>
                 </div>
                 <div className="metrics-bars__track" aria-hidden>
                   <div className="metrics-bars__fill" style={{ width }} />
+                </div>
+              </>
+            );
+
+            if (!isOtros) {
+              return (
+                <li key={row.name} className="metrics-bars__row">
+                  {meta}
+                </li>
+              );
+            }
+
+            return (
+              <li key={row.name} className="metrics-bars__row metrics-bars__row--has-detail">
+                <div className="pami-tip metrics-bars__tip-wrap">
+                  <div
+                    className="metrics-bars__tip-hit"
+                    tabIndex={0}
+                    aria-describedby={tipId}
+                  >
+                    {meta}
+                  </div>
+                  <span id={tipId} className="pami-tip__bubble" role="tooltip">
+                    <span className="pami-tip__title">Detalle de Otros</span>
+                    {detail.length > 0 ? (
+                      <ul className="pami-tip__list pami-tip__list--motivos">
+                        {detail.map((d) => (
+                          <li key={d.name}>
+                            <span className="pami-tip__motivo" title={d.name}>
+                              {d.name}
+                            </span>
+                            <span className="pami-tip__stats">
+                              <span className="pami-tip__cant">{d.count}</span>
+                              <span className="pami-tip__pct">
+                                {((d.count / detailTotal) * 100).toFixed(0)}%
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="pami-tip__fallback">No hay otros motivos</p>
+                    )}
+                  </span>
                 </div>
               </li>
             );
@@ -220,6 +342,7 @@ export function PresupuestosMetricasPanel() {
   const initialRange = useMemo(() => rangeForMesKey(mesInicial, hoy), [mesInicial, hoy]);
 
   const [items, setItems] = useState<Presupuesto[]>([]);
+  const [motivosConfig, setMotivosConfig] = useState<MotivoRechazoPresupuesto[]>([]);
   const [loading, setLoading] = useState(true);
   const [desde, setDesde] = useState(initialRange.desde);
   const [hasta, setHasta] = useState(initialRange.hasta);
@@ -228,7 +351,12 @@ export function PresupuestosMetricasPanel() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await fetchPresupuestos());
+      const [presupuestos, config] = await Promise.all([
+        fetchPresupuestos(),
+        fetchPresupuestosConfig(),
+      ]);
+      setItems(presupuestos);
+      setMotivosConfig(config.motivosRechazo ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudieron cargar métricas");
     } finally {
@@ -240,35 +368,62 @@ export function PresupuestosMetricasPanel() {
     void cargar();
   }, [cargar]);
 
-  const stats = useMemo(() => computeStats(items, desde, hasta), [items, desde, hasta]);
+  const motivosLabels = useMemo(
+    () => motivosConfig.map((m) => m.label).filter((l) => l.trim()),
+    [motivosConfig],
+  );
+
+  const stats = useMemo(
+    () => computeStats(items, desde, hasta, motivosLabels),
+    [items, desde, hasta, motivosLabels],
+  );
 
   const enviados =
     stats.byEstado.enviado + stats.byEstado.aceptado + stats.byEstado.rechazado;
+  const pendientesEnvio = stats.byEstado.pendiente + stats.byEstado.fallido;
+  const desgloseEnviados = useMemo(
+    () => [
+      {
+        key: "enviado" as const,
+        label: "Pendiente de respuesta",
+        count: stats.byEstado.enviado,
+      },
+      {
+        key: "aceptado" as const,
+        label: PRESUPUESTO_ESTADO_LABEL.aceptado,
+        count: stats.byEstado.aceptado,
+      },
+      {
+        key: "rechazado" as const,
+        label: PRESUPUESTO_ESTADO_LABEL.rechazado,
+        count: stats.byEstado.rechazado,
+      },
+    ],
+    [stats.byEstado],
+  );
 
   const exportData = useMemo((): MetricasExportData => {
-    const estadosVisibles = [
-      { estado: "enviado" as const, tone: "muted" as const },
-      { estado: "aceptado" as const, tone: "ok" as const },
-      { estado: "rechazado" as const, tone: "error" as const },
-    ];
     return {
       desde,
       hasta,
       mesLabel: mesKey ? mesLabelFromKey(mesKey) : undefined,
       total: stats.total,
       enviados,
+      pendientesEnvio,
       aceptados: stats.byEstado.aceptado,
       rechazados: stats.byEstado.rechazado,
-      byEstado: estadosVisibles.map(({ estado, tone }) => ({
-        label: PRESUPUESTO_ESTADO_LABEL[estado],
-        count: stats.byEstado[estado],
-        pct: enviados ? Math.round((stats.byEstado[estado] / enviados) * 100) : 0,
-        tone,
+      byEstado: desgloseEnviados.map((row) => ({
+        label: row.label,
+        count: row.count,
+        pct: enviados ? Math.round((row.count / enviados) * 100) : 0,
+        tone:
+          row.key === "aceptado" ? "ok" : row.key === "rechazado" ? "error" : "muted",
       })),
       byProfesional: stats.byProfesional,
       byPrestacion: stats.byPrestacion,
+      byMotivoRechazo: stats.byMotivoRechazo,
     };
-  }, [desde, hasta, mesKey, stats, enviados]);
+  }, [desde, hasta, mesKey, stats, enviados, pendientesEnvio, desgloseEnviados]);
 
   function applyMes(key: string) {
     const range = rangeForMesKey(key, hoy);
@@ -384,58 +539,47 @@ export function PresupuestosMetricasPanel() {
 
       {loading ? (
         <div className="fl-table-empty">
-          <p className="fl-table-empty__title">Cargando métricas…</p>
+          <LoadingBlock label="Cargando métricas…" />
         </div>
       ) : (
         <>
-          <p className="metrics-range-hint">
-            Periodo: <strong>{formatFechaYmd(desde)}</strong> –{" "}
-            <strong>{formatFechaYmd(hasta)}</strong>
-            {mesKey ? (
-              <>
-                {" "}
-                · <strong>{mesLabelFromKey(mesKey)}</strong>
-              </>
-            ) : null}
-          </p>
-
           <div className="metrics-kpi-grid">
             <KpiCard label="Total" value={stats.total} />
             <KpiCard label="Enviados" value={enviados} tone="muted" />
-            <KpiCard
-              label={PRESUPUESTO_ESTADO_LABEL.aceptado}
-              value={stats.byEstado.aceptado}
-              tone="ok"
-            />
-            <KpiCard
-              label={PRESUPUESTO_ESTADO_LABEL.rechazado}
-              value={stats.byEstado.rechazado}
-              tone="error"
-            />
+            <KpiCard label="Pendientes de envío" value={pendientesEnvio} tone="warn" />
           </div>
 
-          <div className="metrics-estado-row">
-            {(["enviado", "aceptado", "rechazado"] as const).map((estado) => {
-              const count = stats.byEstado[estado];
-              const pct = enviados ? Math.round((count / enviados) * 100) : 0;
-              return (
-                <div key={estado} className={`metrics-estado-chip metrics-estado-chip--${estado}`}>
-                  <span className="metrics-estado-chip__label">{PRESUPUESTO_ESTADO_LABEL[estado]}</span>
-                  <span className="metrics-estado-chip__value">
-                    {count} <span className="text-muted">({pct}%)</span>
-                  </span>
-                  <div className="metrics-bars__track" aria-hidden>
-                    <div className="metrics-bars__fill" style={{ width: `${pct}%` }} />
+          <section className="metrics-card metrics-card--estados">
+            <h3 className="metrics-card__title">De los enviados</h3>
+            <div className="metrics-estado-row">
+              {desgloseEnviados.map((row) => {
+                const pct = enviados ? Math.round((row.count / enviados) * 100) : 0;
+                return (
+                  <div
+                    key={row.key}
+                    className={`metrics-estado-chip metrics-estado-chip--${row.key}`}
+                  >
+                    <span className="metrics-estado-chip__label">{row.label}</span>
+                    <span className="metrics-estado-chip__value">
+                      {row.count} <span className="text-muted">({pct}%)</span>
+                    </span>
+                    <div className="metrics-bars__track" aria-hidden>
+                      <div className="metrics-bars__fill" style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-          <p className="metrics-pct-hint">Porcentajes sobre enviados (sin pendientes ni fallidos)</p>
+                );
+              })}
+            </div>
+          </section>
 
-          <div className="metrics-grid-2">
+          <div className="metrics-grid-detail">
             <BarList title="Por profesional" rows={stats.byProfesional} />
             <BarList title="Por prestación" rows={stats.byPrestacion} />
+            <BarList
+              title="Motivos de rechazo"
+              rows={stats.byMotivoRechazo}
+              emptyLabel="Sin rechazos en el periodo"
+            />
           </div>
         </>
       )}

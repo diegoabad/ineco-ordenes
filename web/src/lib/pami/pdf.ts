@@ -6,6 +6,7 @@ import {
   LOGO_INECO_WIDTH,
 } from "../../assets/logoIneco";
 import { formatFechaYmd } from "../fechas";
+import { formatNombrePersona } from "../nombrePersona";
 import { withDuplicadosDebitos } from "./cruzar";
 import { mesLabelFromKey } from "./mesLabel";
 import type { ResultadoPami } from "./types";
@@ -474,7 +475,7 @@ export function generarPdfPami(result: ResultadoPami, mesKey: string): jsPDF {
       ensureSpace(ctx, 36);
       const headTop = ctx.y;
       const headLines = doc.splitTextToSize(
-        `${c.afiliadoOriginal}  —  ${c.nombre}${flag}`,
+        `${c.afiliadoOriginal}  —  ${formatNombrePersona(c.nombre)}${flag}`,
         CONTENT_W - 16,
       ) as string[];
       const sub = `Presentación: ${mods || "—"}  ·  ${c.cantidadObservadas} observada(s)  ·  códigos ${c.codigosObservados.join(", ") || "—"}`;

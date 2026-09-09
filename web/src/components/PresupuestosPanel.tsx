@@ -10,15 +10,24 @@ import {
   fetchPresupuestoPdfBlob,
   fetchPresupuestoPlantillaConfig,
   fetchPresupuestos,
+  fetchPresupuestosConfig,
   restorePresupuestoPdf,
   updatePresupuestoEstado,
 } from "../services/dataService";
-import type { ModalidadPresupuesto, Presupuesto, PresupuestoEstado, ProfesionalPresupuesto } from "../types";
+import type {
+  ModalidadPresupuesto,
+  MotivoRechazoPresupuesto,
+  Presupuesto,
+  PresupuestoEstado,
+  ProfesionalPresupuesto,
+} from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { LoadingBlock } from "./InecoMark";
 import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
+import { PresupuestoRechazoDialog } from "./PresupuestoRechazoDialog";
 import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
 
@@ -106,6 +115,8 @@ export function PresupuestosPanel({
   const [formOpen, setFormOpen] = useState(false);
   const [editando, setEditando] = useState<Presupuesto | null>(null);
   const [aBorrar, setABorrar] = useState<Presupuesto | null>(null);
+  const [aRechazar, setARechazar] = useState<Presupuesto | null>(null);
+  const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
   const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
   const [viendoPdfId, setViendoPdfId] = useState<string | null>(null);
@@ -134,9 +145,19 @@ export function PresupuestosPanel({
     }
   }, []);
 
+  const cargarMotivos = useCallback(async () => {
+    try {
+      const config = await fetchPresupuestosConfig();
+      setMotivosRechazo(config.motivosRechazo ?? []);
+    } catch {
+      setMotivosRechazo([]);
+    }
+  }, []);
+
   useEffect(() => {
     void cargar();
-  }, [cargar]);
+    void cargarMotivos();
+  }, [cargar, cargarMotivos]);
 
   useEffect(() => {
     if (addRequestKey > lastAddRequestKey.current) {
@@ -173,20 +194,58 @@ export function PresupuestosPanel({
 
   const maxAcciones = ACCIONES_PRESUPUESTO;
 
-  async function marcarEstado(p: Presupuesto, estado: "aceptado" | "rechazado") {
-    if (p.estado === estado || guardandoEstadoId) return;
+  async function marcarEstado(
+    p: Presupuesto,
+    estado: "aceptado" | "rechazado",
+    motivoRechazo?: string,
+  ) {
+    if (guardandoEstadoId) return;
+    if (estado === "aceptado" && p.estado === "aceptado") return;
+    if (
+      estado === "rechazado" &&
+      p.estado === "rechazado" &&
+      (p.motivoRechazo ?? "") === (motivoRechazo ?? "").trim()
+    ) {
+      return;
+    }
     setGuardandoEstadoId(p.id);
     try {
-      const updated = await updatePresupuestoEstado(p.id, estado);
+      const updated = await updatePresupuestoEstado(p.id, estado, motivoRechazo);
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       toast.success(
-        estado === "aceptado" ? "Presupuesto marcado como aceptado" : "Presupuesto marcado como rechazado",
+        estado === "aceptado"
+          ? "Presupuesto marcado como aceptado"
+          : p.estado === "rechazado"
+            ? "Motivo de rechazo actualizado"
+            : "Presupuesto marcado como rechazado",
       );
+      if (estado === "rechazado") setARechazar(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
     } finally {
       setGuardandoEstadoId(null);
     }
+  }
+
+  async function abrirRechazo(p: Presupuesto) {
+    if (guardandoEstadoId) return;
+    await cargarMotivos();
+    setARechazar(p);
+  }
+
+  function estadoChipTitle(p: Presupuesto): string | undefined {
+    if (p.estado === "rechazado") {
+      return p.motivoRechazo?.trim()
+        ? `Motivo: ${p.motivoRechazo}`
+        : "Sin motivo — clic para cargar";
+    }
+    if (p.ultimoEnvioAt && p.estado === "enviado") {
+      return `Enviado: ${formatFechaHora(p.ultimoEnvioAt)}`;
+    }
+    if (p.ultimoEnvioAt && p.estado === "fallido") {
+      return `Último intento: ${formatFechaHora(p.ultimoEnvioAt)}`;
+    }
+    return undefined;
   }
 
   function openPdfBlob(blob: Blob) {
@@ -357,18 +416,29 @@ export function PresupuestosPanel({
                     </td>
                     <td className="fl-col-presup-total">{formatTotal(p.totalEfectivo)}</td>
                     <td className="fl-col-presup-estado">
-                      <span
-                        className={estadoChipClass(p.estado)}
-                        title={
-                          p.ultimoEnvioAt && p.estado === "enviado"
-                            ? `Enviado: ${formatFechaHora(p.ultimoEnvioAt)}`
-                            : p.ultimoEnvioAt && p.estado === "fallido"
-                              ? `Último intento: ${formatFechaHora(p.ultimoEnvioAt)}`
-                              : undefined
-                        }
-                      >
-                        {PRESUPUESTO_ESTADO_LABEL[p.estado]}
-                      </span>
+                      {p.estado === "rechazado" ? (
+                        <button
+                          type="button"
+                          className={`${estadoChipClass(p.estado)} chip--button`}
+                          title={estadoChipTitle(p)}
+                          aria-label={
+                            p.motivoRechazo?.trim()
+                              ? `Rechazado. Motivo: ${p.motivoRechazo}. Clic para editar`
+                              : "Rechazado sin motivo. Clic para cargar motivo"
+                          }
+                          disabled={Boolean(guardandoEstadoId)}
+                          onClick={() => void abrirRechazo(p)}
+                        >
+                          {PRESUPUESTO_ESTADO_LABEL[p.estado]}
+                        </button>
+                      ) : (
+                        <span
+                          className={estadoChipClass(p.estado)}
+                          title={estadoChipTitle(p)}
+                        >
+                          {PRESUPUESTO_ESTADO_LABEL[p.estado]}
+                        </span>
+                      )}
                     </td>
                     <td className={`fl-col-actions ${accionesClass()}`}>
                       <div className={`fl-table-actions fl-table-actions--${maxAcciones}`}>
@@ -406,7 +476,7 @@ export function PresupuestosPanel({
                             Boolean(guardandoEstadoId) ||
                             p.estado === "rechazado"
                           }
-                          onClick={() => void marcarEstado(p, "rechazado")}
+                          onClick={() => void abrirRechazo(p)}
                         >
                           <IconX size={16} />
                         </button>
@@ -491,7 +561,7 @@ export function PresupuestosPanel({
           </table>
           {loading ? (
             <div className="fl-table-empty fl-table-empty--fill">
-              <p className="fl-table-empty__title">Cargando presupuestos…</p>
+              <LoadingBlock label="Cargando presupuestos…" />
             </div>
           ) : filtrados.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">
@@ -535,6 +605,18 @@ export function PresupuestosPanel({
         onFailed={(fallido) => {
           upsertPresupuesto(fallido);
           void cargar();
+        }}
+      />
+
+      <PresupuestoRechazoDialog
+        open={aRechazar !== null}
+        presupuesto={aRechazar}
+        motivos={motivosRechazo}
+        saving={Boolean(aRechazar && guardandoEstadoId === aRechazar.id)}
+        onClose={() => setARechazar(null)}
+        onConfirm={(motivo) => {
+          if (!aRechazar) return;
+          return marcarEstado(aRechazar, "rechazado", motivo);
         }}
       />
 

@@ -18,6 +18,11 @@ export function LoginPage() {
       const { code, message } = friendlyLoginError(err);
       if (code === "PENDING") {
         toast.info(message, { autoClose: 8000 });
+      } else if (
+        code === "auth/popup-closed-by-user" ||
+        code === "auth/cancelled-popup-request"
+      ) {
+        toast.info(message);
       } else {
         toast.error(message);
       }

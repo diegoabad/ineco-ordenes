@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { formatFechaYmd } from "../lib/fechas";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { withDuplicadosDebitos, type ResultadoPami } from "../lib/pami";
 import { IconAlert } from "./Icons";
 
@@ -177,7 +178,7 @@ export function PamiResultados({ result: resultProp, compact }: Props) {
                         </td>
                         <td className="pami-mono pami-col-afiliado">{c.afiliadoOriginal}</td>
                         <td className="pami-col-nombre">
-                          {c.nombre}
+                          {formatNombrePersona(c.nombre)}
                           {c.codigoDistintoAlModulo && (
                             <span className="pami-flag" title="Código observado distinto al módulo presentado">
                               {" "}

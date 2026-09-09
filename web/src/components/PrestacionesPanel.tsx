@@ -9,6 +9,7 @@ import {
 import type { Prestacion, PrestacionFormData, TipoPrestacion } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconPencil, IconSearch, IconTrash } from "./Icons";
+import { LoadingBlock } from "./InecoMark";
 import { PrestacionFormModal } from "./PrestacionFormModal";
 import { RichTextContent } from "./RichTextContent";
 import { TablePagination } from "./TablePagination";
@@ -206,7 +207,7 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
           </table>
           {loading ? (
             <div className="fl-table-empty fl-table-empty--fill">
-              <p className="fl-table-empty__title">Cargando prestaciones…</p>
+              <LoadingBlock label="Cargando prestaciones…" />
             </div>
           ) : filtradas.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">

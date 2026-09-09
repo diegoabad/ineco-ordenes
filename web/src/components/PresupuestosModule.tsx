@@ -42,6 +42,7 @@ export function PresupuestosModule({ section, onSectionChange }: Props) {
           tiposPrestacion: tiposMerged,
           profesionales: config.profesionales,
           modalidades: config.modalidades,
+          motivosRechazo: config.motivosRechazo ?? [],
         });
         setTiposPrestacion(saved.tiposPrestacion);
         setProfesionalesPresupuesto(saved.profesionales);

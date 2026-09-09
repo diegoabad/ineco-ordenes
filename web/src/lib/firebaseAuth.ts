@@ -103,13 +103,71 @@ function providerFor(id: OAuthProviderId) {
   return p;
 }
 
+function popupClosedError(): Error & { code: string } {
+  return Object.assign(new Error("Cerraste la ventana de inicio de sesión."), {
+    code: "auth/popup-closed-by-user",
+  });
+}
+
+/**
+ * Firebase tarda mucho en rechazar cuando el usuario cierra el popup.
+ * Interceptamos window.open y cortamos apenas `closed === true`.
+ */
+function signInWithPopupDetectClose(
+  authInstance: Auth,
+  provider: GoogleAuthProvider | OAuthProvider,
+): Promise<UserCredential> {
+  let popup: Window | null = null;
+  const originalOpen = window.open.bind(window);
+  window.open = (...args: Parameters<typeof window.open>) => {
+    popup = originalOpen(...args);
+    return popup;
+  };
+
+  let settled = false;
+  let intervalId = 0;
+
+  const cleanup = () => {
+    window.open = originalOpen;
+    if (intervalId) window.clearInterval(intervalId);
+  };
+
+  return new Promise<UserCredential>((resolve, reject) => {
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      action();
+    };
+
+    intervalId = window.setInterval(() => {
+      if (settled || !popup) return;
+      try {
+        if (popup.closed) {
+          finish(() => reject(popupClosedError()));
+        }
+      } catch {
+        // Si el browser bloquea leer `closed`, dejamos que Firebase maneje el timeout.
+      }
+    }, 200);
+
+    void signInWithPopup(authInstance, provider).then(
+      (cred) => finish(() => resolve(cred)),
+      (err) => finish(() => reject(err)),
+    );
+  });
+}
+
 export async function signInWithOAuthProvider(
   providerId: OAuthProviderId,
 ): Promise<string> {
   const authInstance = await ensureAuth();
   let credential: UserCredential;
   try {
-    credential = await signInWithPopup(authInstance, providerFor(providerId));
+    credential = await signInWithPopupDetectClose(
+      authInstance,
+      providerFor(providerId),
+    );
   } catch (err) {
     const friendly = friendlyLoginError(err);
     throw Object.assign(new Error(friendly.message), {

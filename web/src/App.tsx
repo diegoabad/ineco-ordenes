@@ -16,7 +16,7 @@ import {
   IconStar,
   IconTrash,
 } from "./components/Icons";
-import { EmailConfigPanel } from "./components/EmailConfigPanel";
+import { LoadingBlock } from "./components/InecoMark";
 import {
   EnvioResultadoModal,
   type EnvioResultadoItem,
@@ -32,6 +32,7 @@ import {
   type WhatsappSection,
   ORDENES_SECTIONS,
 } from "./lib/appNav";
+import { EmailConfigPanel } from "./components/EmailConfigPanel";
 import { FechaOrdenModal } from "./components/FechaOrdenModal";
 import { HistorialEnviosPanel } from "./components/HistorialEnviosPanel";
 import { LoginPage } from "./components/LoginPage";
@@ -877,7 +878,7 @@ export default function App() {
       onNavigate={handleNavigate}
       allowedModules={allowedModules}
       isAdmin={user?.role === "admin"}
-      userName={user?.nombre}
+      userName={formatNombrePersona(user?.nombre ?? "") || undefined}
       onLogout={() => void logout()}
     />
   );
@@ -885,7 +886,7 @@ export default function App() {
   if (authLoading) {
     return (
       <div className="auth-page">
-        <p className="auth-page__loading">Cargando sesión…</p>
+        <LoadingBlock label="Cargando sesión…" size={80} />
       </div>
     );
   }
@@ -901,7 +902,7 @@ export default function App() {
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
-              <p className="fl-table-empty__title">Cargando datos…</p>
+              <LoadingBlock label="Cargando datos…" />
             </div>
           </div>
         </div>
@@ -1101,7 +1102,7 @@ export default function App() {
                               className="chip chip--default"
                               title={
                                 medicoPorDefecto?.nombre
-                                  ? `Profesional por defecto: ${medicoPorDefecto.nombre}`
+                                  ? `Profesional por defecto: ${formatNombrePersona(medicoPorDefecto.nombre)}`
                                   : "Sin profesional por defecto"
                               }
                             >
@@ -1500,7 +1501,7 @@ export default function App() {
                       className="chip chip--default"
                       title={
                         medicoPorDefecto?.nombre
-                          ? `Profesional por defecto: ${medicoPorDefecto.nombre}`
+                          ? `Profesional por defecto: ${formatNombrePersona(medicoPorDefecto.nombre)}`
                           : "Sin profesional por defecto"
                       }
                     >

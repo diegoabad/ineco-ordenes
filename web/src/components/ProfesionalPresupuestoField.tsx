@@ -5,6 +5,7 @@ import {
   normalizeProfesionalPresupuestoNombre,
   TITULOS_PROFESIONAL_PRESUPUESTO,
 } from "../lib/profesionalPresupuesto";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
 import type { ProfesionalPresupuesto } from "../types";
 import { IconCheck, IconSearch, IconX } from "./Icons";
@@ -51,7 +52,7 @@ export function ProfesionalPresupuestoField({
 
   useEffect(() => {
     if (!focused && !creating) {
-      setQuery(value);
+      setQuery(formatNombrePersona(value));
     }
   }, [value, focused, creating]);
 
@@ -125,6 +126,7 @@ export function ProfesionalPresupuestoField({
         tiposPrestacion: config.tiposPrestacion,
         profesionales: nextProfesionales,
         modalidades: config.modalidades,
+        motivosRechazo: config.motivosRechazo ?? [],
       });
       onProfesionalesChange?.(saved.profesionales);
       seleccionar(label);
@@ -171,6 +173,7 @@ export function ProfesionalPresupuestoField({
             aria-label="Nombre y apellido"
             autoFocus
             onChange={(e) => setNuevoNombre(e.target.value)}
+            onBlur={() => setNuevoNombre(formatNombrePersona(nuevoNombre))}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -243,7 +246,7 @@ export function ProfesionalPresupuestoField({
           onBlur={(e) => {
             if (rootRef.current?.contains(e.relatedTarget as Node)) return;
             setFocused(false);
-            setQuery(value);
+            setQuery(formatNombrePersona(value));
           }}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -302,7 +305,9 @@ export function ProfesionalPresupuestoField({
       ) : null}
       {value &&
       !profesionales.some((p) => formatProfesionalPresupuesto(p) === value) ? (
-        <p className="text-muted prof-combobox__legacy">Profesional guardado: {value}</p>
+        <p className="text-muted prof-combobox__legacy">
+          Profesional guardado: {formatNombrePersona(value)}
+        </p>
       ) : null}
     </div>
   );

@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { PEDIDO_PRIORIDAD_LABEL, PEDIDO_SECCION_LABEL } from "../types";
 import { IconFile, IconTrash, IconUpload, IconX } from "./Icons";
+import { normalizeNombrePersona } from "../lib/nombrePersona";
 
 type AdjuntoDraft = {
   key: string;
@@ -108,8 +109,9 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const solicitadoPor =
-      user?.nombre?.trim() || user?.email?.trim() || "";
+    const solicitadoPor = user?.nombre?.trim()
+      ? normalizeNombrePersona(user.nombre)
+      : user?.email?.trim() || "";
     if (!titulo.trim() || !detalle.trim()) {
       toast.warning("Completá título y detalle");
       return;

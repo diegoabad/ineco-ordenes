@@ -8,6 +8,7 @@ import type { EmailEnvio, Paciente } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ViewDetailModal } from "./ViewDetailModal";
 import { IconAlert, IconFile, IconPdf, IconRefresh, IconSearch, IconTrash } from "./Icons";
+import { LoadingBlock } from "./InecoMark";
 import { TablePagination, TABLE_PAGE_SIZE } from "./TablePagination";
 
 type Props = {
@@ -312,7 +313,7 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
           </table>
           {loading ? (
             <div className="fl-table-empty fl-table-empty--fill">
-              <p className="fl-table-empty__title">Cargando historial…</p>
+              <LoadingBlock label="Cargando historial…" />
             </div>
           ) : items.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">

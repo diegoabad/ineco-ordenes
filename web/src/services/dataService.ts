@@ -326,10 +326,14 @@ export async function updatePresupuesto(
 export async function updatePresupuestoEstado(
   id: string,
   estado: Presupuesto["estado"],
+  motivoRechazo?: string | null,
 ): Promise<Presupuesto> {
   const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/estado`, {
     method: "PATCH",
-    body: JSON.stringify({ estado }),
+    body: JSON.stringify({
+      estado,
+      ...(estado === "rechazado" ? { motivoRechazo: motivoRechazo ?? "" } : {}),
+    }),
   });
   return res.data;
 }

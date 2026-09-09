@@ -21,15 +21,30 @@ function readTipText(el: Element): string | null {
   return null;
 }
 
+function isModalOverlayLayer(node: HTMLElement): boolean {
+  return (
+    node.classList.contains("fl-modal-backdrop") ||
+    node.getAttribute("aria-modal") === "true"
+  );
+}
+
 function findTipElement(clientX: number, clientY: number, fallbackTarget: EventTarget | null): HTMLElement | null {
   const stack = document.elementsFromPoint(clientX, clientY);
   for (const node of stack) {
     if (!(node instanceof HTMLElement)) continue;
     if (node.closest(".app-tooltip")) continue;
+    // Tip del elemento actual (incluye controles del modal)
     if (readTipText(node)) return node;
+    // No atravesar el modal: debajo suele haber la tabla con title/data-tooltip
+    if (isModalOverlayLayer(node)) return null;
   }
   if (fallbackTarget instanceof Element) {
-    const el = fallbackTarget.closest("[data-tooltip], [title]");
+    // Si hay un modal abierto, el fallback solo vale dentro del overlay
+    const openBackdrop = document.querySelector(".fl-modal-backdrop");
+    if (openBackdrop && !(fallbackTarget as Element).closest(".fl-modal-backdrop")) {
+      return null;
+    }
+    const el = (fallbackTarget as Element).closest("[data-tooltip], [title]");
     if (el instanceof HTMLElement && readTipText(el)) return el;
   }
   return null;

@@ -5,16 +5,19 @@ import {
   normalizeProfesionalPresupuestoNombre,
   TITULOS_PROFESIONAL_PRESUPUESTO,
 } from "../lib/profesionalPresupuesto";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { nextTipoColor, mergeMissingDefaultTipos } from "../lib/tipoPrestacion";
 import { fetchPresupuestosConfig, savePresupuestosConfig } from "../services/dataService";
 import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
   type ModalidadPresupuesto,
+  type MotivoRechazoPresupuesto,
   type ProfesionalPresupuesto,
   type TipoPrestacion,
 } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { LoadingBlock } from "./InecoMark";
 import { IconPlus, IconTrash } from "./Icons";
 import { TipoPrestacionChip } from "./TipoPrestacionChip";
 
@@ -29,7 +32,8 @@ function newId(): string {
 type PendingDelete =
   | { kind: "tipo"; index: number; nombre: string }
   | { kind: "profesional"; id: string; label: string }
-  | { kind: "modalidad"; id: string; label: string };
+  | { kind: "modalidad"; id: string; label: string }
+  | { kind: "motivo"; id: string; label: string };
 
 export function PresupuestosConfigPanel({ onSaved }: Props) {
   const [tipos, setTipos] = useState<TipoPrestacion[]>(DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })));
@@ -37,12 +41,14 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   const [modalidades, setModalidades] = useState<ModalidadPresupuesto[]>(
     DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
   );
+  const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
   const [nuevoTipo, setNuevoTipo] = useState("");
   const [nuevoColor, setNuevoColor] = useState(() => nextTipoColor(DEFAULT_TIPOS_PRESTACION));
   const [nuevoProfTitulo, setNuevoProfTitulo] = useState<string>(TITULOS_PROFESIONAL_PRESUPUESTO[0]!);
   const [nuevoProfNombre, setNuevoProfNombre] = useState("");
   const [nuevaModTitulo, setNuevaModTitulo] = useState("");
   const [nuevaModTexto, setNuevaModTexto] = useState("");
+  const [nuevoMotivo, setNuevoMotivo] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
@@ -62,10 +68,12 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
             tiposPrestacion: tiposMerged,
             profesionales: config.profesionales,
             modalidades: modalidadesLoaded,
+            motivosRechazo: config.motivosRechazo ?? [],
           });
           setTipos(saved.tiposPrestacion);
           setProfesionales(saved.profesionales);
           setModalidades(saved.modalidades);
+          setMotivosRechazo(saved.motivosRechazo);
           setNuevoColor(nextTipoColor(saved.tiposPrestacion));
           onSaved?.();
           if (changed) toast.success("Tipos Evaluación y Tratamiento restaurados");
@@ -73,6 +81,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
           setTipos(config.tiposPrestacion);
           setProfesionales(config.profesionales);
           setModalidades(config.modalidades);
+          setMotivosRechazo(config.motivosRechazo ?? []);
           setNuevoColor(nextTipoColor(config.tiposPrestacion));
         }
       } catch (error) {
@@ -87,6 +96,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     nextTipos: TipoPrestacion[],
     nextProfesionales: ProfesionalPresupuesto[],
     nextModalidades: ModalidadPresupuesto[],
+    nextMotivos: MotivoRechazoPresupuesto[],
     okMessage?: string,
   ) {
     setSaving(true);
@@ -95,10 +105,12 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
         tiposPrestacion: nextTipos,
         profesionales: nextProfesionales,
         modalidades: nextModalidades,
+        motivosRechazo: nextMotivos,
       });
       setTipos(saved.tiposPrestacion);
       setProfesionales(saved.profesionales);
       setModalidades(saved.modalidades);
+      setMotivosRechazo(saved.motivosRechazo);
       setNuevoColor(nextTipoColor(saved.tiposPrestacion));
       onSaved?.();
       if (okMessage) toast.success(okMessage);
@@ -113,6 +125,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
             ? config.modalidades
             : DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
         );
+        setMotivosRechazo(config.motivosRechazo ?? []);
         setNuevoColor(nextTipoColor(config.tiposPrestacion));
       } catch {
         // El toast ya avisó; la lista queda como estaba en pantalla.
@@ -132,7 +145,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     const next = [{ nombre, color: nuevoColor }, ...tipos];
     setNuevoTipo("");
     setNuevoColor(nextTipoColor(next));
-    await persistConfig(next, profesionales, modalidades, "Tipo agregado");
+    await persistConfig(next, profesionales, modalidades, motivosRechazo, "Tipo agregado");
   }
 
   function solicitarQuitarTipo(index: number) {
@@ -147,7 +160,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   async function confirmarQuitarTipo(index: number) {
     const next = tipos.filter((_, i) => i !== index);
-    await persistConfig(next, profesionales, modalidades, "Tipo eliminado");
+    await persistConfig(next, profesionales, modalidades, motivosRechazo, "Tipo eliminado");
   }
 
   function solicitarQuitarProfesional(p: ProfesionalPresupuesto) {
@@ -160,7 +173,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   async function confirmarQuitarProfesional(id: string) {
     const next = profesionales.filter((p) => p.id !== id);
-    await persistConfig(tipos, next, modalidades, "Profesional eliminado");
+    await persistConfig(tipos, next, modalidades, motivosRechazo, "Profesional eliminado");
   }
 
   function solicitarQuitarModalidad(m: ModalidadPresupuesto) {
@@ -173,7 +186,16 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
 
   async function confirmarQuitarModalidad(id: string) {
     const next = modalidades.filter((m) => m.id !== id);
-    await persistConfig(tipos, profesionales, next, "Modalidad eliminada");
+    await persistConfig(tipos, profesionales, next, motivosRechazo, "Modalidad eliminada");
+  }
+
+  function solicitarQuitarMotivo(m: MotivoRechazoPresupuesto) {
+    setPendingDelete({ kind: "motivo", id: m.id, label: m.label });
+  }
+
+  async function confirmarQuitarMotivo(id: string) {
+    const next = motivosRechazo.filter((m) => m.id !== id);
+    await persistConfig(tipos, profesionales, modalidades, next, "Motivo eliminado");
   }
 
   async function confirmarEliminacion() {
@@ -184,14 +206,16 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       await confirmarQuitarTipo(pending.index);
     } else if (pending.kind === "profesional") {
       await confirmarQuitarProfesional(pending.id);
-    } else {
+    } else if (pending.kind === "modalidad") {
       await confirmarQuitarModalidad(pending.id);
+    } else {
+      await confirmarQuitarMotivo(pending.id);
     }
   }
 
   async function cambiarColor(index: number, color: string) {
     const next = tipos.map((t, i) => (i === index ? { ...t, color } : t));
-    await persistConfig(next, profesionales, modalidades);
+    await persistConfig(next, profesionales, modalidades, motivosRechazo);
   }
 
   async function agregarProfesional() {
@@ -214,7 +238,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
       ...profesionales,
     ];
     setNuevoProfNombre("");
-    await persistConfig(tipos, next, modalidades, "Profesional agregado");
+    await persistConfig(tipos, next, modalidades, motivosRechazo, "Profesional agregado");
   }
 
   async function actualizarProfesional(
@@ -229,7 +253,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     };
     const next = profesionales.map((p) => (p.id === id ? { ...p, ...normalized } : p));
     setProfesionales(next);
-    await persistConfig(tipos, next, modalidades);
+    await persistConfig(tipos, next, modalidades, motivosRechazo);
   }
 
   async function agregarModalidad() {
@@ -248,7 +272,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     ];
     setNuevaModTitulo("");
     setNuevaModTexto("");
-    await persistConfig(tipos, profesionales, next, "Modalidad agregada");
+    await persistConfig(tipos, profesionales, next, motivosRechazo, "Modalidad agregada");
   }
 
   async function actualizarModalidad(
@@ -257,13 +281,36 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   ) {
     const next = modalidades.map((m) => (m.id === id ? { ...m, ...patch } : m));
     setModalidades(next);
-    await persistConfig(tipos, profesionales, next);
+    await persistConfig(tipos, profesionales, next, motivosRechazo);
+  }
+
+  async function agregarMotivo() {
+    const label = nuevoMotivo.trim();
+    if (!label) {
+      toast.warning("Ingresá el motivo de rechazo");
+      return;
+    }
+    if (motivosRechazo.some((m) => m.label.toLowerCase() === label.toLowerCase())) {
+      toast.warning("Ese motivo ya existe");
+      return;
+    }
+    const next = [{ id: newId(), label }, ...motivosRechazo];
+    setNuevoMotivo("");
+    await persistConfig(tipos, profesionales, modalidades, next, "Motivo agregado");
+  }
+
+  async function actualizarMotivo(id: string, label: string) {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const next = motivosRechazo.map((m) => (m.id === id ? { ...m, label: trimmed } : m));
+    setMotivosRechazo(next);
+    await persistConfig(tipos, profesionales, modalidades, next);
   }
 
   if (loading) {
     return (
       <div className="fl-table-empty fl-table-empty--inline">
-        <p className="fl-table-empty__title">Cargando configuración…</p>
+        <LoadingBlock label="Cargando configuración…" />
       </div>
     );
   }
@@ -312,7 +359,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
                       <input
                         id={`prof-nombre-${p.id}`}
                         type="text"
-                        value={p.nombreApellido}
+                        value={formatNombrePersona(p.nombreApellido)}
                         disabled={saving}
                         onChange={(e) =>
                           setProfesionales((prev) =>
@@ -322,7 +369,9 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
                           )
                         }
                         onBlur={(e) =>
-                          void actualizarProfesional(p.id, { nombreApellido: e.target.value.trim() })
+                          void actualizarProfesional(p.id, {
+                            nombreApellido: e.target.value.trim(),
+                          })
                         }
                       />
                     </div>
@@ -359,6 +408,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
               type="text"
               value={nuevoProfNombre}
               onChange={(e) => setNuevoProfNombre(e.target.value)}
+              onBlur={() => setNuevoProfNombre(formatNombrePersona(nuevoProfNombre))}
               placeholder="Nombre y apellido"
               disabled={saving}
               onKeyDown={(e) => {
@@ -557,6 +607,80 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
           </div>
         </div>
       </details>
+
+      <details className="presup-config-accordion">
+        <summary className="presup-config-accordion__summary">
+          <div className="presup-config-accordion__lead">
+            <span className="presup-config-accordion__title">Motivos de rechazo</span>
+            <span className="presup-config-accordion__hint">
+              Opciones precargadas al rechazar un presupuesto. También se puede escribir uno nuevo en el momento.
+            </span>
+          </div>
+          <span className="presup-config-accordion__meta">{motivosRechazo.length} motivo(s)</span>
+        </summary>
+        <div className="presup-config-accordion__body">
+          {motivosRechazo.length > 0 ? (
+            <ul className="presup-config-list presup-config-list--profesionales">
+              {motivosRechazo.map((m) => (
+                <li key={m.id} className="presup-config-list__item presup-config-list__item--prof">
+                  <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                    <input
+                      id={`motivo-${m.id}`}
+                      type="text"
+                      value={m.label}
+                      disabled={saving}
+                      aria-label="Motivo de rechazo"
+                      onChange={(e) =>
+                        setMotivosRechazo((prev) =>
+                          prev.map((item) =>
+                            item.id === m.id ? { ...item, label: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      onBlur={(e) => void actualizarMotivo(m.id, e.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="fl-icon-btn fl-icon-btn--danger"
+                    title="Quitar motivo"
+                    disabled={saving}
+                    onClick={() => solicitarQuitarMotivo(m)}
+                  >
+                    <IconTrash size={15} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted presup-config-empty">Todavía no hay motivos cargados.</p>
+          )}
+          <div className="presup-config-add">
+            <input
+              type="text"
+              value={nuevoMotivo}
+              onChange={(e) => setNuevoMotivo(e.target.value)}
+              placeholder="Nuevo motivo, ej. Precio"
+              disabled={saving}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void agregarMotivo();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={saving}
+              onClick={() => void agregarMotivo()}
+            >
+              <IconPlus size={16} />
+              Agregar
+            </button>
+          </div>
+        </div>
+      </details>
       </div>
 
       <ConfirmDialog
@@ -566,7 +690,9 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
             ? "Eliminar tipo de prestación"
             : pendingDelete?.kind === "profesional"
               ? "Eliminar profesional"
-              : "Eliminar modalidad"
+              : pendingDelete?.kind === "modalidad"
+                ? "Eliminar modalidad"
+                : "Eliminar motivo de rechazo"
         }
         message={
           pendingDelete?.kind === "tipo"
@@ -575,7 +701,9 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
               ? `¿Eliminar a ${pendingDelete.label}?`
               : pendingDelete?.kind === "modalidad"
                 ? `¿Eliminar la modalidad "${pendingDelete.label}"?`
-                : ""
+                : pendingDelete?.kind === "motivo"
+                  ? `¿Eliminar el motivo "${pendingDelete.label}"?`
+                  : ""
         }
         confirmLabel="Eliminar"
         onConfirm={() => void confirmarEliminacion()}

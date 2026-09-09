@@ -193,11 +193,6 @@ export function PresupuestoPlantillaPanel() {
                             key={v}
                             type="button"
                             className={`config-var${enUso ? " is-used" : " is-unused"}`}
-                            title={
-                              enUso
-                                ? `En uso · Insertar {{${v}}}`
-                                : `Sin usar · Insertar {{${v}}}`
-                            }
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => insertVariable(v)}
                           >

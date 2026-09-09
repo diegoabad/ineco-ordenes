@@ -16,8 +16,10 @@ import {
 } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconFile, IconPlus, IconSearch, IconTrash, IconX } from "./Icons";
+import { LoadingBlock } from "./InecoMark";
 import { PedidoSistemaFormModal } from "./PedidoSistemaFormModal";
 import { PedidosColorSelect, type PedidosColorOption } from "./PedidosColorSelect";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
 
@@ -209,8 +211,11 @@ export function PedidosSistemaPanel() {
                     >
                       {formatDateOnly(p.creadoAt)}
                     </td>
-                    <td className="pedidos-col-usuario" title={p.solicitadoPor}>
-                      {p.solicitadoPor}
+                    <td
+                      className="pedidos-col-usuario"
+                      title={formatNombrePersona(p.solicitadoPor)}
+                    >
+                      {formatNombrePersona(p.solicitadoPor)}
                     </td>
                     <td className="pedidos-col-titulo" title={p.titulo}>
                       {p.titulo}
@@ -261,7 +266,7 @@ export function PedidosSistemaPanel() {
 
           {loading ? (
             <div className="fl-table-empty fl-table-empty--fill">
-              <p className="fl-table-empty__title">Cargando pedidos…</p>
+              <LoadingBlock label="Cargando pedidos…" />
             </div>
           ) : filtrados.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">
@@ -343,7 +348,7 @@ export function PedidosSistemaPanel() {
                 </div>
                 <div className="detail-list__row">
                   <dt>Usuario</dt>
-                  <dd>{viewing.solicitadoPor}</dd>
+                  <dd>{formatNombrePersona(viewing.solicitadoPor)}</dd>
                 </div>
                 <div className="detail-list__row">
                   <dt>Sección</dt>

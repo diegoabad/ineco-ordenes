@@ -24,6 +24,7 @@ import {
   DEFAULT_TIPOS_PRESTACION,
   TIPO_COLOR_PALETTE,
   type ModalidadPresupuesto,
+  type MotivoRechazoPresupuesto,
   type PresupuestoCreateInput,
   type PresupuestoEstado,
   type PresupuestosConfig,
@@ -80,6 +81,24 @@ function parseModalidadesPresupuesto(raw: unknown): ModalidadPresupuesto[] {
   return result;
 }
 
+function parseMotivosRechazoPresupuesto(raw: unknown): MotivoRechazoPresupuesto[] {
+  if (!Array.isArray(raw)) return [];
+  const result: MotivoRechazoPresupuesto[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const label = String(obj.label ?? obj.nombre ?? "").trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const id = String(obj.id ?? "").trim() || randomUUID();
+    result.push({ id, label });
+  }
+  return result;
+}
+
 function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
   const raw = body as Record<string, unknown>;
   if (!Array.isArray(raw.tiposPrestacion)) {
@@ -87,6 +106,7 @@ function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
       tiposPrestacion: DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })),
       profesionales: parseProfesionalesPresupuesto(raw.profesionales),
       modalidades: parseModalidadesPresupuesto(raw.modalidades),
+      motivosRechazo: parseMotivosRechazoPresupuesto(raw.motivosRechazo),
     };
   }
 
@@ -132,6 +152,7 @@ function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
     tiposPrestacion: unique,
     profesionales: parseProfesionalesPresupuesto(raw.profesionales),
     modalidades: parseModalidadesPresupuesto(raw.modalidades),
+    motivosRechazo: parseMotivosRechazoPresupuesto(raw.motivosRechazo),
   };
 }
 
@@ -237,13 +258,21 @@ router.put("/plantilla", async (req, res) => {
   }
 });
 
-function parsePresupuestoEstado(body: unknown): PresupuestoEstado {
+function parsePresupuestoEstado(body: unknown): {
+  estado: PresupuestoEstado;
+  motivoRechazo?: string | null;
+} {
   const raw = body as Record<string, unknown>;
   const estado = String(raw.estado ?? "").trim();
-  if (estado === "aceptado" || estado === "rechazado") {
-    return estado;
+  if (estado !== "aceptado" && estado !== "rechazado") {
+    throw new Error("Solo se puede marcar como aceptado o rechazado");
   }
-  throw new Error("Solo se puede marcar como aceptado o rechazado");
+  const motivoRechazo =
+    typeof raw.motivoRechazo === "string" ? raw.motivoRechazo.trim() : "";
+  return {
+    estado,
+    motivoRechazo: estado === "rechazado" ? motivoRechazo || null : null,
+  };
 }
 
 function parsePresupuestoEnvioOverrides(body: unknown): { subject?: string; body?: string } {
@@ -321,7 +350,8 @@ router.put("/:id/pdf", async (req, res) => {
 router.patch("/:id/estado", async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
-    const data = await updatePresupuestoEstado(id, parsePresupuestoEstado(req.body));
+    const parsed = parsePresupuestoEstado(req.body);
+    const data = await updatePresupuestoEstado(id, parsed.estado, parsed.motivoRechazo);
     res.json({ ok: true, data });
   } catch (error) {
     res.status(400).json({
