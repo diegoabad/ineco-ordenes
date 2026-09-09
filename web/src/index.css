@@ -5676,6 +5676,18 @@ tbody tr.is-inactive td {
   flex-shrink: 0;
 }
 
+.pedidos-fotos__file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+  color: var(--text-muted);
+}
+
 .pedidos-fotos__item span {
   font-size: 0.8125rem;
   overflow: hidden;
@@ -5951,6 +5963,19 @@ tbody tr.is-inactive td {
   overflow: hidden;
   background: #fff;
   aspect-ratio: 1;
+}
+
+.pedidos-adjuntos__file {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--border) 40%, #fff);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.pedidos-adjuntos__file-icon {
+  display: inline-flex;
 }
 
 .pedidos-adjuntos__item img {

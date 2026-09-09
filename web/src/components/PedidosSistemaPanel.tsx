@@ -65,6 +65,11 @@ function fotoSrc(url: string): string {
   return resolveAssetUrl(url) ?? url;
 }
 
+function isImageAdjunto(nombre: string, url: string): boolean {
+  const name = `${nombre} ${url}`.toLowerCase();
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(name);
+}
+
 export function PedidosSistemaPanel() {
   const [items, setItems] = useState<PedidoSistema[]>([]);
   const [loading, setLoading] = useState(true);
@@ -357,19 +362,30 @@ export function PedidosSistemaPanel() {
                   <dd className="pedidos-adjuntos">
                     {viewing.fotos.length > 0 ? (
                       <ul className="pedidos-adjuntos__grid">
-                        {viewing.fotos.map((f, idx) => (
-                          <li key={`${f.url}-${idx}`} className="pedidos-adjuntos__item">
-                            <a
-                              href={fotoSrc(f.url)}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={f.nombre}
-                            >
-                              <img src={fotoSrc(f.url)} alt={f.nombre} />
-                            </a>
-                            <span title={f.nombre}>{f.nombre}</span>
-                          </li>
-                        ))}
+                        {viewing.fotos.map((f, idx) => {
+                          const src = fotoSrc(f.url);
+                          const image = isImageAdjunto(f.nombre, f.url);
+                          return (
+                            <li key={`${f.url}-${idx}`} className="pedidos-adjuntos__item">
+                              <a
+                                href={src}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={f.nombre}
+                                className={image ? undefined : "pedidos-adjuntos__file"}
+                              >
+                                {image ? (
+                                  <img src={src} alt={f.nombre} />
+                                ) : (
+                                  <span className="pedidos-adjuntos__file-icon" aria-hidden>
+                                    <IconFile size={28} />
+                                  </span>
+                                )}
+                              </a>
+                              <span title={f.nombre}>{f.nombre}</span>
+                            </li>
+                          );
+                        })}
                       </ul>
                     ) : (
                       <p className="text-muted pedidos-adjuntos__empty">Sin adjuntos</p>

@@ -8,14 +8,15 @@ import type {
   PedidoSistemaSeccion,
 } from "../types";
 import { PEDIDO_PRIORIDAD_LABEL, PEDIDO_SECCION_LABEL } from "../types";
-import { IconTrash, IconUpload, IconX } from "./Icons";
+import { IconFile, IconTrash, IconUpload, IconX } from "./Icons";
 
-type FotoDraft = {
+type AdjuntoDraft = {
   key: string;
   nombre: string;
   mime: string;
   base64: string;
   previewUrl: string;
+  isImage: boolean;
 };
 
 type Props = {
@@ -33,27 +34,31 @@ const SECCIONES: PedidoSistemaSeccion[] = [
 ];
 
 const PRIORIDADES: PedidoSistemaPrioridad[] = ["baja", "media", "alta"];
+const MAX_ADJUNTOS = 8;
+const MAX_BYTES = 8 * 1024 * 1024;
 
-async function fileToDraft(file: File): Promise<FotoDraft> {
+async function fileToDraft(file: File): Promise<AdjuntoDraft> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== "string") {
-        reject(new Error("No se pudo leer la imagen"));
+        reject(new Error("No se pudo leer el archivo"));
         return;
       }
       resolve(reader.result);
     };
-    reader.onerror = () => reject(new Error("No se pudo leer la imagen"));
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
     reader.readAsDataURL(file);
   });
   const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1]! : dataUrl;
+  const mime = file.type || "application/octet-stream";
   return {
     key: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
     nombre: file.name,
-    mime: file.type || "image/jpeg",
+    mime,
     base64,
     previewUrl: dataUrl,
+    isImage: mime.startsWith("image/"),
   };
 }
 
@@ -65,7 +70,7 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
   const [titulo, setTitulo] = useState("");
   const [detalle, setDetalle] = useState("");
   const [prioridad, setPrioridad] = useState<PedidoSistemaPrioridad>("media");
-  const [fotos, setFotos] = useState<FotoDraft[]>([]);
+  const [adjuntos, setAdjuntos] = useState<AdjuntoDraft[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -73,7 +78,7 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
     setTitulo("");
     setDetalle("");
     setPrioridad("media");
-    setFotos([]);
+    setAdjuntos([]);
     setSaving(false);
   }, [open]);
 
@@ -84,21 +89,17 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
   async function onPickFiles(files: FileList | null) {
     if (!files?.length) return;
     try {
-      const next: FotoDraft[] = [];
+      const next: AdjuntoDraft[] = [];
       for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/")) {
-          toast.warning(`"${file.name}" no es una imagen`);
-          continue;
-        }
-        if (file.size > 8 * 1024 * 1024) {
+        if (file.size > MAX_BYTES) {
           toast.warning(`"${file.name}" supera 8 MB`);
           continue;
         }
         next.push(await fileToDraft(file));
       }
-      setFotos((prev) => [...prev, ...next].slice(0, 8));
+      setAdjuntos((prev) => [...prev, ...next].slice(0, MAX_ADJUNTOS));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudieron cargar las fotos");
+      toast.error(error instanceof Error ? error.message : "No se pudieron cargar los archivos");
     } finally {
       if (fileRef.current) fileRef.current.value = "";
     }
@@ -126,7 +127,7 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
         detalle: detalle.trim(),
         solicitadoPor,
         prioridad,
-        fotos: fotos.map((f) => ({
+        fotos: adjuntos.map((f) => ({
           base64: f.base64,
           nombre: f.nombre,
           mime: f.mime,
@@ -225,7 +226,6 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*"
                 multiple
                 hidden
                 onChange={(e) => void onPickFiles(e.target.files)}
@@ -233,17 +233,23 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
               <button
                 type="button"
                 className="btn btn-secondary"
-                disabled={saving || fotos.length >= 8}
+                disabled={saving || adjuntos.length >= MAX_ADJUNTOS}
                 onClick={() => fileRef.current?.click()}
               >
                 <IconUpload size={16} />
-                Subir fotos
+                Subir imágenes o archivos
               </button>
-              {fotos.length > 0 ? (
+              {adjuntos.length > 0 ? (
                 <ul className="pedidos-fotos__list">
-                  {fotos.map((f) => (
+                  {adjuntos.map((f) => (
                     <li key={f.key} className="pedidos-fotos__item">
-                      <img src={f.previewUrl} alt={f.nombre} />
+                      {f.isImage ? (
+                        <img src={f.previewUrl} alt={f.nombre} />
+                      ) : (
+                        <span className="pedidos-fotos__file-icon" aria-hidden>
+                          <IconFile size={22} />
+                        </span>
+                      )}
                       <span title={f.nombre}>{f.nombre}</span>
                       <button
                         type="button"
@@ -251,7 +257,7 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
                         title="Quitar"
                         disabled={saving}
                         onClick={() =>
-                          setFotos((prev) => prev.filter((x) => x.key !== f.key))
+                          setAdjuntos((prev) => prev.filter((x) => x.key !== f.key))
                         }
                       >
                         <IconTrash size={14} />
@@ -259,9 +265,7 @@ export function PedidoSistemaFormModal({ open, onClose, onCreated }: Props) {
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="text-muted pedidos-fotos__hint">Hasta 8 imágenes, 8 MB c/u.</p>
-              )}
+              ) : null}
             </div>
           </label>
         </div>

@@ -1,5 +1,8 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import sgMail from "@sendgrid/mail";
 import { env } from "../config/env.js";
+import { uploadsPedidosDir } from "../config/paths.js";
 import type { PedidoSistema } from "../types.js";
 
 const PEDIDOS_TO = "tickets@ineco.ar";
@@ -17,6 +20,49 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function mimeFromExt(ext: string): string {
+  switch (ext.toLowerCase()) {
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "pdf":
+      return "application/pdf";
+    case "doc":
+      return "application/msword";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xls":
+      return "application/vnd.ms-excel";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case "ppt":
+      return "application/vnd.ms-powerpoint";
+    case "pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    case "txt":
+      return "text/plain";
+    case "csv":
+      return "text/csv";
+    case "zip":
+      return "application/zip";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function filePathFromFotoUrl(url: string): string | null {
+  const clean = url.split("?")[0] ?? "";
+  const match = /\/uploads\/pedidos\/([^/]+)$/i.exec(clean);
+  if (!match?.[1]) return null;
+  return path.join(uploadsPedidosDir(), match[1]);
 }
 
 const SECCION_LABEL: Record<PedidoSistema["seccion"], string> = {
@@ -48,15 +94,15 @@ export async function sendPedidoSistemaEmail(pedido: PedidoSistema): Promise<voi
       : []),
     `Solicitado por: ${pedido.solicitadoPor}`,
     `Prioridad: ${PRIORIDAD_LABEL[pedido.prioridad]}`,
-    `Fotos: ${pedido.fotos.length}`,
+    `Adjuntos: ${pedido.fotos.length}`,
     "",
     "Detalle:",
     pedido.detalle || "—",
   ].join("\n");
 
-  const fotosHtml =
+  const adjuntosHtml =
     pedido.fotos.length === 0
-      ? "<p>Sin fotos adjuntas.</p>"
+      ? "<p>Sin adjuntos.</p>"
       : `<ul>${pedido.fotos.map((f) => `<li>${escapeHtml(f.nombre)}</li>`).join("")}</ul>`;
 
   const nuevaHtml =
@@ -73,9 +119,33 @@ export async function sendPedidoSistemaEmail(pedido: PedidoSistema): Promise<voi
     <p><strong>Prioridad:</strong> ${escapeHtml(PRIORIDAD_LABEL[pedido.prioridad])}</p>
     <p><strong>Detalle:</strong></p>
     <p style="white-space:pre-wrap">${escapeHtml(pedido.detalle || "—")}</p>
-    <p><strong>Fotos:</strong></p>
-    ${fotosHtml}
+    <p><strong>Adjuntos:</strong></p>
+    ${adjuntosHtml}
   `;
+
+  const attachments: {
+    content: string;
+    filename: string;
+    type: string;
+    disposition: "attachment";
+  }[] = [];
+
+  for (const foto of pedido.fotos) {
+    const filePath = filePathFromFotoUrl(foto.url);
+    if (!filePath) continue;
+    try {
+      const buffer = await fs.readFile(filePath);
+      const ext = path.extname(filePath).replace(/^\./, "") || "bin";
+      attachments.push({
+        content: buffer.toString("base64"),
+        filename: foto.nombre.trim() || path.basename(filePath),
+        type: mimeFromExt(ext),
+        disposition: "attachment",
+      });
+    } catch (error) {
+      console.error(`No se pudo adjuntar archivo de pedido ${pedido.id}:`, foto.url, error);
+    }
+  }
 
   await sgMail.send({
     to: PEDIDOS_TO,
@@ -83,5 +153,6 @@ export async function sendPedidoSistemaEmail(pedido: PedidoSistema): Promise<voi
     subject,
     text,
     html,
+    ...(attachments.length > 0 ? { attachments } : {}),
   });
 }

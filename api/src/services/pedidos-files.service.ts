@@ -14,7 +14,7 @@ function stripBase64(input: string): string {
 
 function extFromMimeOrName(mime: string | undefined, nombre: string): string {
   const fromName = path.extname(nombre).replace(/^\./, "").toLowerCase();
-  if (fromName && /^[a-z0-9]+$/i.test(fromName) && fromName.length <= 5) {
+  if (fromName && /^[a-z0-9]+$/i.test(fromName) && fromName.length <= 8) {
     return fromName;
   }
   const m = (mime ?? "").toLowerCase();
@@ -22,7 +22,14 @@ function extFromMimeOrName(mime: string | undefined, nombre: string): string {
   if (m.includes("webp")) return "webp";
   if (m.includes("gif")) return "gif";
   if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
-  return "jpg";
+  if (m.includes("pdf")) return "pdf";
+  if (m.includes("msword") || m.includes("wordprocessingml")) return "docx";
+  if (m.includes("spreadsheetml") || m.includes("excel")) return "xlsx";
+  if (m.includes("presentationml") || m.includes("powerpoint")) return "pptx";
+  if (m.includes("text/plain")) return "txt";
+  if (m.includes("csv")) return "csv";
+  if (m.includes("zip")) return "zip";
+  return "bin";
 }
 
 export async function savePedidoFoto(
@@ -34,9 +41,9 @@ export async function savePedidoFoto(
 ): Promise<{ url: string; nombre: string }> {
   await ensurePedidosUploadsDir();
   const buffer = Buffer.from(stripBase64(base64), "base64");
-  if (buffer.length === 0) throw new Error("Foto inválida");
+  if (buffer.length === 0) throw new Error("Archivo inválido");
   if (buffer.length > 8 * 1024 * 1024) {
-    throw new Error("Cada foto puede pesar como máximo 8 MB");
+    throw new Error("Cada archivo puede pesar como máximo 8 MB");
   }
   const ext = extFromMimeOrName(mime, nombre);
   const safeName = `${pedidoId}-${index}.${ext}`;
