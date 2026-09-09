@@ -205,7 +205,7 @@ function computeStats(
       count: otrosTotal,
       detail: otrosDetalle,
     },
-  ];
+  ].sort(sortDesc);
 
   return {
     total: filtered.length,
@@ -251,6 +251,10 @@ function BarList({
   accent?: "error";
 }) {
   const max = Math.max(1, ...rows.map((r) => r.count));
+  const total = Math.max(
+    1,
+    rows.reduce((acc, r) => acc + r.count, 0),
+  );
 
   return (
     <section className={`metrics-card${accent ? ` metrics-card--${accent}` : ""}`}>
@@ -261,6 +265,7 @@ function BarList({
         <ul className={`metrics-bars${accent ? ` metrics-bars--${accent}` : ""}`}>
           {rows.map((row) => {
             const width = `${Math.round((row.count / max) * 100)}%`;
+            const pct = Math.round((row.count / total) * 100);
             const isOtros = row.name === "Otros";
             const detail = row.detail ?? [];
             const detailTotal = Math.max(
@@ -273,7 +278,10 @@ function BarList({
               <>
                 <div className="metrics-bars__meta">
                   <span className="metrics-bars__name">{row.name}</span>
-                  <span className="metrics-bars__count">{row.count}</span>
+                  <span className="metrics-bars__count">
+                    {row.count}{" "}
+                    <span className="metrics-bars__pct">({pct}%)</span>
+                  </span>
                 </div>
                 <div className="metrics-bars__track" aria-hidden>
                   <div className="metrics-bars__fill" style={{ width }} />

@@ -402,6 +402,27 @@ function sheetTable(
   });
 }
 
+function pctOf(count: number, total: number): number {
+  if (!total) return 0;
+  return Math.round((count / total) * 100);
+}
+
+function withPctRows(
+  rows: { name: string; count: number }[],
+): (string | number)[][] {
+  const total = rows.reduce((acc, r) => acc + r.count, 0);
+  if (!rows.length) return [["Sin datos", 0, 0]];
+  return rows.map((r) => [r.name, r.count, pctOf(r.count, total)]);
+}
+
+function withPctLabelRows(
+  rows: { name: string; count: number }[],
+): string[][] {
+  const total = rows.reduce((acc, r) => acc + r.count, 0);
+  if (!rows.length) return [["Sin datos", "0", "0%"]];
+  return rows.map((r) => [r.name, String(r.count), `${pctOf(r.count, total)}%`]);
+}
+
 export function exportMetricasExcel(data: MetricasExportData): void {
   const wb = XLSX.utils.book_new();
 
@@ -447,10 +468,8 @@ export function exportMetricasExcel(data: MetricasExportData): void {
     wb,
     sheetTable(
       "Por profesional",
-      ["Profesional", "Cantidad"],
-      data.byProfesional.length
-        ? data.byProfesional.map((p) => [p.name, p.count])
-        : [["Sin datos", 0]],
+      ["Profesional", "Cantidad", "%"],
+      withPctRows(data.byProfesional),
       { subtitle: ["Periodo", periodoLabel(data)] },
     ),
     "Por profesional",
@@ -460,10 +479,8 @@ export function exportMetricasExcel(data: MetricasExportData): void {
     wb,
     sheetTable(
       "Por prestación",
-      ["Prestación", "Cantidad"],
-      data.byPrestacion.length
-        ? data.byPrestacion.map((p) => [p.name, p.count])
-        : [["Sin datos", 0]],
+      ["Prestación", "Cantidad", "%"],
+      withPctRows(data.byPrestacion),
       { subtitle: ["Periodo", periodoLabel(data)] },
     ),
     "Por prestación",
@@ -474,17 +491,17 @@ export function exportMetricasExcel(data: MetricasExportData): void {
     wb,
     sheetTable(
       "Motivos de rechazo",
-      ["Motivo de rechazo", "Cantidad"],
-      data.byMotivoRechazo.map((m) => [m.name, m.count]),
+      ["Motivo de rechazo", "Cantidad", "%"],
+      withPctRows(data.byMotivoRechazo),
       {
         subtitle: ["Periodo", periodoLabel(data)],
         extraSection: {
           title: "Detalle de Otros",
-          headers: ["Texto escrito", "Cantidad"],
+          headers: ["Texto escrito", "Cantidad", "%"],
           rows:
             otrosDetalle.length > 0
-              ? otrosDetalle.map((d) => [d.name, d.count])
-              : [["No hay textos en Otros", "—"]],
+              ? withPctRows(otrosDetalle)
+              : [["No hay textos en Otros", "—", "—"]],
         },
       },
     ),
@@ -654,34 +671,30 @@ export function exportMetricasPdf(data: MetricasExportData): void {
   drawTable(
     ctx,
     "Por profesional",
-    ["Profesional", "Cantidad"],
-    data.byProfesional.length
-      ? data.byProfesional.map((p) => [p.name, String(p.count)])
-      : [["Sin datos", "0"]],
+    ["Profesional", "Cantidad", "%"],
+    withPctLabelRows(data.byProfesional),
   );
   drawTable(
     ctx,
     "Por prestación",
-    ["Prestación", "Cantidad"],
-    data.byPrestacion.length
-      ? data.byPrestacion.map((p) => [p.name, String(p.count)])
-      : [["Sin datos", "0"]],
+    ["Prestación", "Cantidad", "%"],
+    withPctLabelRows(data.byPrestacion),
   );
   drawTable(
     ctx,
     "Motivos de rechazo",
-    ["Motivo", "Cantidad"],
-    data.byMotivoRechazo.map((m) => [m.name, String(m.count)]),
+    ["Motivo", "Cantidad", "%"],
+    withPctLabelRows(data.byMotivoRechazo),
   );
 
   const otrosDetalle = data.byMotivoRechazo.find((m) => m.name === "Otros")?.detail ?? [];
   drawTable(
     ctx,
     "Detalle de Otros",
-    ["Texto escrito", "Cantidad"],
+    ["Texto escrito", "Cantidad", "%"],
     otrosDetalle.length > 0
-      ? otrosDetalle.map((d) => [d.name, String(d.count)])
-      : [["No hay textos en Otros", "—"]],
+      ? withPctLabelRows(otrosDetalle)
+      : [["No hay textos en Otros", "—", "—"]],
   );
 
   drawFootersOnAllPages(doc);
