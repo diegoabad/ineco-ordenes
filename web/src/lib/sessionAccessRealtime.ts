@@ -12,6 +12,7 @@ const AUTH_CONFIG_DOC = "auth";
 
 function isModuleId(value: unknown): value is AppModuleId {
   return (
+    value === "inicio" ||
     value === "ordenes" ||
     value === "presupuestos" ||
     value === "pami" ||

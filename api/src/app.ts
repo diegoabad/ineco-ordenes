@@ -13,6 +13,7 @@ import { medexisProxy } from "./middleware/medexis.proxy.js";
 import authRoutes from "./routes/auth.routes.js";
 import buscaTurnoRoutes from "./routes/busca-turno.routes.js";
 import configRoutes from "./routes/config.routes.js";
+import inicioRoutes from "./routes/inicio.routes.js";
 import medicosRoutes from "./routes/medicos.routes.js";
 import pacientesRoutes from "./routes/pacientes.routes.js";
 import pamiRoutes from "./routes/pami.routes.js";
@@ -83,6 +84,7 @@ app.use(express.json({ limit: "50mb" }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/usuarios", usuariosRoutes);
+app.use("/api/inicio", requireAuth, requireModule("inicio"), inicioRoutes);
 
 app.use("/api", configRoutes);
 app.use("/api/pacientes", requireAuth, requireModule("ordenes"), pacientesRoutes);

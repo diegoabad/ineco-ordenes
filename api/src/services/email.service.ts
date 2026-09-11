@@ -327,3 +327,72 @@ export async function sendPresupuestoEmail(
     throw new Error(clearEmailErrorMessage(error));
   }
 }
+
+export type SendLinkPagoEmailInput = {
+  toEmail: string;
+  nombrePaciente: string;
+  profesional?: string;
+  fechaPresupuesto?: string;
+  totalEfectivo?: number;
+  total3Cuotas?: number;
+  cantidadPrestaciones?: number;
+  items?: PresupuestoItem[];
+  linkPago: string;
+  subject?: string;
+  body?: string;
+};
+
+export async function sendLinkPagoEmail(
+  input: SendLinkPagoEmailInput,
+): Promise<{ to: string }> {
+  const to = input.toEmail.trim();
+  if (!to) throw new Error("El email es obligatorio para enviar el link de pago");
+  if (!input.linkPago.trim()) throw new Error("Falta el link de pago");
+
+  const nombrePaciente = formatNombrePersona(input.nombrePaciente) || "paciente";
+  const config = await getPresupuestoEmailConfig();
+  const fechaRaw = input.fechaPresupuesto?.trim() || "";
+  const fechaFmt = (() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaRaw);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : fechaRaw || "—";
+  })();
+  const vars = {
+    nombrePaciente,
+    email: to,
+    nombreProfesional: formatNombrePersona(input.profesional ?? "") || "—",
+    fechaPresupuesto: fechaFmt,
+    totalEfectivo: formatPresupuestoMoney(input.totalEfectivo),
+    total3Cuotas: formatPresupuestoMoney(input.total3Cuotas),
+    cantidadPrestaciones:
+      input.cantidadPrestaciones !== undefined ? String(input.cantidadPrestaciones) : "—",
+    listaPrestaciones: formatListaPrestaciones(input.items ?? []),
+    linkPago: input.linkPago.trim(),
+  };
+
+  const subject =
+    input.subject?.trim() ||
+    applyPresupuestoEmailTemplate(config.linkPagoSubject, vars).trim() ||
+    `Link de pago - ${nombrePaciente}`;
+  const bodyRaw =
+    input.body?.trim() || applyPresupuestoEmailTemplate(config.linkPagoBody, vars);
+  const bodyText = emailBodyToPlainText(bodyRaw);
+  const bodyHtml = emailBodyToHtml(bodyRaw);
+
+  try {
+    ensureSendGrid();
+    await sgMail.send({
+      to,
+      from: {
+        email: config.fromEmail,
+        name: config.fromName,
+      },
+      subject,
+      text: bodyText,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111">${bodyHtml}</div>`,
+    });
+
+    return { to };
+  } catch (error) {
+    throw new Error(clearEmailErrorMessage(error));
+  }
+}

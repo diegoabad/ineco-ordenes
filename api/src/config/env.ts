@@ -54,4 +54,8 @@ export const env = {
     password: process.env.MEDEXIS_PASSWORD || "",
     token: process.env.MEDEXIS_TOKEN || "",
   },
+  mercadoPago: {
+    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN?.trim() || "",
+    sandbox: process.env.MERCADOPAGO_SANDBOX === "true",
+  },
 };

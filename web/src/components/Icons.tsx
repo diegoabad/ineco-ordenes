@@ -351,3 +351,58 @@ export function IconWhatsapp(p: IconProps) {
   );
 }
 
+/** Inicio / home. */
+export function IconHome(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 10v10h14V10" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
+  );
+}
+
+/** Reloj. */
+export function IconClock(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
+
+/** Chincheta / pin. */
+export function IconPin(p: IconProps & { filled?: boolean }) {
+  const s = base(p);
+  if (p.filled) {
+    return (
+      <svg viewBox="0 0 24 24" {...s} fill="currentColor" stroke="none">
+        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+      <path d="M12 17v5" />
+    </svg>
+  );
+}
+
+/** Paleta de colores. */
+export function IconPalette(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M12 3a9 9 0 1 0 0 18c.8 0 1.4-.6 1.4-1.4 0-.4-.1-.7-.4-1-.2-.2-.3-.5-.3-.8a1.4 1.4 0 0 1 1.4-1.4H16a5 5 0 0 0 0-10H12z" />
+      <circle cx="7.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="10.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="16.5" cy="11" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+

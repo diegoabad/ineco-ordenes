@@ -12,7 +12,7 @@ import {
 } from "../services/db.service.js";
 import { EMAIL_TEMPLATE_VARS, type EmailConfig } from "../services/email-templates.js";
 import {
-  PRESUPUESTO_EMAIL_TEMPLATE_VARS,
+  EMAIL_TEMPLATE_VARS_BY_KIND,
   type PresupuestoEmailConfig,
 } from "../services/presupuesto-email-templates.js";
 import { sendOrdenEmail } from "../services/email.service.js";
@@ -36,6 +36,8 @@ function parsePresupuestoEmailConfig(body: unknown): PresupuestoEmailConfig {
     fromName: String(raw.fromName ?? "").trim(),
     subject: String(raw.subject ?? "").trim(),
     body: String(raw.body ?? "").trim(),
+    linkPagoSubject: String(raw.linkPagoSubject ?? "").trim(),
+    linkPagoBody: String(raw.linkPagoBody ?? "").trim(),
   };
 }
 
@@ -102,7 +104,12 @@ router.put("/config/email", requireAuth, requireModule("ordenes"), async (req, r
 router.get("/config/presupuesto-email", requireAuth, requireModule("presupuestos"), async (_req, res) => {
   try {
     const data = await getPresupuestoEmailConfig();
-    res.json({ ok: true, data, variables: PRESUPUESTO_EMAIL_TEMPLATE_VARS });
+    res.json({
+      ok: true,
+      data,
+      variables: EMAIL_TEMPLATE_VARS_BY_KIND.presupuesto,
+      variablesByKind: EMAIL_TEMPLATE_VARS_BY_KIND,
+    });
   } catch (error) {
     res.status(500).json({
       ok: false,

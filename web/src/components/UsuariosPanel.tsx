@@ -28,10 +28,10 @@ const SELECTABLE_MODULE_IDS: AppModuleId[] = SELECTABLE_MODULE_OPTIONS.map(
 
 function withFixedModules(modules: AppModuleId[], role: UserRole): AppModuleId[] {
   if (role === "admin") {
-    return [...SELECTABLE_MODULE_IDS, "pedidos-sistema", "usuarios"];
+    return [...SELECTABLE_MODULE_IDS, "inicio", "pedidos-sistema", "usuarios"];
   }
   const selectable = modules.filter((m) => SELECTABLE_MODULE_IDS.includes(m));
-  return Array.from(new Set<AppModuleId>([...selectable, "pedidos-sistema"]));
+  return Array.from(new Set<AppModuleId>(["inicio", ...selectable, "pedidos-sistema"]));
 }
 
 type AccessDraft = {

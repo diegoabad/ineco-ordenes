@@ -142,6 +142,12 @@ export type Presupuesto = {
   motivoRechazo: string | null;
   /** ISO del último intento de envío (éxito o fallo). */
   ultimoEnvioAt: string | null;
+  /** Preferencia Checkout Pro de Mercado Pago. */
+  mpPreferenceId: string | null;
+  /** Link de pago (init_point) de Mercado Pago. */
+  mpInitPoint: string | null;
+  /** ISO del último envío del mail con link de pago. */
+  linkPagoEnviadoAt: string | null;
   creadoAt?: string;
 };
 
@@ -225,6 +231,7 @@ export type PamiAnalisisCreateInput = {
 
 /** Módulos / pantallas de la app. */
 export type AppModuleId =
+  | "inicio"
   | "ordenes"
   | "presupuestos"
   | "pami"
@@ -234,6 +241,7 @@ export type AppModuleId =
   | "usuarios";
 
 export const ALL_APP_MODULES: AppModuleId[] = [
+  "inicio",
   "ordenes",
   "presupuestos",
   "pami",
@@ -299,6 +307,82 @@ export type PedidoSistemaUpdateInput = {
   titulo?: string;
   detalle?: string;
   cuando?: string;
+};
+
+/** Items personales de la pantalla Inicio. */
+export type InicioItemTipo = "tarea" | "nota" | "recordatorio";
+
+export type InicioNotaColor =
+  | "gris"
+  | "amarillo"
+  | "verde"
+  | "azul"
+  | "rosa"
+  | "naranja";
+
+export const INICIO_NOTA_COLORES: InicioNotaColor[] = [
+  "gris",
+  "amarillo",
+  "verde",
+  "azul",
+  "rosa",
+  "naranja",
+];
+
+export type InicioItem = {
+  id: string;
+  tipo: InicioItemTipo;
+  titulo: string;
+  detalle: string;
+  /** ISO datetime (recordatorios; opcional en tareas). */
+  fechaHora: string | null;
+  hecha: boolean;
+  /** Orden de visualización (menor = primero). */
+  orden: number;
+  /** Color del papel (notas). */
+  color: InicioNotaColor;
+  /** Aviso en la aplicación (recordatorios). */
+  avisoApp: boolean;
+  /** Aviso por mail (recordatorios). */
+  avisoEmail: boolean;
+  /** Cuándo se envió el mail de aviso (anti-duplicado). */
+  emailEnviadoAt: string | null;
+  /** Nota fijada al frente. */
+  pinned: boolean;
+  /** Id de la tarea de origen (si el recordatorio se creó desde una tarea). */
+  origenTareaId: string | null;
+  userId: string;
+  creadoAt: string;
+  actualizadoAt: string;
+};
+
+export type InicioItemCreateInput = {
+  tipo: InicioItemTipo;
+  titulo: string;
+  detalle?: string;
+  fechaHora?: string | null;
+  color?: InicioNotaColor;
+  avisoApp?: boolean;
+  avisoEmail?: boolean;
+  pinned?: boolean;
+  origenTareaId?: string | null;
+};
+
+export type InicioItemUpdateInput = {
+  titulo?: string;
+  detalle?: string;
+  fechaHora?: string | null;
+  hecha?: boolean;
+  color?: InicioNotaColor;
+  avisoApp?: boolean;
+  avisoEmail?: boolean;
+  emailEnviadoAt?: string | null;
+  pinned?: boolean;
+};
+
+export type InicioItemReorderInput = {
+  tipo: InicioItemTipo;
+  ids: string[];
 };
 
 export type UserRole = "user" | "admin";

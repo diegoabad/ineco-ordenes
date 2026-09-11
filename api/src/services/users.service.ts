@@ -103,6 +103,7 @@ const SELECTABLE_MODULES: AppModuleId[] = [
 
 function isModuleId(value: unknown): value is AppModuleId {
   return (
+    value === "inicio" ||
     value === "ordenes" ||
     value === "presupuestos" ||
     value === "pami" ||
@@ -115,7 +116,7 @@ function isModuleId(value: unknown): value is AppModuleId {
 
 function normalizeModules(raw: unknown, role: UserRole): AppModuleId[] {
   if (role === "admin") {
-    return [...SELECTABLE_MODULES, "pedidos-sistema", "usuarios"];
+    return [...SELECTABLE_MODULES, "inicio", "pedidos-sistema", "usuarios"];
   }
   const list = Array.isArray(raw)
     ? raw.filter(isModuleId)
@@ -123,8 +124,9 @@ function normalizeModules(raw: unknown, role: UserRole): AppModuleId[] {
   const unique = [
     ...new Set(list.filter((m) => SELECTABLE_MODULES.includes(m))),
   ];
+  unique.unshift("inicio");
   unique.push("pedidos-sistema");
-  return unique;
+  return [...new Set(unique)];
 }
 
 function assertHasSelectableModule(modules: AppModuleId[], role: UserRole): void {

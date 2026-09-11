@@ -17,6 +17,7 @@ import {
 import {
   IconCalendar,
   IconChevronDown,
+  IconHome,
   IconOrders,
   IconPami,
   IconPedidos,
@@ -37,7 +38,13 @@ type Props = {
   onLogout?: () => void;
 };
 
-type FlatItem = { id: "pedidos-sistema" | "usuarios"; label: string; Icon: typeof IconOrders };
+type FlatItem = {
+  id: "inicio" | "pedidos-sistema" | "usuarios";
+  label: string;
+  Icon: typeof IconOrders;
+};
+
+const TOP_ITEMS: FlatItem[] = [{ id: "inicio", label: "Inicio", Icon: IconHome }];
 
 const CONFIG_ITEMS: FlatItem[] = [
   { id: "pedidos-sistema", label: "Pedidos sistema", Icon: IconPedidos },
@@ -144,6 +151,7 @@ export function AppSidebar({
   const showPami = allowedModules.includes("pami");
   const showBuscaTurno = allowedModules.includes("busca-turno");
   const showWhatsapp = allowedModules.includes("whatsapp");
+  const top = TOP_ITEMS.filter((item) => allowedModules.includes(item.id));
   const config = [
     ...CONFIG_ITEMS.filter((item) => allowedModules.includes(item.id)),
     ...(isAdmin
@@ -181,6 +189,12 @@ export function AppSidebar({
         <img className="app-sidebar__logo" src={LOGO_INECO_DATA_URL} alt="Ineco" />
       </div>
       <nav className="app-sidebar__nav" aria-label="Módulos">
+        {top.length > 0 ? (
+          <div className="app-sidebar__nav-top">
+            <FlatNavButtons items={top} module={module} onNavigate={navigateFlat} />
+          </div>
+        ) : null}
+
         {showWhatsapp ? (
           <AccordionGroup
             id="whatsapp"

@@ -36,6 +36,7 @@ function parseApproveBody(body: unknown): ApproveUserInput {
   const modules = Array.isArray(raw.modules)
     ? (raw.modules.filter(
         (m): m is AppModuleId =>
+          m === "inicio" ||
           m === "ordenes" ||
           m === "presupuestos" ||
           m === "pami" ||

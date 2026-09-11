@@ -33,12 +33,12 @@ export type AppSection =
   | WhatsappSection;
 
 export type AppNavTarget =
+  | { module: "inicio" | "pedidos-sistema" | "usuarios"; section?: undefined }
   | { module: "ordenes"; section: OrdenesSection }
   | { module: "presupuestos"; section: PresupuestosSection }
   | { module: "pami"; section: PamiSection }
   | { module: "busca-turno"; section: BuscaTurnoSection }
-  | { module: "whatsapp"; section: WhatsappSection }
-  | { module: "pedidos-sistema" | "usuarios"; section?: undefined };
+  | { module: "whatsapp"; section: WhatsappSection };
 
 export const ORDENES_SECTIONS: { id: OrdenesSection; label: string }[] = [
   { id: "pacientes", label: "Pacientes" },

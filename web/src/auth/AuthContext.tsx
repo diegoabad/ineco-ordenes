@@ -18,6 +18,7 @@ import {
 import { subscribeSessionAccess } from "../lib/sessionAccessRealtime";
 
 export type AppModuleId =
+  | "inicio"
   | "ordenes"
   | "presupuestos"
   | "pami"
@@ -62,6 +63,7 @@ function normalizeClientModules(
 ): AppModuleId[] {
   if (role === "admin") {
     return [
+      "inicio",
       "ordenes",
       "presupuestos",
       "pami",
@@ -79,7 +81,7 @@ function normalizeClientModules(
       m === "busca-turno" ||
       m === "whatsapp",
   );
-  return [...new Set<AppModuleId>([...selectable, "pedidos-sistema"])];
+  return [...new Set<AppModuleId>(["inicio", ...selectable, "pedidos-sistema"])];
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -273,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!user) return false;
       if (module === "usuarios") return user.role === "admin";
       if (user.role === "admin") return true;
-      if (module === "pedidos-sistema") return true;
+      if (module === "inicio" || module === "pedidos-sistema") return true;
       return user.modules.includes(module);
     },
     [user],
