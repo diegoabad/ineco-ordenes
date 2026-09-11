@@ -31,12 +31,13 @@ function isModalOverlayLayer(node: HTMLElement): boolean {
 function findTipElement(clientX: number, clientY: number, fallbackTarget: EventTarget | null): HTMLElement | null {
   const stack = document.elementsFromPoint(clientX, clientY);
   for (const node of stack) {
-    if (!(node instanceof HTMLElement)) continue;
+    if (!(node instanceof Element)) continue;
     if (node.closest(".app-tooltip")) continue;
-    // Tip del elemento actual (incluye controles del modal)
-    if (readTipText(node)) return node;
+    // Incluye hijos SVG: sube al botón/[data-tooltip] más cercano
+    const tipHost = node.closest("[data-tooltip], [title]");
+    if (tipHost instanceof HTMLElement && readTipText(tipHost)) return tipHost;
     // No atravesar el modal: debajo suele haber la tabla con title/data-tooltip
-    if (isModalOverlayLayer(node)) return null;
+    if (node instanceof HTMLElement && isModalOverlayLayer(node)) return null;
   }
   if (fallbackTarget instanceof Element) {
     // Si hay un modal abierto, el fallback solo vale dentro del overlay

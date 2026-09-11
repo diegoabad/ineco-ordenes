@@ -4,6 +4,11 @@ import type { PresupuestoEmailConfig } from "../types/presupuestoEmail";
 import type { PresupuestoPlantillaConfig } from "../types/presupuestoPlantilla";
 import type {
   EmailEnvio,
+  InicioItem,
+  InicioItemCreateInput,
+  InicioItemReorderInput,
+  InicioItemTipo,
+  InicioItemUpdateInput,
   Medico,
   MedicoFormData,
   Paciente,
@@ -467,5 +472,52 @@ export async function updatePedidoSistema(
 
 export async function deletePedidoSistema(id: string): Promise<void> {
   await apiFetch(`/api/pedidos-sistema/${id}`, { method: "DELETE" });
+}
+
+export async function fetchInicioItems(tipo?: InicioItemTipo): Promise<InicioItem[]> {
+  const qs = tipo ? `?tipo=${encodeURIComponent(tipo)}` : "";
+  const res = await apiFetch<{ ok: boolean; data: InicioItem[] }>(`/api/inicio${qs}`);
+  return res.data;
+}
+
+export async function createInicioItem(data: InicioItemCreateInput): Promise<InicioItem> {
+  const res = await apiFetch<{ ok: boolean; data: InicioItem }>("/api/inicio", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function updateInicioItem(
+  id: string,
+  data: InicioItemUpdateInput,
+): Promise<InicioItem> {
+  const res = await apiFetch<{ ok: boolean; data: InicioItem }>(`/api/inicio/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+  return res.data;
+}
+
+export async function notifyInicioRecordatorioEmail(id: string): Promise<InicioItem> {
+  const res = await apiFetch<{ ok: boolean; data: InicioItem }>(
+    `/api/inicio/${id}/notify-email`,
+    { method: "POST", body: "{}" },
+  );
+  return res.data;
+}
+
+export async function deleteInicioItem(id: string): Promise<void> {
+  await apiFetch(`/api/inicio/${id}`, { method: "DELETE" });
+}
+
+export async function reorderInicioItems(
+  data: InicioItemReorderInput,
+): Promise<InicioItem[]> {
+  const res = await apiFetch<{ ok: boolean; data: InicioItem[] }>("/api/inicio/reorder", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.data;
 }
 

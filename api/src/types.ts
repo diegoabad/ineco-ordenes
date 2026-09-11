@@ -306,6 +306,82 @@ export type PedidoSistemaUpdateInput = {
   cuando?: string;
 };
 
+/** Items personales de la pantalla Inicio. */
+export type InicioItemTipo = "tarea" | "nota" | "recordatorio";
+
+export type InicioNotaColor =
+  | "gris"
+  | "amarillo"
+  | "verde"
+  | "azul"
+  | "rosa"
+  | "naranja";
+
+export const INICIO_NOTA_COLORES: InicioNotaColor[] = [
+  "gris",
+  "amarillo",
+  "verde",
+  "azul",
+  "rosa",
+  "naranja",
+];
+
+export type InicioItem = {
+  id: string;
+  tipo: InicioItemTipo;
+  titulo: string;
+  detalle: string;
+  /** ISO datetime (recordatorios; opcional en tareas). */
+  fechaHora: string | null;
+  hecha: boolean;
+  /** Orden de visualización (menor = primero). */
+  orden: number;
+  /** Color del papel (notas). */
+  color: InicioNotaColor;
+  /** Aviso en la aplicación (recordatorios). */
+  avisoApp: boolean;
+  /** Aviso por mail (recordatorios). */
+  avisoEmail: boolean;
+  /** Cuándo se envió el mail de aviso (anti-duplicado). */
+  emailEnviadoAt: string | null;
+  /** Nota fijada al frente. */
+  pinned: boolean;
+  /** Id de la tarea de origen (si el recordatorio se creó desde una tarea). */
+  origenTareaId: string | null;
+  userId: string;
+  creadoAt: string;
+  actualizadoAt: string;
+};
+
+export type InicioItemCreateInput = {
+  tipo: InicioItemTipo;
+  titulo: string;
+  detalle?: string;
+  fechaHora?: string | null;
+  color?: InicioNotaColor;
+  avisoApp?: boolean;
+  avisoEmail?: boolean;
+  pinned?: boolean;
+  origenTareaId?: string | null;
+};
+
+export type InicioItemUpdateInput = {
+  titulo?: string;
+  detalle?: string;
+  fechaHora?: string | null;
+  hecha?: boolean;
+  color?: InicioNotaColor;
+  avisoApp?: boolean;
+  avisoEmail?: boolean;
+  emailEnviadoAt?: string | null;
+  pinned?: boolean;
+};
+
+export type InicioItemReorderInput = {
+  tipo: InicioItemTipo;
+  ids: string[];
+};
+
 export type UserRole = "user" | "admin";
 export type UserStatus = "pending" | "approved" | "rejected";
 

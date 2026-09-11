@@ -285,3 +285,87 @@ export const PEDIDO_ESTADO_LABEL: Record<PedidoSistemaEstado, string> = {
   finalizado: "Finalizado",
 };
 
+/** Items personales de la pantalla Inicio. */
+export type InicioItemTipo = "tarea" | "nota" | "recordatorio";
+
+export type InicioNotaColor =
+  | "gris"
+  | "amarillo"
+  | "verde"
+  | "azul"
+  | "rosa"
+  | "naranja";
+
+export const INICIO_NOTA_COLORES: InicioNotaColor[] = [
+  "gris",
+  "amarillo",
+  "verde",
+  "azul",
+  "rosa",
+  "naranja",
+];
+
+export const INICIO_NOTA_COLOR_LABEL: Record<InicioNotaColor, string> = {
+  gris: "Gris",
+  amarillo: "Amarillo",
+  verde: "Verde",
+  azul: "Azul",
+  rosa: "Rosa",
+  naranja: "Naranja",
+};
+
+export type InicioItem = {
+  id: string;
+  tipo: InicioItemTipo;
+  titulo: string;
+  detalle: string;
+  fechaHora: string | null;
+  hecha: boolean;
+  orden: number;
+  color: InicioNotaColor;
+  avisoApp: boolean;
+  avisoEmail: boolean;
+  emailEnviadoAt: string | null;
+  pinned: boolean;
+  /** Id de la tarea de origen (si el recordatorio se creó desde una tarea). */
+  origenTareaId: string | null;
+  userId: string;
+  creadoAt: string;
+  actualizadoAt: string;
+};
+
+export type InicioItemCreateInput = {
+  tipo: InicioItemTipo;
+  titulo: string;
+  detalle?: string;
+  fechaHora?: string | null;
+  color?: InicioNotaColor;
+  avisoApp?: boolean;
+  avisoEmail?: boolean;
+  pinned?: boolean;
+  origenTareaId?: string | null;
+};
+
+export type InicioItemUpdateInput = {
+  titulo?: string;
+  detalle?: string;
+  fechaHora?: string | null;
+  hecha?: boolean;
+  color?: InicioNotaColor;
+  avisoApp?: boolean;
+  avisoEmail?: boolean;
+  emailEnviadoAt?: string | null;
+  pinned?: boolean;
+};
+
+export type InicioItemReorderInput = {
+  tipo: InicioItemTipo;
+  ids: string[];
+};
+
+export const INICIO_TIPO_LABEL: Record<InicioItemTipo, string> = {
+  tarea: "Tarea",
+  nota: "Nota",
+  recordatorio: "Recordatorio",
+};
+
