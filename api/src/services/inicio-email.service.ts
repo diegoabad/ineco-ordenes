@@ -37,7 +37,7 @@ export async function sendRecordatorioEmail(input: {
   if (!to) throw new Error("Email de destino inválido");
 
   const titulo = input.titulo.trim() || "Recordatorio";
-  const detalle = input.detalle.trim();
+  const detalle = input.detalle.trim() || "Sin detalle";
   const cuando = (() => {
     const t = Date.parse(input.fechaHora);
     return Number.isFinite(t) ? fechaFmt.format(new Date(t)) : input.fechaHora;
@@ -52,20 +52,18 @@ export async function sendRecordatorioEmail(input: {
     "",
     "Tenés un recordatorio:",
     `Título: ${titulo}`,
-    detalle ? `Detalle: ${detalle}` : null,
+    `Detalle: ${detalle}`,
     `Fecha y hora: ${cuando}`,
     "",
     "Saludos,",
     fromName,
-  ]
-    .filter((line) => line != null)
-    .join("\n");
+  ].join("\n");
 
   const html = `
     <p>${escapeHtml(saludo)}</p>
     <p>Tenés un <strong>recordatorio</strong>:</p>
     <p><strong>Título:</strong> ${escapeHtml(titulo)}</p>
-    ${detalle ? `<p><strong>Detalle:</strong> ${escapeHtml(detalle)}</p>` : ""}
+    <p><strong>Detalle:</strong> ${escapeHtml(detalle)}</p>
     <p><strong>Fecha y hora:</strong> ${escapeHtml(cuando)}</p>
     <p>Saludos,<br/>${escapeHtml(fromName)}</p>
   `;
