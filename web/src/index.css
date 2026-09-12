@@ -2111,8 +2111,9 @@ input.is-readonly:focus {
 }
 
 .app-shell {
-  max-width: 1200px;
-  margin: 0 auto;
+  max-width: none;
+  width: 100%;
+  margin: 0;
   padding: 1.25rem 1.25rem 1.25rem;
   display: flex;
   flex-direction: column;
@@ -7085,14 +7086,6 @@ tbody tr.is-inactive td {
 .usuarios-dominios__form .form-group {
   flex: 1 1 16rem;
   margin: 0;
-}
-
-.app-shell--busca-turno {
-  max-width: none;
-  width: 100%;
-  margin: 0;
-  padding: 1.25rem 1.25rem 1.25rem;
-  overflow: hidden;
 }
 
 .app-shell--busca-turno .busca-turno {
