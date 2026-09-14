@@ -32,11 +32,13 @@ export const LINK_PAGO_EMAIL_TEMPLATE_VARS = [
   "cantidadPrestaciones",
   "listaPrestaciones",
   "linkPago",
+  "linkPagoHipervinculo",
 ] as const;
 
 export const ALL_PRESUPUESTO_EMAIL_TEMPLATE_VARS = [
   ...PRESUPUESTO_EMAIL_TEMPLATE_VARS,
   "linkPago",
+  "linkPagoHipervinculo",
 ] as const;
 
 export type PresupuestoEmailTemplateVar =
@@ -54,7 +56,8 @@ export const PRESUPUESTO_EMAIL_TEMPLATE_VAR_LABELS: Record<
   total3Cuotas: "Total en 3 cuotas",
   cantidadPrestaciones: "Cantidad de prestaciones",
   listaPrestaciones: "Lista de prestaciones",
-  linkPago: "Link de pago",
+  linkPago: "Link de pago (URL)",
+  linkPagoHipervinculo: "Link de pago (hipervínculo)",
 };
 
 export const EMAIL_TEMPLATE_VARS_BY_KIND: Record<

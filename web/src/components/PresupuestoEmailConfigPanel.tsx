@@ -5,9 +5,12 @@ import {
   type FormEvent,
 } from "react";
 import { toast } from "react-toastify";
+import { LINK_PAGO_EMAIL_LABEL } from "../lib/presupuestoEmail";
 import { canonicalRichHtml, normalizeRichHtml, richHtmlEquivalent } from "../lib/richText";
 import {
+  getSelectionOffsets,
   refreshTemplateVarDecorations,
+  setSelectionOffsets,
   stripTemplateVarDecorations,
   TEMPLATE_VAR_TOKEN_RE,
 } from "../lib/templateVars";
@@ -26,6 +29,7 @@ import {
   PRESUPUESTO_EMAIL_TEMPLATE_VAR_LABELS,
 } from "../types/presupuestoEmail";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
+import { Modal } from "./Modal";
 import { TemplateVarTextField, type TemplateVarTextFieldHandle } from "./TemplateVarTextField";
 import { IconAlert, IconCheck } from "./Icons";
 
@@ -67,7 +71,7 @@ const VAR_GROUPS_BY_KIND: Record<PresupuestoEmailTemplateKind, VarGroup[]> = {
     { title: "Profesional", keys: ["nombreProfesional"] },
     { title: "Presupuesto", keys: ["fechaPresupuesto", "totalEfectivo", "total3Cuotas"] },
     { title: "Prestaciones", keys: ["cantidadPrestaciones", "listaPrestaciones"] },
-    { title: "Pago", keys: ["linkPago"] },
+    { title: "Pago", keys: ["linkPago", "linkPagoHipervinculo"] },
   ],
 };
 
@@ -102,6 +106,15 @@ export function PresupuestoEmailConfigPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editorResetKey, setEditorResetKey] = useState(0);
+  const [hipervinculoOpen, setHipervinculoOpen] = useState(false);
+  const [hipervinculoLabel, setHipervinculoLabel] = useState(LINK_PAGO_EMAIL_LABEL);
+  const [hipervinculoEditing, setHipervinculoEditing] = useState(false);
+  const hipervinculoInputRef = useRef<HTMLInputElement>(null);
+  const pendingInsertFieldRef = useRef<InsertTarget>("body");
+  const pendingSubjectSelRef = useRef<{ start: number; end: number } | null>(null);
+  const pendingBodySelRef = useRef<{ start: number; end: number } | null>(null);
+  /** Token completo a reemplazar al editar un hipervínculo existente (doble clic). */
+  const pendingReplaceTokenRef = useRef<string | null>(null);
 
   const subjectRef = useRef<TemplateVarTextFieldHandle>(null);
   const bodyAreaRef = useRef<HTMLDivElement | null>(null);
@@ -169,15 +182,14 @@ export function PresupuestoEmailConfigPanel() {
     activeFieldRef.current = "body";
   }
 
-  function insertVariable(key: string) {
-    if (!allowedVars.has(key as PresupuestoEmailTemplateVar)) return;
-    const token = `{{${key}}}`;
-    const field = activeFieldRef.current;
-
+  function insertToken(token: string, field: InsertTarget) {
     if (field === "body") {
       const el = bodyAreaRef.current;
       if (!el) return;
       el.focus();
+      const sel = pendingBodySelRef.current;
+      pendingBodySelRef.current = null;
+      if (sel) setSelectionOffsets(el, sel.start, sel.end);
       document.execCommand("insertText", false, token);
       const html = normalizeRichHtml(stripTemplateVarDecorations(el.innerHTML));
       setActiveBody(html);
@@ -188,11 +200,11 @@ export function PresupuestoEmailConfigPanel() {
     const subject = subjectRef.current;
     if (!subject) return;
 
-    subject.rememberSelection();
-    const { start, end } = subject.getSelection();
+    const sel = pendingSubjectSelRef.current ?? subject.getSelection();
+    pendingSubjectSelRef.current = null;
     const value = subjectValue;
-    const next = `${value.slice(0, start)}${token}${value.slice(end)}`;
-    const caret = start + token.length;
+    const next = `${value.slice(0, sel.start)}${token}${value.slice(sel.end)}`;
+    const caret = sel.start + token.length;
 
     setActiveSubject(next);
 
@@ -201,6 +213,94 @@ export function PresupuestoEmailConfigPanel() {
       subject.setSelection(caret, caret);
     });
   }
+
+  function insertVariable(key: string) {
+    if (!allowedVars.has(key as PresupuestoEmailTemplateVar)) return;
+
+    if (key === "linkPagoHipervinculo") {
+      pendingReplaceTokenRef.current = null;
+      pendingInsertFieldRef.current = activeFieldRef.current;
+      if (activeFieldRef.current === "subject") {
+        subjectRef.current?.rememberSelection();
+        pendingSubjectSelRef.current = subjectRef.current?.getSelection() ?? null;
+        pendingBodySelRef.current = null;
+      } else {
+        pendingSubjectSelRef.current = null;
+        pendingBodySelRef.current = bodyAreaRef.current
+          ? getSelectionOffsets(bodyAreaRef.current)
+          : null;
+      }
+      setHipervinculoLabel(LINK_PAGO_EMAIL_LABEL);
+      setHipervinculoEditing(false);
+      setHipervinculoOpen(true);
+      return;
+    }
+
+    insertToken(`{{${key}}}`, activeFieldRef.current);
+  }
+
+  function parseHipervinculoLabel(token: string): string | null {
+    const match = /^\{\{\s*linkPagoHipervinculo(?:\s*\|\s*([^}]*?))?\s*\}\}$/i.exec(token.trim());
+    if (!match) return null;
+    return match[1]?.trim() || LINK_PAGO_EMAIL_LABEL;
+  }
+
+  function replaceTokenInBody(oldToken: string, newToken: string) {
+    const el = bodyAreaRef.current;
+    const raw = el ? stripTemplateVarDecorations(el.innerHTML) : bodyValue;
+    const idx = raw.indexOf(oldToken);
+    if (idx < 0) {
+      toast.warning("No se encontró el hipervínculo para editar");
+      return;
+    }
+    const next = canonicalRichHtml(
+      normalizeRichHtml(raw.slice(0, idx) + newToken + raw.slice(idx + oldToken.length)),
+    );
+    setActiveBody(next);
+    setEditorResetKey((key) => key + 1);
+  }
+
+  function openHipervinculoEditor(token: string) {
+    const label = parseHipervinculoLabel(token);
+    if (label === null) return;
+    pendingReplaceTokenRef.current = token;
+    pendingInsertFieldRef.current = "body";
+    pendingBodySelRef.current = null;
+    pendingSubjectSelRef.current = null;
+    setHipervinculoLabel(label);
+    setHipervinculoEditing(true);
+    setHipervinculoOpen(true);
+  }
+
+  function confirmHipervinculo() {
+    const label = hipervinculoLabel.trim() || LINK_PAGO_EMAIL_LABEL;
+    const safeLabel = label.replace(/[|}]/g, "").trim() || LINK_PAGO_EMAIL_LABEL;
+    const token = `{{linkPagoHipervinculo|${safeLabel}}}`;
+    const replacing = pendingReplaceTokenRef.current;
+    pendingReplaceTokenRef.current = null;
+    setHipervinculoEditing(false);
+    setHipervinculoOpen(false);
+    if (replacing) {
+      replaceTokenInBody(replacing, token);
+      return;
+    }
+    insertToken(token, pendingInsertFieldRef.current);
+  }
+
+  function closeHipervinculoModal() {
+    pendingReplaceTokenRef.current = null;
+    setHipervinculoEditing(false);
+    setHipervinculoOpen(false);
+  }
+
+  useEffect(() => {
+    if (!hipervinculoOpen) return;
+    const id = window.setTimeout(() => {
+      hipervinculoInputRef.current?.focus();
+      hipervinculoInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [hipervinculoOpen]);
 
   function varLabel(key: string): string {
     return PRESUPUESTO_EMAIL_TEMPLATE_VAR_LABELS[key as PresupuestoEmailTemplateVar] ?? key;
@@ -343,6 +443,7 @@ export function PresupuestoEmailConfigPanel() {
                     onAreaMount={(el) => {
                       bodyAreaRef.current = el;
                     }}
+                    onTemplateVarDoubleClick={openHipervinculoEditor}
                   />
                 </div>
               </section>
@@ -411,6 +512,46 @@ export function PresupuestoEmailConfigPanel() {
           </div>
         </div>
       </form>
+
+      <Modal
+        open={hipervinculoOpen}
+        title={hipervinculoEditing ? "Editar texto del hipervínculo" : "Texto del hipervínculo"}
+        onClose={closeHipervinculoModal}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={closeHipervinculoModal}
+            >
+              Cancelar
+            </button>
+            <button type="button" className="btn btn-primary" onClick={confirmHipervinculo}>
+              {hipervinculoEditing ? "Guardar" : "Insertar"}
+            </button>
+          </>
+        }
+      >
+        <div className="form-stack">
+          <div className="form-group form-group--last">
+            <label htmlFor="presup-hipervinculo-label">Texto del enlace</label>
+            <input
+              ref={hipervinculoInputRef}
+              id="presup-hipervinculo-label"
+              type="text"
+              value={hipervinculoLabel}
+              onChange={(e) => setHipervinculoLabel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  confirmHipervinculo();
+                }
+              }}
+              placeholder={LINK_PAGO_EMAIL_LABEL}
+            />
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }

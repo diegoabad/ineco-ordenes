@@ -1,6 +1,6 @@
-/** HTML permitido: negrita, cursiva, subrayado, listas, alineación, tamaño y saltos de línea. */
+/** HTML permitido: negrita, cursiva, subrayado, listas, alineación, tamaño, enlaces y saltos de línea. */
 
-const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "BR", "P", "DIV", "UL", "OL", "LI", "SPAN"]);
+const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "BR", "P", "DIV", "UL", "OL", "LI", "SPAN", "A"]);
 
 export const RICH_ALIGN_CLASSES = {
   left: "rich-align-left",
@@ -39,7 +39,7 @@ function escapeHtml(text: string): string {
 
 /** ¿Parece HTML enriquecido (no texto plano)? */
 export function looksLikeRichHtml(text: string): boolean {
-  return /<(?:b|strong|i|em|u|br|p|div|ul|ol|li|span)\b/i.test(text);
+  return /<(?:a|b|strong|i|em|u|br|p|div|ul|ol|li|span)\b/i.test(text);
 }
 
 /** Texto plano → HTML conservando enters y espacios. */
@@ -89,6 +89,12 @@ export function stripRichHtml(input: string): string {
     }
     if (tag === "LI") return `${inner.trim()}\n`;
     if (tag === "P" || tag === "DIV") return `${inner}\n`;
+    if (tag === "A") {
+      const href = (el.getAttribute("href") ?? "").trim();
+      const label = inner.trim();
+      if (href && label && label !== href) return `${label}: ${href}`;
+      return href || label;
+    }
     return inner;
   };
   return [...doc.body.childNodes].map(walk).join("").replace(/\n+$/, "");
@@ -333,6 +339,20 @@ export function applyRichTextAlignToSelection(root: HTMLElement, align: RichText
 }
 
 function sanitizeElementAttributes(el: HTMLElement): void {
+  if (el.tagName === "A") {
+    const href = (el.getAttribute("href") ?? "").trim();
+    for (const attr of [...el.attributes]) {
+      el.removeAttribute(attr.name);
+    }
+    if (/^https?:\/\//i.test(href)) {
+      el.setAttribute("href", href);
+    } else {
+      // Sin href seguro: el walk lo desempaqueta abajo.
+      el.removeAttribute("href");
+    }
+    return;
+  }
+
   if (el.tagName === "P" || el.tagName === "DIV") {
     const align = readAlignFromElement(el);
     const size = readSizeFromElement(el);
@@ -463,6 +483,12 @@ export function richHtmlToPdfText(input: string): string {
       if (size && size !== "md") return `[[size:${size}]]${inner}[[/size]]`;
       return inner;
     }
+    if (tag === "A") {
+      const href = (el.getAttribute("href") ?? "").trim();
+      const label = inner.trim();
+      if (href && label && label !== href) return `${label}: ${href}`;
+      return href || label;
+    }
     return inner;
   };
 
@@ -538,8 +564,18 @@ export function sanitizeRichHtml(html: string): string {
 
   walk(doc.body);
 
-  for (const el of doc.body.querySelectorAll("p,div,span")) {
+  for (const el of doc.body.querySelectorAll("p,div,span,a")) {
     sanitizeElementAttributes(el as HTMLElement);
+  }
+
+  // Enlaces sin href http(s) → dejar solo el texto.
+  for (const anchor of [...doc.body.querySelectorAll("a")]) {
+    if (!(anchor as HTMLElement).getAttribute("href")) {
+      const parent = anchor.parentNode;
+      if (!parent) continue;
+      while (anchor.firstChild) parent.insertBefore(anchor.firstChild, anchor);
+      parent.removeChild(anchor);
+    }
   }
 
   for (const span of [...doc.body.querySelectorAll("span")]) {
@@ -586,6 +622,15 @@ function serializeInline(nodes: Node[]): string {
         }
         return inner;
       }
+      if (el.tagName === "A") {
+        const href = (el.getAttribute("href") ?? "").trim();
+        const inner = serializeInline([...el.childNodes]);
+        if (!inner) return "";
+        if (/^https?:\/\//i.test(href)) {
+          return `<a href="${escapeHtml(href)}">${inner}</a>`;
+        }
+        return inner;
+      }
       const kind = normalizeFormatTag(el.tagName);
       if (!kind) return serializeInline([...el.childNodes]);
       if (kind === "br") return "<br>";
@@ -609,27 +654,41 @@ function serializeBlockInner(el: HTMLElement): string {
   let inlineBuffer = "";
 
   function flushInline() {
-    if (inlineBuffer) {
-      parts.push(inlineBuffer);
+    if (!inlineBuffer) return;
+    // Ignorar nodos de solo whitespace entre elementos.
+    if (!inlineBuffer.replace(/[\u200B\uFEFF]/g, "").trim()) {
       inlineBuffer = "";
+      return;
     }
+    parts.push(inlineBuffer);
+    inlineBuffer = "";
   }
 
   for (const node of el.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      if (!text.replace(/[\u200B\uFEFF]/g, "").trim()) continue;
+      inlineBuffer += text;
+      continue;
+    }
     if (node.nodeType === Node.ELEMENT_NODE && normalizeFormatTag((node as HTMLElement).tagName) === "br") {
+      const hadContent = Boolean(inlineBuffer.replace(/[\u200B\uFEFF]/g, "").trim());
       flushInline();
-      parts.push("");
+      // <br> sin contenido previo = línea en blanco dentro del bloque.
+      if (!hadContent) parts.push("");
       continue;
     }
     if (node.nodeType === Node.ELEMENT_NODE && normalizeFormatTag((node as HTMLElement).tagName) === "block") {
       flushInline();
-      parts.push(serializeBlock(node as HTMLElement));
+      parts.push(serializeBlockInner(node as HTMLElement));
       continue;
     }
     inlineBuffer += serializeInline([node]);
   }
 
   flushInline();
+  // No sacar el "" final: una línea vacía al final del bloque es intencional
+  // (el <br> "fantasma" de contenteditable ya no se agrega gracias a hadContent).
   return parts.join("<br>");
 }
 
@@ -651,21 +710,35 @@ export function canonicalRichHtml(input: string): string {
   let inlineBuffer = "";
 
   function flushInline() {
-    if (inlineBuffer) {
-      blocks.push(inlineBuffer);
+    if (!inlineBuffer) return;
+    if (!inlineBuffer.replace(/[\u200B\uFEFF]/g, "").trim()) {
       inlineBuffer = "";
+      return;
     }
+    blocks.push(inlineBuffer);
+    inlineBuffer = "";
   }
 
   for (const node of body.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      // Saltos/espacios entre <div> del editor no son contenido.
+      if (!text.replace(/[\u200B\uFEFF]/g, "").trim()) continue;
+      inlineBuffer += text;
+      continue;
+    }
     if (node.nodeType === Node.ELEMENT_NODE && normalizeFormatTag((node as HTMLElement).tagName) === "br") {
+      const hadContent = Boolean(inlineBuffer.replace(/[\u200B\uFEFF]/g, "").trim());
       flushInline();
-      blocks.push("");
+      // Un <br> tras contenido solo separa (el join pone <br>).
+      // <br> extra / <br> entre bloques = línea en blanco a preservar.
+      if (!hadContent) blocks.push("");
       continue;
     }
     if (node.nodeType === Node.ELEMENT_NODE && normalizeFormatTag((node as HTMLElement).tagName) === "block") {
       flushInline();
-      blocks.push(serializeBlock(node as HTMLElement));
+      // Aplanar el bloque sin envolver en <div> (evita <div>a</div><br><div>b</div>).
+      blocks.push(serializeBlockInner(node as HTMLElement));
       continue;
     }
     inlineBuffer += serializeInline([node]);
@@ -673,9 +746,7 @@ export function canonicalRichHtml(input: string): string {
 
   flushInline();
 
-  return blocks
-    .join("<br>")
-    .trim();
+  return blocks.join("<br>").trim();
 }
 
 export function richHtmlEquivalent(a: string, b: string): boolean {

@@ -288,6 +288,9 @@ export const PEDIDO_ESTADO_LABEL: Record<PedidoSistemaEstado, string> = {
 /** Items personales de la pantalla Inicio. */
 export type InicioItemTipo = "tarea" | "nota" | "recordatorio";
 
+/** Frecuencia de repetición de un recordatorio. */
+export type InicioRecurrencia = "none" | "semanal" | "mensual" | "cada_n_dias";
+
 export type InicioNotaColor =
   | "gris"
   | "amarillo"
@@ -314,6 +317,20 @@ export const INICIO_NOTA_COLOR_LABEL: Record<InicioNotaColor, string> = {
   naranja: "Naranja",
 };
 
+export const INICIO_RECURRENCIA_LABEL: Record<InicioRecurrencia, string> = {
+  none: "Una vez",
+  semanal: "Cada semana",
+  mensual: "Cada mes",
+  cada_n_dias: "Cada N días",
+};
+
+/** Usuario referenciado en asignación / compartido. */
+export type InicioUserRef = {
+  id: string;
+  nombre: string;
+  email: string;
+};
+
 export type InicioItem = {
   id: string;
   tipo: InicioItemTipo;
@@ -326,9 +343,14 @@ export type InicioItem = {
   avisoApp: boolean;
   avisoEmail: boolean;
   emailEnviadoAt: string | null;
+  recurrencia: InicioRecurrencia;
+  intervaloDias: number | null;
   pinned: boolean;
   /** Id de la tarea de origen (si el recordatorio se creó desde una tarea). */
   origenTareaId: string | null;
+  participantIds: string[];
+  sharedWith: InicioUserRef[];
+  ownerNombre: string;
   userId: string;
   creadoAt: string;
   actualizadoAt: string;
@@ -342,8 +364,11 @@ export type InicioItemCreateInput = {
   color?: InicioNotaColor;
   avisoApp?: boolean;
   avisoEmail?: boolean;
+  recurrencia?: InicioRecurrencia;
+  intervaloDias?: number | null;
   pinned?: boolean;
   origenTareaId?: string | null;
+  sharedWithIds?: string[];
 };
 
 export type InicioItemUpdateInput = {
@@ -355,12 +380,21 @@ export type InicioItemUpdateInput = {
   avisoApp?: boolean;
   avisoEmail?: boolean;
   emailEnviadoAt?: string | null;
+  recurrencia?: InicioRecurrencia;
+  intervaloDias?: number | null;
   pinned?: boolean;
+  sharedWithIds?: string[];
 };
 
 export type InicioItemReorderInput = {
   tipo: InicioItemTipo;
   ids: string[];
+};
+
+export type UserDirectoryEntry = {
+  id: string;
+  nombre: string;
+  email: string;
 };
 
 export const INICIO_TIPO_LABEL: Record<InicioItemTipo, string> = {

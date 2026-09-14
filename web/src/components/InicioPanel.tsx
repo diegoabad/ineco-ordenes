@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "react-toastify";
+import { useAuth } from "../auth/AuthContext";
 import { fechaHoyIso, parseYmd, toYmd } from "../lib/fechas";
 import {
+  aceptarInicioRecordatorio,
   createInicioItem,
   deleteInicioItem,
   fetchInicioItems,
@@ -9,10 +11,15 @@ import {
   reorderInicioItems,
   updateInicioItem,
 } from "../services/dataService";
-import type { InicioItem, InicioNotaColor } from "../types";
-import { INICIO_NOTA_COLOR_LABEL, INICIO_NOTA_COLORES } from "../types";
+import type { InicioItem, InicioNotaColor, InicioRecurrencia } from "../types";
+import {
+  INICIO_NOTA_COLOR_LABEL,
+  INICIO_NOTA_COLORES,
+  INICIO_RECURRENCIA_LABEL,
+} from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DatePicker } from "./DatePicker";
+import { DateTimePicker } from "./DateTimePicker";
 import {
   IconCalendar,
   IconCheck,
@@ -22,8 +29,10 @@ import {
   IconPin,
   IconPlus,
   IconTrash,
+  IconUsers,
   IconX,
 } from "./Icons";
+import { InicioSharePicker, UserAvatarStack } from "./InicioSharePicker";
 import { Modal } from "./Modal";
 import { TimePicker } from "./TimePicker";
 
@@ -121,6 +130,17 @@ function isRecordatorioDue(item: InicioItem, nowMs = Date.now()): boolean {
   return Number.isFinite(t) && t <= nowMs;
 }
 
+function formatRecurrenciaLabel(item: InicioItem): string | null {
+  if (item.tipo !== "recordatorio") return null;
+  const recurrencia = item.recurrencia || "none";
+  if (recurrencia === "none") return null;
+  if (recurrencia === "cada_n_dias") {
+    const n = item.intervaloDias ?? 1;
+    return n === 1 ? "Cada día" : `Cada ${n} días`;
+  }
+  return INICIO_RECURRENCIA_LABEL[recurrencia];
+}
+
 /** Timbre tipo campana al abrir el aviso de recordatorio (Web Audio, sin archivo). */
 function playRecordatorioChime(): void {
   try {
@@ -208,6 +228,8 @@ type Props = {
 
 /** Pantalla de entrada: tareas, recordatorios y notas personales. */
 export function InicioPanel({ userName }: Props) {
+  const { user } = useAuth();
+  const myUserId = user?.id ?? "";
   const [now, setNow] = useState(() => new Date());
   const [items, setItems] = useState<InicioItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -230,10 +252,13 @@ export function InicioPanel({ userName }: Props) {
   const [recHora, setRecHora] = useState(() => defaultRecSchedule().hora);
   const [recAvisoApp, setRecAvisoApp] = useState(true);
   const [recAvisoEmail, setRecAvisoEmail] = useState(true);
+  const [recRecurrencia, setRecRecurrencia] = useState<InicioRecurrencia>("none");
+  const [recIntervaloDias, setRecIntervaloDias] = useState("7");
   const [alertRec, setAlertRec] = useState<InicioItem | null>(null);
   const [posponerOpen, setPosponerOpen] = useState(false);
   const [posFecha, setPosFecha] = useState(() => defaultRecSchedule().fecha);
   const [posHora, setPosHora] = useState(() => defaultRecSchedule().hora);
+  const [shareTarget, setShareTarget] = useState<InicioItem | null>(null);
   const emailNotifyRef = useRef<Set<string>>(new Set());
   const alertSoundPlayedRef = useRef<string | null>(null);
   const pendingCreatesRef = useRef(new Map<string, Promise<InicioItem>>());
@@ -362,20 +387,25 @@ export function InicioPanel({ userName }: Props) {
   }, [alertRec?.id]);
 
   async function persistNotasOrder(nextNotas: InicioItem[]) {
+    const owned = nextNotas.filter((it) => it.userId === myUserId);
+    if (owned.length === 0) return;
     setReordering(true);
     const previous = items;
     setItems((prev) => {
       const others = prev.filter((it) => it.tipo !== "nota");
-      return [...others, ...nextNotas.map((it, index) => ({ ...it, orden: index }))];
+      const ownedIds = new Set(owned.map((it) => it.id));
+      const shared = nextNotas.filter((it) => !ownedIds.has(it.id));
+      const orderedOwned = owned.map((it, index) => ({ ...it, orden: index }));
+      return [...others, ...sortNotasLocal([...orderedOwned, ...shared])];
     });
     try {
       const updated = await reorderInicioItems({
         tipo: "nota",
-        ids: nextNotas.map((it) => it.id),
+        ids: owned.map((it) => it.id),
       });
       setItems((prev) => {
-        const others = prev.filter((it) => it.tipo !== "nota");
-        return [...others, ...updated];
+        const byId = new Map(updated.map((it) => [it.id, it]));
+        return prev.map((it) => byId.get(it.id) ?? it);
       });
     } catch (error) {
       setItems(previous);
@@ -385,38 +415,60 @@ export function InicioPanel({ userName }: Props) {
     }
   }
 
+  function sortNotasLocal(list: InicioItem[]): InicioItem[] {
+    return [...list].sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      if (a.orden !== b.orden) return a.orden - b.orden;
+      return Date.parse(b.creadoAt) - Date.parse(a.creadoAt);
+    });
+  }
+
   function moveNota(fromId: string, toId: string, edge: DropEdge) {
     if (reordering) return;
-    const fromIndex = notas.findIndex((it) => it.id === fromId);
-    const toIndex = notas.findIndex((it) => it.id === toId);
+    const from = notas.find((it) => it.id === fromId);
+    const to = notas.find((it) => it.id === toId);
+    if (!from || !to) return;
+    if (from.userId !== myUserId || to.userId !== myUserId) {
+      toast.info("Solo podés reordenar tus propias notas");
+      return;
+    }
+    const owned = notas.filter((it) => it.userId === myUserId);
+    const fromIndex = owned.findIndex((it) => it.id === fromId);
+    const toIndex = owned.findIndex((it) => it.id === toId);
     if (fromIndex < 0 || toIndex < 0) return;
 
     let insertIndex = edge === "after" ? toIndex + 1 : toIndex;
     if (fromIndex === insertIndex || fromIndex + 1 === insertIndex) return;
 
-    const next = [...notas];
-    const [moved] = next.splice(fromIndex, 1);
+    const nextOwned = [...owned];
+    const [moved] = nextOwned.splice(fromIndex, 1);
     if (!moved) return;
     if (fromIndex < insertIndex) insertIndex -= 1;
-    next.splice(insertIndex, 0, moved);
-    void persistNotasOrder(next);
+    nextOwned.splice(insertIndex, 0, moved);
+    const shared = notas.filter((it) => it.userId !== myUserId);
+    void persistNotasOrder([...nextOwned, ...shared]);
   }
 
   async function persistTareasOrder(nextTareas: InicioItem[]) {
+    const owned = nextTareas.filter((it) => it.userId === myUserId);
+    if (owned.length === 0) return;
     setReordering(true);
     const previous = items;
     setItems((prev) => {
       const others = prev.filter((it) => it.tipo !== "tarea");
-      return [...others, ...nextTareas.map((it, index) => ({ ...it, orden: index }))];
+      const ownedIds = new Set(owned.map((it) => it.id));
+      const shared = nextTareas.filter((it) => !ownedIds.has(it.id));
+      const orderedOwned = owned.map((it, index) => ({ ...it, orden: index }));
+      return [...others, ...orderedOwned, ...shared];
     });
     try {
       const updated = await reorderInicioItems({
         tipo: "tarea",
-        ids: nextTareas.map((it) => it.id),
+        ids: owned.map((it) => it.id),
       });
       setItems((prev) => {
-        const others = prev.filter((it) => it.tipo !== "tarea");
-        return [...others, ...updated];
+        const byId = new Map(updated.map((it) => [it.id, it]));
+        return prev.map((it) => byId.get(it.id) ?? it);
       });
     } catch (error) {
       setItems(previous);
@@ -428,19 +480,28 @@ export function InicioPanel({ userName }: Props) {
 
   function moveTarea(fromId: string, toId: string, edge: DropEdge) {
     if (reordering) return;
-    const fromIndex = tareas.findIndex((it) => it.id === fromId);
-    const toIndex = tareas.findIndex((it) => it.id === toId);
+    const from = tareas.find((it) => it.id === fromId);
+    const to = tareas.find((it) => it.id === toId);
+    if (!from || !to) return;
+    if (from.userId !== myUserId || to.userId !== myUserId) {
+      toast.info("Solo podés reordenar tus propias tareas");
+      return;
+    }
+    const owned = tareas.filter((it) => it.userId === myUserId);
+    const fromIndex = owned.findIndex((it) => it.id === fromId);
+    const toIndex = owned.findIndex((it) => it.id === toId);
     if (fromIndex < 0 || toIndex < 0) return;
 
     let insertIndex = edge === "after" ? toIndex + 1 : toIndex;
     if (fromIndex === insertIndex || fromIndex + 1 === insertIndex) return;
 
-    const next = [...tareas];
-    const [moved] = next.splice(fromIndex, 1);
+    const nextOwned = [...owned];
+    const [moved] = nextOwned.splice(fromIndex, 1);
     if (!moved) return;
     if (fromIndex < insertIndex) insertIndex -= 1;
-    next.splice(insertIndex, 0, moved);
-    void persistTareasOrder(next);
+    nextOwned.splice(insertIndex, 0, moved);
+    const shared = tareas.filter((it) => it.userId !== myUserId);
+    void persistTareasOrder([...nextOwned, ...shared]);
   }
 
   async function addTarea() {
@@ -465,9 +526,14 @@ export function InicioPanel({ userName }: Props) {
       avisoApp: false,
       avisoEmail: false,
       emailEnviadoAt: null,
+      recurrencia: "none",
+      intervaloDias: null,
       pinned: false,
       origenTareaId: null,
-      userId: "",
+      participantIds: myUserId ? [myUserId] : [],
+      sharedWith: [],
+      ownerNombre: user?.nombre ?? userName ?? "",
+      userId: myUserId,
       creadoAt: nowIso,
       actualizadoAt: nowIso,
     };
@@ -501,6 +567,8 @@ export function InicioPanel({ userName }: Props) {
       setRecHora(schedule.hora);
       setRecAvisoApp(item.avisoApp);
       setRecAvisoEmail(item.avisoEmail);
+      setRecRecurrencia(item.recurrencia || "none");
+      setRecIntervaloDias(String(item.intervaloDias && item.intervaloDias > 0 ? item.intervaloDias : 7));
     } else if (item?.tipo === "tarea") {
       const schedule = defaultRecSchedule();
       setEditingRecId(null);
@@ -511,6 +579,8 @@ export function InicioPanel({ userName }: Props) {
       setRecHora(schedule.hora);
       setRecAvisoApp(true);
       setRecAvisoEmail(true);
+      setRecRecurrencia("none");
+      setRecIntervaloDias("7");
     } else {
       const schedule = defaultRecSchedule();
       setEditingRecId(null);
@@ -521,6 +591,8 @@ export function InicioPanel({ userName }: Props) {
       setRecHora(schedule.hora);
       setRecAvisoApp(true);
       setRecAvisoEmail(true);
+      setRecRecurrencia("none");
+      setRecIntervaloDias("7");
     }
     setRecordatorioOpen(true);
   }
@@ -558,11 +630,21 @@ export function InicioPanel({ userName }: Props) {
       toast.error("Fecha u hora inválida");
       return;
     }
+    let intervaloDias: number | null = null;
+    if (recRecurrencia === "cada_n_dias") {
+      const n = Number.parseInt(recIntervaloDias.trim(), 10);
+      if (!Number.isFinite(n) || n < 1) {
+        toast.error("Indicá cada cuántos días (mínimo 1)");
+        return;
+      }
+      intervaloDias = n;
+    }
 
     savingRecRef.current = true;
     const detalle = recDetalle.trim();
     const avisoApp = recAvisoApp;
     const avisoEmail = recAvisoEmail;
+    const recurrencia = recRecurrencia;
     const fromTareaId = convertFromTareaId;
     const editingId = editingRecId;
     const tituloLocked = tituloRecBloqueado;
@@ -584,6 +666,8 @@ export function InicioPanel({ userName }: Props) {
                 fechaHora,
                 avisoApp,
                 avisoEmail,
+                recurrencia,
+                intervaloDias,
                 actualizadoAt: new Date().toISOString(),
               }
             : it,
@@ -599,6 +683,8 @@ export function InicioPanel({ userName }: Props) {
                 fechaHora,
                 avisoApp,
                 avisoEmail,
+                recurrencia,
+                intervaloDias,
               }
             : prev,
         );
@@ -610,6 +696,8 @@ export function InicioPanel({ userName }: Props) {
           fechaHora,
           avisoApp,
           avisoEmail,
+          recurrencia,
+          intervaloDias,
         });
         setItems((prev) => prev.map((it) => (it.id === item.id ? item : it)));
         if (alertRec?.id === item.id) setAlertRec(item);
@@ -639,9 +727,14 @@ export function InicioPanel({ userName }: Props) {
       avisoApp,
       avisoEmail,
       emailEnviadoAt: null,
+      recurrencia,
+      intervaloDias,
       pinned: false,
       origenTareaId: fromTareaId,
-      userId: "",
+      participantIds: myUserId ? [myUserId] : [],
+      sharedWith: [],
+      ownerNombre: user?.nombre ?? userName ?? "",
+      userId: myUserId,
       creadoAt: nowIso,
       actualizadoAt: nowIso,
     };
@@ -655,6 +748,8 @@ export function InicioPanel({ userName }: Props) {
         fechaHora,
         avisoApp,
         avisoEmail,
+        recurrencia,
+        intervaloDias,
         ...(fromTareaId ? { origenTareaId: fromTareaId } : {}),
       });
       setItems((prev) => {
@@ -675,16 +770,43 @@ export function InicioPanel({ userName }: Props) {
     if (!alertRec) return;
     const id = alertRec.id;
     const previous = alertRec;
+    const isRecurrente = (previous.recurrencia || "none") !== "none";
     setAlertRec(null);
     setPosponerOpen(false);
-    setItems((prev) => prev.filter((it) => it.id !== id));
     emailNotifyRef.current.delete(id);
+    alertSoundPlayedRef.current = null;
+
     if (isLocalInicioId(id)) {
       pendingCreatesRef.current.delete(id);
+      if (isRecurrente) {
+        // Local pending create: keep optimistic until server id exists; just dismiss.
+        return;
+      }
+      setItems((prev) => prev.filter((it) => it.id !== id));
       return;
     }
+
+    if (isRecurrente) {
+      try {
+        const result = await aceptarInicioRecordatorio(id);
+        if (result.deleted || !result.item) {
+          setItems((prev) => prev.filter((it) => it.id !== id));
+        } else {
+          setItems((prev) => prev.map((it) => (it.id === result.item!.id ? result.item! : it)));
+        }
+      } catch (error) {
+        setItems((prev) =>
+          prev.some((it) => it.id === previous.id) ? prev : [previous, ...prev],
+        );
+        setAlertRec(previous);
+        toast.error(error instanceof Error ? error.message : "No se pudo aceptar el recordatorio");
+      }
+      return;
+    }
+
+    setItems((prev) => prev.filter((it) => it.id !== id));
     try {
-      await deleteInicioItem(id);
+      await aceptarInicioRecordatorio(id);
     } catch (error) {
       setItems((prev) => (prev.some((it) => it.id === previous.id) ? prev : [previous, ...prev]));
       setAlertRec(previous);
@@ -749,9 +871,14 @@ export function InicioPanel({ userName }: Props) {
       avisoApp: false,
       avisoEmail: false,
       emailEnviadoAt: null,
+      recurrencia: "none",
+      intervaloDias: null,
       pinned: false,
       origenTareaId: null,
-      userId: "",
+      participantIds: myUserId ? [myUserId] : [],
+      sharedWith: [],
+      ownerNombre: user?.nombre ?? userName ?? "",
+      userId: myUserId,
       creadoAt: nowIso,
       actualizadoAt: nowIso,
     };
@@ -923,6 +1050,28 @@ export function InicioPanel({ userName }: Props) {
     })();
   }
 
+  async function saveShare(ids: string[]) {
+    if (!shareTarget) return;
+    const id = shareTarget.id;
+    if (isLocalInicioId(id)) {
+      throw new Error("Esperá a que se guarde antes de asignar o compartir");
+    }
+    const previous = shareTarget;
+    const item = await updateInicioItem(id, { sharedWithIds: ids });
+    setItems((prev) => prev.map((it) => (it.id === item.id ? item : it)));
+    setViewNota((prev) => (prev?.id === item.id ? { ...prev, ...item } : prev));
+    setShareTarget(null);
+    toast.success(
+      previous.tipo === "tarea"
+        ? ids.length
+          ? "Tarea asignada"
+          : "Asignación actualizada"
+        : ids.length
+          ? "Nota compartida"
+          : "Compartido actualizado",
+    );
+  }
+
   async function toggleNotaPinned(item: InicioItem) {
     const previousPinned = item.pinned;
     const nextPinned = !item.pinned;
@@ -1032,18 +1181,20 @@ export function InicioPanel({ userName }: Props) {
                 {tareas.map((item) => {
                   const yaConvertida = tareasConRecordatorio.has(item.id);
                   const isDragging = dragTareaId === item.id;
+                  const isOwner = item.userId === myUserId;
                   const dropEdge =
                     dropHint?.id === item.id && dragTareaId && dragTareaId !== item.id
                       ? dropHint.edge
                       : null;
                   const editing = editingTareaId === item.id;
+                  const shared = item.sharedWith ?? [];
                   return (
                   <li
                     key={item.id}
-                    className={`inicio-list__item inicio-list__item--tarea${item.hecha ? " is-done" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}`}
-                    draggable={!reordering && !editing}
+                    className={`inicio-list__item inicio-list__item--tarea${item.hecha ? " is-done" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}${!isOwner ? " is-shared" : ""}`}
+                    draggable={!reordering && !editing && isOwner}
                     onDragStart={(e) => {
-                      if (!dragTareaAllowedRef.current || editing) {
+                      if (!dragTareaAllowedRef.current || editing || !isOwner) {
                         e.preventDefault();
                         return;
                       }
@@ -1058,7 +1209,7 @@ export function InicioPanel({ userName }: Props) {
                       setDropHint(null);
                     }}
                     onDragOver={(e) => {
-                      if (!dragTareaId) return;
+                      if (!dragTareaId || !isOwner) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       if (dragTareaId === item.id) {
@@ -1089,10 +1240,12 @@ export function InicioPanel({ userName }: Props) {
                   >
                     <span
                       className="inicio-list__grip"
-                      data-tooltip="Arrastrar"
+                      data-tooltip={isOwner ? "Arrastrar" : "Solo el dueño puede reordenar"}
                       aria-hidden="true"
                       onPointerDown={() => {
-                        if (!reordering && !editing) dragTareaAllowedRef.current = true;
+                        if (!reordering && !editing && isOwner) {
+                          dragTareaAllowedRef.current = true;
+                        }
                       }}
                     >
                       <IconGrip size={14} />
@@ -1132,8 +1285,23 @@ export function InicioPanel({ userName }: Props) {
                         <span className="inicio-list__title inicio-list__title--ellipsis">
                           {item.titulo}
                         </span>
+                        {!isOwner && item.ownerNombre ? (
+                          <span className="inicio-list__owner">De {item.ownerNombre}</span>
+                        ) : null}
                       </button>
                     )}
+                    <UserAvatarStack
+                      users={shared}
+                      emptyLabel={isOwner ? "Asignar" : "Asignados"}
+                      disabled={busyId === item.id || reordering || !isOwner}
+                      onClick={() => {
+                        if (!isOwner) {
+                          toast.info("Solo el dueño puede cambiar la asignación");
+                          return;
+                        }
+                        setShareTarget(item);
+                      }}
+                    />
                     <div className="inicio-list__actions">
                       {editing ? (
                         <>
@@ -1160,39 +1328,40 @@ export function InicioPanel({ userName }: Props) {
                         </>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            className={`fl-icon-btn${
-                              yaConvertida ? " fl-icon-btn--muted" : " fl-icon-btn--success"
-                            }`}
-                            aria-label={
-                              yaConvertida
-                                ? "Ya tiene recordatorio (crear otro)"
-                                : "Convertir a recordatorio"
-                            }
-                            data-tooltip={
-                              yaConvertida
-                                ? "Ya tiene recordatorio"
-                                : "Convertir a recordatorio"
-                            }
-                              disabled={
-                              busyId === item.id ||
-                              reordering
-                            }
-                            onClick={() => openRecordatorioModal(item)}
-                          >
-                            <IconClock size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            className="fl-icon-btn fl-icon-btn--danger"
-                            aria-label="Eliminar"
-                            data-tooltip="Eliminar"
-                            disabled={busyId === item.id || reordering}
-                            onClick={() => setDeleteId(item.id)}
-                          >
-                            <IconTrash size={15} />
-                          </button>
+                          {isOwner ? (
+                            <button
+                              type="button"
+                              className={`fl-icon-btn${
+                                yaConvertida ? " fl-icon-btn--muted" : " fl-icon-btn--success"
+                              }`}
+                              aria-label={
+                                yaConvertida
+                                  ? "Ya tiene recordatorio (crear otro)"
+                                  : "Convertir a recordatorio"
+                              }
+                              data-tooltip={
+                                yaConvertida
+                                  ? "Ya tiene recordatorio"
+                                  : "Convertir a recordatorio"
+                              }
+                              disabled={busyId === item.id || reordering}
+                              onClick={() => openRecordatorioModal(item)}
+                            >
+                              <IconClock size={15} />
+                            </button>
+                          ) : null}
+                          {isOwner ? (
+                            <button
+                              type="button"
+                              className="fl-icon-btn fl-icon-btn--danger"
+                              aria-label="Eliminar"
+                              data-tooltip="Eliminar"
+                              disabled={busyId === item.id || reordering}
+                              onClick={() => setDeleteId(item.id)}
+                            >
+                              <IconTrash size={15} />
+                            </button>
+                          ) : null}
                         </>
                       )}
                     </div>
@@ -1251,6 +1420,7 @@ export function InicioPanel({ userName }: Props) {
               <ul className="inicio-list">
                 {recordatorios.map((item) => {
                   const fechaLabel = formatItemFecha(item.fechaHora);
+                  const recLabel = formatRecurrenciaLabel(item);
                   const due = isRecordatorioDue(item, now.getTime());
                   return (
                     <li
@@ -1265,6 +1435,11 @@ export function InicioPanel({ userName }: Props) {
                       <span className="inicio-list__title inicio-list__title--ellipsis" data-tooltip={item.titulo}>
                         {item.titulo}
                       </span>
+                      {recLabel ? (
+                        <span className="inicio-list__recurrencia" data-tooltip={recLabel}>
+                          {recLabel}
+                        </span>
+                      ) : null}
                       <div className="inicio-list__actions">
                         <button
                           type="button"
@@ -1319,15 +1494,21 @@ export function InicioPanel({ userName }: Props) {
                 {notas.map((item) => {
                   const tituloVisible = item.titulo.trim() || "Sin título";
                   const isDragging = dragNotaId === item.id;
+                  const isOwner = item.userId === myUserId;
+                  const shared = item.sharedWith ?? [];
                   const dropEdge =
                     dropHint?.id === item.id && dragNotaId !== item.id ? dropHint.edge : null;
                   const color = item.color || "gris";
                   return (
                     <article
                       key={item.id}
-                      className={`inicio-paper inicio-paper--saved inicio-paper--${color}${item.pinned ? " is-pinned" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}`}
-                      draggable={!reordering}
+                      className={`inicio-paper inicio-paper--saved inicio-paper--${color}${item.pinned ? " is-pinned" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}${!isOwner ? " is-shared" : ""}`}
+                      draggable={!reordering && isOwner}
                       onDragStart={(e) => {
+                        if (!isOwner) {
+                          e.preventDefault();
+                          return;
+                        }
                         setDragNotaId(item.id);
                         setDropHint(null);
                         e.dataTransfer.effectAllowed = "move";
@@ -1338,6 +1519,7 @@ export function InicioPanel({ userName }: Props) {
                         setDropHint(null);
                       }}
                       onDragOver={(e) => {
+                        if (!isOwner) return;
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
                         if (dragNotaId === item.id) {
@@ -1373,10 +1555,33 @@ export function InicioPanel({ userName }: Props) {
                         if (fromId) moveNota(fromId, item.id, edge);
                       }}
                     >
-                      <span className="inicio-paper__grip" aria-hidden="true" data-tooltip="Arrastrar">
-                        <IconGrip size={14} />
-                      </span>
+                      {isOwner ? (
+                        <span className="inicio-paper__grip" aria-hidden="true" data-tooltip="Arrastrar">
+                          <IconGrip size={14} />
+                        </span>
+                      ) : null}
                       <div className="inicio-paper__actions">
+                        {(shared.length > 0 || isOwner) && (
+                          <span
+                            className="inicio-paper__share"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <UserAvatarStack
+                              users={shared}
+                              size={20}
+                              emptyLabel="Compartir"
+                              disabled={reordering || !isOwner}
+                              onClick={() => {
+                                if (!isOwner) {
+                                  toast.info("Solo el dueño puede cambiar quién tiene acceso");
+                                  return;
+                                }
+                                setShareTarget(item);
+                              }}
+                            />
+                          </span>
+                        )}
                         <button
                           type="button"
                           className={`fl-icon-btn inicio-paper__pin-btn${item.pinned ? " is-active" : ""}`}
@@ -1391,20 +1596,22 @@ export function InicioPanel({ userName }: Props) {
                         >
                           <IconPin size={15} filled={item.pinned} />
                         </button>
-                        <button
-                          type="button"
-                          className="fl-icon-btn fl-icon-btn--danger inicio-paper__delete"
-                          aria-label="Eliminar nota"
-                          data-tooltip="Eliminar nota"
-                          disabled={busyId === item.id || reordering}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteId(item.id);
-                          }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
-                          <IconTrash size={15} />
-                        </button>
+                        {isOwner ? (
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--danger inicio-paper__delete"
+                            aria-label="Eliminar nota"
+                            data-tooltip="Eliminar nota"
+                            disabled={busyId === item.id || reordering}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteId(item.id);
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <IconTrash size={15} />
+                          </button>
+                        ) : null}
                       </div>
                       <button
                         type="button"
@@ -1417,6 +1624,9 @@ export function InicioPanel({ userName }: Props) {
                         >
                           {tituloVisible}
                         </h3>
+                        {!isOwner && item.ownerNombre ? (
+                          <p className="inicio-paper__owner">De {item.ownerNombre}</p>
+                        ) : null}
                         {item.detalle.trim() ? (
                           <p className="inicio-paper__preview">{item.detalle}</p>
                         ) : (
@@ -1454,6 +1664,29 @@ export function InicioPanel({ userName }: Props) {
                 aria-label="Título de la nota"
               />
               <div className="inicio-nota-editor__top-actions">
+                {viewNota.userId === myUserId ? (
+                  <button
+                    type="button"
+                    className="inicio-nota-editor__icon-btn"
+                    aria-label="Compartir nota"
+                    data-tooltip="Compartir"
+                    onClick={() => setShareTarget(viewNota)}
+                  >
+                    <IconUsers size={18} />
+                  </button>
+                ) : null}
+                {(viewNota.sharedWith?.length ?? 0) > 0 ? (
+                  <UserAvatarStack
+                    users={viewNota.sharedWith ?? []}
+                    size={24}
+                    emptyLabel="Compartir"
+                    disabled={viewNota.userId !== myUserId}
+                    onClick={() => {
+                      if (viewNota.userId !== myUserId) return;
+                      setShareTarget(viewNota);
+                    }}
+                  />
+                ) : null}
                 <button
                   type="button"
                   className={`inicio-nota-editor__icon-btn${viewNota.pinned ? " is-active" : ""}`}
@@ -1566,27 +1799,44 @@ export function InicioPanel({ userName }: Props) {
             />
           </div>
           <div className="form-group">
-            <label htmlFor="rec-fecha">Fecha</label>
-            <DatePicker
-              id="rec-fecha"
-              value={recFecha}
-              onChange={setRecFecha}
-              min={fechaHoyIso()}
-              placeholder="dd/mm/aaaa"
-              aria-label="Fecha del recordatorio"
+            <label htmlFor="rec-cuando-fecha">Fecha y hora</label>
+            <DateTimePicker
+              id="rec-cuando"
+              fecha={recFecha}
+              hora={recHora}
+              onFechaChange={setRecFecha}
+              onHoraChange={setRecHora}
+              minFecha={fechaHoyIso()}
+              aria-label="Fecha y hora del recordatorio"
             />
           </div>
           <div className="form-group">
-            <label htmlFor="rec-hora">Hora</label>
-            <TimePicker
-              id="rec-hora"
-              value={recHora}
-              onChange={setRecHora}
-              fecha={recFecha}
-              placeholder="hh:mm"
-              aria-label="Hora del recordatorio"
-            />
+            <label htmlFor="rec-recurrencia">Repetir</label>
+            <select
+              id="rec-recurrencia"
+              value={recRecurrencia}
+              onChange={(e) => setRecRecurrencia(e.target.value as InicioRecurrencia)}
+            >
+              <option value="none">{INICIO_RECURRENCIA_LABEL.none}</option>
+              <option value="semanal">{INICIO_RECURRENCIA_LABEL.semanal}</option>
+              <option value="mensual">{INICIO_RECURRENCIA_LABEL.mensual}</option>
+              <option value="cada_n_dias">{INICIO_RECURRENCIA_LABEL.cada_n_dias}</option>
+            </select>
           </div>
+          {recRecurrencia === "cada_n_dias" ? (
+            <div className="form-group form-group--full">
+              <label htmlFor="rec-intervalo">Cada cuántos días</label>
+              <input
+                id="rec-intervalo"
+                type="number"
+                min={1}
+                step={1}
+                value={recIntervaloDias}
+                onChange={(e) => setRecIntervaloDias(e.target.value)}
+                placeholder="Ej. 3"
+              />
+            </div>
+          ) : null}
           <div className="form-group form-group--full">
             <label>Avisar</label>
             <div className="inicio-aviso-options inicio-aviso-options--row" role="group" aria-label="Tipo de aviso">
@@ -1635,7 +1885,11 @@ export function InicioPanel({ userName }: Props) {
               disabled={busyId === alertRec?.id}
               onClick={() => void aceptarRecordatorioAlert()}
             >
-              {busyId === alertRec?.id ? "…" : "Aceptar"}
+              {busyId === alertRec?.id
+                ? "…"
+                : alertRec?.recurrencia && alertRec.recurrencia !== "none"
+                  ? "Listo"
+                  : "Aceptar"}
             </button>
           </>
         }
@@ -1665,6 +1919,16 @@ export function InicioPanel({ userName }: Props) {
                     <span className="inicio-rec-alert__meta-label">Hora</span>
                     <span className="inicio-rec-alert__meta-value">
                       {formatItemSoloHora(alertRec.fechaHora)} hs
+                    </span>
+                  </span>
+                </div>
+              ) : null}
+              {formatRecurrenciaLabel(alertRec) ? (
+                <div className="inicio-rec-alert__meta-item">
+                  <span className="inicio-rec-alert__meta-copy">
+                    <span className="inicio-rec-alert__meta-label">Repite</span>
+                    <span className="inicio-rec-alert__meta-value">
+                      {formatRecurrenciaLabel(alertRec)}
                     </span>
                   </span>
                 </div>
@@ -1740,6 +2004,22 @@ export function InicioPanel({ userName }: Props) {
           </div>
         </form>
       </Modal>
+
+      <InicioSharePicker
+        open={shareTarget != null}
+        title={
+          shareTarget?.tipo === "tarea" ? "Asignar tarea" : "Compartir nota"
+        }
+        subtitle={
+          shareTarget?.tipo === "tarea"
+            ? "Elegí uno o más usuarios. Ellos van a ver la tarea en su Inicio."
+            : "Elegí con quién compartir. Pueden ver y editar la nota."
+        }
+        selectedIds={(shareTarget?.sharedWith ?? []).map((u) => u.id)}
+        excludeUserId={myUserId}
+        onClose={() => setShareTarget(null)}
+        onSave={saveShare}
+      />
 
       <ConfirmDialog
         open={deleteId != null}

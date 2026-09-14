@@ -27,7 +27,7 @@ export const DEFAULT_PRESUPUESTO_EMAIL_CONFIG: PresupuestoEmailConfig = {
     "Estimado/a {{nombrePaciente}},\n\n" +
     "¡Gracias por aceptar el presupuesto!\n\n" +
     "Para abonar el total en 3 cuotas sin interés, puede hacerlo desde el siguiente enlace:\n\n" +
-    "{{linkPago}}\n\n" +
+    "{{linkPagoHipervinculo|Link de pago Mercado Pago}}\n\n" +
     "Monto: {{total3Cuotas}}\n\n" +
     "Ante cualquier consulta, puede responder a este correo.\n\n" +
     "Saludos cordiales,\n" +
@@ -57,12 +57,14 @@ export const LINK_PAGO_EMAIL_TEMPLATE_VARS = [
   "cantidadPrestaciones",
   "listaPrestaciones",
   "linkPago",
+  "linkPagoHipervinculo",
 ] as const;
 
 /** Unión de todas las variables conocidas (reemplazo en templates). */
 export const ALL_PRESUPUESTO_EMAIL_TEMPLATE_VARS = [
   ...PRESUPUESTO_EMAIL_TEMPLATE_VARS,
   "linkPago",
+  "linkPagoHipervinculo",
 ] as const;
 
 export type PresupuestoEmailTemplateVar =
@@ -80,12 +82,44 @@ const TEMPLATE_VAR_ALIASES: Record<string, PresupuestoEmailTemplateVar> = {
   link: "linkPago",
 };
 
+/** Texto por defecto del hipervínculo de Mercado Pago. */
+export const LINK_PAGO_EMAIL_LABEL = "Link de pago Mercado Pago";
+
+const TEMPLATE_TOKEN_RE =
+  /\{\{\s*([a-zA-Z0-9_]+)(?:\s*\|\s*([^}]*?))?\s*\}\}/g;
+
+/** Convierte la URL en un `<a>` con el texto visible indicado. */
+export function formatLinkPagoHtml(
+  url: string,
+  label: string = LINK_PAGO_EMAIL_LABEL,
+): string {
+  const href = url.trim();
+  if (!href) return "";
+  const safeHref = href
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+  const safeLabel = (label.trim() || LINK_PAGO_EMAIL_LABEL)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<a href="${safeHref}">${safeLabel}</a>`;
+}
+
 export function applyPresupuestoEmailTemplate(
   template: string,
   vars: Partial<Record<PresupuestoEmailTemplateVar, string>>,
+  options?: { plainSubject?: boolean },
 ): string {
-  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
+  return template.replace(TEMPLATE_TOKEN_RE, (_match, key: string, labelArg?: string) => {
     const resolved = (TEMPLATE_VAR_ALIASES[key] ?? key) as PresupuestoEmailTemplateVar;
+    if (resolved === "linkPagoHipervinculo") {
+      const url = (vars.linkPago ?? "").trim();
+      if (!url) return "";
+      const label = labelArg?.trim() || LINK_PAGO_EMAIL_LABEL;
+      if (options?.plainSubject) return label;
+      return formatLinkPagoHtml(url, label);
+    }
     const value = vars[resolved];
     return value !== undefined && value !== null ? String(value) : "";
   });

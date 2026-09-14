@@ -15,6 +15,7 @@ import type {
   AppUser,
   AppUserPublic,
   ApproveUserInput,
+  UserDirectoryEntry,
   UserRole,
   UserStatus,
 } from "../types.js";
@@ -175,6 +176,36 @@ function userPayload(user: AppUser): Omit<AppUser, "id"> {
 export function toPublicUser(user: AppUser): AppUserPublic {
   const { passwordHash: _omit, ...rest } = user;
   return rest;
+}
+
+/** Listado liviano de usuarios aprobados (para asignar/compartir). */
+export async function listApprovedDirectory(): Promise<UserDirectoryEntry[]> {
+  const users = await listUsersByStatus("approved");
+  return users
+    .map((u) => ({
+      id: u.id,
+      nombre: u.nombre.trim() || u.email,
+      email: u.email,
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+}
+
+/** Resuelve ids a refs de usuarios aprobados (omite inválidos). */
+export async function resolveApprovedUserRefs(
+  ids: string[],
+): Promise<UserDirectoryEntry[]> {
+  const unique = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  const out: UserDirectoryEntry[] = [];
+  for (const id of unique) {
+    const user = await getUserById(id);
+    if (!user || user.status !== "approved") continue;
+    out.push({
+      id: user.id,
+      nombre: user.nombre.trim() || user.email,
+      email: user.email,
+    });
+  }
+  return out;
 }
 
 export async function getUserById(id: string): Promise<AppUser | null> {

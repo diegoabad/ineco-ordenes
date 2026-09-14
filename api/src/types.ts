@@ -309,6 +309,9 @@ export type PedidoSistemaUpdateInput = {
 /** Items personales de la pantalla Inicio. */
 export type InicioItemTipo = "tarea" | "nota" | "recordatorio";
 
+/** Frecuencia de repetición de un recordatorio. */
+export type InicioRecurrencia = "none" | "semanal" | "mensual" | "cada_n_dias";
+
 export type InicioNotaColor =
   | "gris"
   | "amarillo"
@@ -325,6 +328,13 @@ export const INICIO_NOTA_COLORES: InicioNotaColor[] = [
   "rosa",
   "naranja",
 ];
+
+/** Usuario referenciado en asignación / compartido (denormalizado para UI). */
+export type InicioUserRef = {
+  id: string;
+  nombre: string;
+  email: string;
+};
 
 export type InicioItem = {
   id: string;
@@ -344,10 +354,23 @@ export type InicioItem = {
   avisoEmail: boolean;
   /** Cuándo se envió el mail de aviso (anti-duplicado). */
   emailEnviadoAt: string | null;
+  /** Repetición del recordatorio (solo tipo recordatorio). */
+  recurrencia: InicioRecurrencia;
+  /** Cada cuántos días (solo si recurrencia = cada_n_dias). */
+  intervaloDias: number | null;
   /** Nota fijada al frente. */
   pinned: boolean;
   /** Id de la tarea de origen (si el recordatorio se creó desde una tarea). */
   origenTareaId: string | null;
+  /**
+   * Usuarios con acceso (incluye al dueño). Indexable con array-contains.
+   * En tareas = asignados + dueño; en notas = compartidos + dueño.
+   */
+  participantIds: string[];
+  /** Otros usuarios (sin el dueño) para chips/UI. */
+  sharedWith: InicioUserRef[];
+  /** Nombre del dueño (denormalizado). */
+  ownerNombre: string;
   userId: string;
   creadoAt: string;
   actualizadoAt: string;
@@ -361,8 +384,12 @@ export type InicioItemCreateInput = {
   color?: InicioNotaColor;
   avisoApp?: boolean;
   avisoEmail?: boolean;
+  recurrencia?: InicioRecurrencia;
+  intervaloDias?: number | null;
   pinned?: boolean;
   origenTareaId?: string | null;
+  /** Ids de usuarios a asignar/compartir (sin el dueño). */
+  sharedWithIds?: string[];
 };
 
 export type InicioItemUpdateInput = {
@@ -374,7 +401,10 @@ export type InicioItemUpdateInput = {
   avisoApp?: boolean;
   avisoEmail?: boolean;
   emailEnviadoAt?: string | null;
+  recurrencia?: InicioRecurrencia;
+  intervaloDias?: number | null;
   pinned?: boolean;
+  sharedWithIds?: string[];
 };
 
 export type InicioItemReorderInput = {
@@ -401,6 +431,13 @@ export type AppUser = {
 
 /** Usuario sin hash de contraseña (respuestas API). */
 export type AppUserPublic = Omit<AppUser, "passwordHash">;
+
+/** Entrada liviana para pickers de asignación/compartir. */
+export type UserDirectoryEntry = {
+  id: string;
+  nombre: string;
+  email: string;
+};
 
 export type ApproveUserInput = {
   role: UserRole;

@@ -369,8 +369,12 @@ router.post("/:id/aceptar", async (req, res) => {
     const enviarEmail = raw.enviarEmail === true;
     const subject = typeof raw.subject === "string" ? raw.subject : undefined;
     const body = typeof raw.body === "string" ? raw.body : undefined;
-    const data = await aceptarPresupuesto(id, { enviarEmail, subject, body });
-    res.json({ ok: true, data });
+    const result = await aceptarPresupuesto(id, { enviarEmail, subject, body });
+    res.json({
+      ok: true,
+      data: result.presupuesto,
+      ...(result.emailError ? { emailError: result.emailError } : {}),
+    });
   } catch (error) {
     res.status(400).json({
       ok: false,

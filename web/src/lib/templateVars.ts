@@ -2,7 +2,7 @@
 
 import { RICH_SIZE_CLASSES, type RichTextSize } from "./richText";
 
-export const TEMPLATE_VAR_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+export const TEMPLATE_VAR_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_]+)(?:\s*\|\s*([^}]*?))?\s*\}\}/g;
 
 export const TEMPLATE_VAR_CLASS = "template-var";
 export const TEMPLATE_VAR_SELECTED_CLASS = "is-selected";
@@ -280,6 +280,9 @@ export function templateVarChipAtIndex(root: HTMLElement, index: number): HTMLEl
 
 /** Chip de variable bajo la selección actual (o null). */
 export function findSelectedTemplateVar(root: HTMLElement): HTMLElement | null {
+  const marked = root.querySelector(`.${TEMPLATE_VAR_CLASS}.${TEMPLATE_VAR_SELECTED_CLASS}`);
+  if (marked instanceof HTMLElement && root.contains(marked)) return marked;
+
   const sel = document.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
@@ -321,6 +324,179 @@ export function findSelectedTemplateVar(root: HTMLElement): HTMLElement | null {
   return null;
 }
 
+function isTemplateVarChip(node: Node | null, root: HTMLElement): HTMLElement | null {
+  if (!(node instanceof HTMLElement)) return null;
+  if (!node.classList.contains(TEMPLATE_VAR_CLASS)) return null;
+  return root.contains(node) ? node : null;
+}
+
+/** ¿Nodo vacío / invisible que se puede saltar al buscar el chip vecino? */
+function isSkippableCaretNeighbor(node: Node): boolean {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return (node.textContent ?? "").replace(/[\u200B\uFEFF]/g, "").length === 0;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return true;
+  const el = node as HTMLElement;
+  if (el.classList.contains(TEMPLATE_VAR_CLASS)) return false;
+  if (el.tagName === "BR") return false;
+  if (el.childNodes.length === 0) return true;
+  return false;
+}
+
+function deepestLastChild(node: Node): Node {
+  let cur = node;
+  while (cur.lastChild) cur = cur.lastChild;
+  return cur;
+}
+
+function deepestFirstChild(node: Node): Node {
+  let cur = node;
+  while (cur.firstChild) cur = cur.firstChild;
+  return cur;
+}
+
+/** Chip inmediatamente antes del caret (Backspace debería borrarlo). */
+function findChipImmediatelyBeforeCaret(root: HTMLElement, range: Range): HTMLElement | null {
+  let node: Node | null = range.startContainer;
+  let offset = range.startOffset;
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (offset > 0) {
+      const text = node.textContent ?? "";
+      const before = text.slice(0, offset).replace(/[\u200B\uFEFF]+$/g, "");
+      if (before.length > 0) return null;
+    }
+    // Caret al inicio del texto (o solo ZWSP detrás): mirar hermanos previos.
+    let prev: Node | null = node.previousSibling;
+    while (prev && isSkippableCaretNeighbor(prev)) prev = prev.previousSibling;
+    if (prev) {
+      const deep = deepestLastChild(prev);
+      return isTemplateVarChip(deep, root) ?? isTemplateVarChip(prev, root);
+    }
+    const parent: Node | null = node.parentNode;
+    if (!parent) return null;
+    offset = [...parent.childNodes].indexOf(node as ChildNode);
+    node = parent;
+  }
+
+  while (node && node !== root) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (offset > 0) {
+        let prev: Node | null = node.childNodes[offset - 1] ?? null;
+        while (prev && isSkippableCaretNeighbor(prev)) {
+          const idx = [...node.childNodes].indexOf(prev as ChildNode);
+          prev = idx > 0 ? node.childNodes[idx - 1]! : null;
+        }
+        if (prev) {
+          const deep = deepestLastChild(prev);
+          return isTemplateVarChip(deep, root) ?? isTemplateVarChip(prev, root);
+        }
+      }
+      const parent: Node | null = node.parentNode;
+      if (!parent) break;
+      offset = [...parent.childNodes].indexOf(node as ChildNode);
+      node = parent;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+/** Chip inmediatamente después del caret (Delete debería borrarlo). */
+function findChipImmediatelyAfterCaret(root: HTMLElement, range: Range): HTMLElement | null {
+  let node: Node | null = range.startContainer;
+  let offset = range.startOffset;
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? "";
+    if (offset < text.length) {
+      const after = text.slice(offset).replace(/^[\u200B\uFEFF]+/g, "");
+      if (after.length > 0) return null;
+    }
+    let next: Node | null = node.nextSibling;
+    while (next && isSkippableCaretNeighbor(next)) next = next.nextSibling;
+    if (next) {
+      const deep = deepestFirstChild(next);
+      return isTemplateVarChip(deep, root) ?? isTemplateVarChip(next, root);
+    }
+    const parent: Node | null = node.parentNode;
+    if (!parent) return null;
+    offset = [...parent.childNodes].indexOf(node as ChildNode) + 1;
+    node = parent;
+  }
+
+  while (node && node !== root) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (offset < node.childNodes.length) {
+        let next: Node | null = node.childNodes[offset] ?? null;
+        while (next && isSkippableCaretNeighbor(next)) {
+          const idx = [...node.childNodes].indexOf(next as ChildNode);
+          next =
+            idx >= 0 && idx + 1 < node.childNodes.length ? node.childNodes[idx + 1]! : null;
+        }
+        if (next) {
+          const deep = deepestFirstChild(next);
+          return isTemplateVarChip(deep, root) ?? isTemplateVarChip(next, root);
+        }
+      }
+      const parent: Node | null = node.parentNode;
+      if (!parent) break;
+      offset = [...parent.childNodes].indexOf(node as ChildNode) + 1;
+      node = parent;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+/**
+ * Chip a borrar con Backspace/Delete cuando el caret está justo al lado
+ * (contenteditable=false no lo borra bien y a veces come el renglón siguiente).
+ */
+export function findTemplateVarChipForDelete(
+  root: HTMLElement,
+  key: "Backspace" | "Delete",
+): HTMLElement | null {
+  const sel = document.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  if (!sel.isCollapsed) {
+    const touched = [...root.querySelectorAll(`.${TEMPLATE_VAR_CLASS}`)].filter((el) => {
+      try {
+        return sel.getRangeAt(0).intersectsNode(el);
+      } catch {
+        return false;
+      }
+    }) as HTMLElement[];
+    return touched.length === 1 ? touched[0]! : null;
+  }
+
+  const selected = findSelectedTemplateVar(root);
+  if (selected) return selected;
+
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+
+  return key === "Backspace"
+    ? findChipImmediatelyBeforeCaret(root, range)
+    : findChipImmediatelyAfterCaret(root, range);
+}
+
+/** Elimina un chip y deja el caret en su lugar. */
+export function removeTemplateVarChip(root: HTMLElement, chip: HTMLElement): void {
+  if (!root.contains(chip)) return;
+  const sel = document.getSelection();
+  const range = document.createRange();
+  range.setStartBefore(chip);
+  range.collapse(true);
+  chip.remove();
+  if (sel) {
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
 /** Marca visualmente el chip seleccionado (borde); limpia el resto. */
 export function syncTemplateVarSelectionHighlight(root: HTMLElement): void {
   const selected = findSelectedTemplateVar(root);
@@ -329,17 +505,27 @@ export function syncTemplateVarSelectionHighlight(root: HTMLElement): void {
   }
 }
 
-/** Selecciona un chip entero (para ver/aplicar estilos) y lo marca. */
+/** Selecciona un chip (marca visual) sin usar selectNode: evita que Chrome inserte <br> al perder el foco. */
 export function selectTemplateVarChip(root: HTMLElement, chip: HTMLElement): void {
   if (!root.contains(chip)) return;
   root.focus();
+  for (const el of root.querySelectorAll(`.${TEMPLATE_VAR_CLASS}`)) {
+    el.classList.toggle(TEMPLATE_VAR_SELECTED_CLASS, el === chip);
+  }
   const sel = document.getSelection();
   if (!sel) return;
   const range = document.createRange();
-  range.selectNode(chip);
+  range.setStartAfter(chip);
+  range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
-  syncTemplateVarSelectionHighlight(root);
+}
+
+/** Quita la marca de selección de chips y deja el caret colapsado si hace falta. */
+export function clearTemplateVarChipSelection(root: HTMLElement): void {
+  for (const el of root.querySelectorAll(`.${TEMPLATE_VAR_CLASS}.${TEMPLATE_VAR_SELECTED_CLASS}`)) {
+    el.classList.remove(TEMPLATE_VAR_SELECTED_CLASS);
+  }
 }
 
 function wrapTokenMatch(match: string): string {
