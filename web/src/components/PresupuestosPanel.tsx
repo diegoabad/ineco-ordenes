@@ -27,7 +27,6 @@ import { LoadingBlock } from "./InecoMark";
 import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
-import { PresupuestoLinkPagoEmailModal } from "./PresupuestoLinkPagoEmailModal";
 import { PresupuestoRechazoDialog } from "./PresupuestoRechazoDialog";
 import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
@@ -120,7 +119,6 @@ export function PresupuestosPanel({
   const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
   const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
-  const [linkPagoPreview, setLinkPagoPreview] = useState<Presupuesto | null>(null);
   const [viendoPdfId, setViendoPdfId] = useState<string | null>(null);
   const lastAddRequestKey = useRef(0);
 
@@ -202,11 +200,7 @@ export function PresupuestosPanel({
     motivoRechazo?: string,
   ) {
     if (guardandoEstadoId) return;
-    if (estado === "aceptado") {
-      if (p.estado === "aceptado") return;
-      setLinkPagoPreview(p);
-      return;
-    }
+    if (estado === "aceptado" && p.estado === "aceptado") return;
     if (
       estado === "rechazado" &&
       p.estado === "rechazado" &&
@@ -219,11 +213,13 @@ export function PresupuestosPanel({
       const updated = await updatePresupuestoEstado(p.id, estado, motivoRechazo);
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       toast.success(
-        p.estado === "rechazado"
-          ? "Motivo de rechazo actualizado"
-          : "Presupuesto marcado como rechazado",
+        estado === "aceptado"
+          ? "Presupuesto marcado como aceptado"
+          : p.estado === "rechazado"
+            ? "Motivo de rechazo actualizado"
+            : "Presupuesto marcado como rechazado",
       );
-      setARechazar(null);
+      if (estado === "rechazado") setARechazar(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
     } finally {
@@ -260,7 +256,8 @@ export function PresupuestosPanel({
 
   async function regenerarYRestaurarPdf(p: Presupuesto): Promise<Blob> {
     const plantilla = await fetchPresupuestoPlantillaConfig();
-    const body = renderPresupuestoPlantillaBody(plantilla.data.body, {
+    const templateHtml = p.pacienteExterno ? plantilla.data.bodyExterno : plantilla.data.body;
+    const body = renderPresupuestoPlantillaBody(templateHtml, {
       nombrePaciente: p.nombrePaciente,
       email: p.email,
       nombreProfesional: p.profesional,
@@ -412,6 +409,11 @@ export function PresupuestosPanel({
                       <span className="fl-texto-truncado" title={formatNombrePersona(p.nombrePaciente)}>
                         {formatNombrePersona(p.nombrePaciente) || "—"}
                       </span>
+                      {p.pacienteExterno ? (
+                        <span className="chip chip--muted" style={{ marginLeft: "0.4rem" }} title="Paciente externo">
+                          Externo
+                        </span>
+                      ) : null}
                     </td>
                     <td>
                       <span className="fl-texto-truncado" title={formatNombrePersona(p.profesional)}>
@@ -457,7 +459,6 @@ export function PresupuestosPanel({
                           aria-label="Marcar como aceptado"
                           disabled={
                             emailPreview?.id === p.id ||
-                            linkPagoPreview?.id === p.id ||
                             guardandoEstaFila ||
                             Boolean(guardandoEstadoId) ||
                             p.estado === "aceptado"
@@ -611,13 +612,6 @@ export function PresupuestosPanel({
           upsertPresupuesto(fallido);
           void cargar();
         }}
-      />
-
-      <PresupuestoLinkPagoEmailModal
-        open={linkPagoPreview !== null}
-        presupuesto={linkPagoPreview}
-        onClose={() => setLinkPagoPreview(null)}
-        onDone={upsertPresupuesto}
       />
 
       <PresupuestoRechazoDialog

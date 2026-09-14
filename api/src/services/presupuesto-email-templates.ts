@@ -1,15 +1,18 @@
 export type PresupuestoEmailConfig = {
   fromEmail: string;
   fromName: string;
-  /** Plantilla al enviar el presupuesto (PDF). */
+  /** Plantilla al enviar el presupuesto (PDF) — paciente normal. */
   subject: string;
   body: string;
+  /** Plantilla al enviar el presupuesto (PDF) — paciente externo (valor único). */
+  externoSubject: string;
+  externoBody: string;
   /** Plantilla al enviar el link de pago (Mercado Pago). */
   linkPagoSubject: string;
   linkPagoBody: string;
 };
 
-export type PresupuestoEmailTemplateKind = "presupuesto" | "linkPago";
+export type PresupuestoEmailTemplateKind = "presupuesto" | "presupuestoExterno" | "linkPago";
 
 export const DEFAULT_PRESUPUESTO_EMAIL_CONFIG: PresupuestoEmailConfig = {
   fromEmail: "informes@ineco.ar",
@@ -18,6 +21,15 @@ export const DEFAULT_PRESUPUESTO_EMAIL_CONFIG: PresupuestoEmailConfig = {
   body:
     "Estimado/a {{nombrePaciente}},\n\n" +
     "Le enviamos el presupuesto del módulo de evaluación según indicación de {{nombreProfesional}}.\n\n" +
+    "Adjuntamos el detalle completo en PDF, con las prestaciones incluidas, costos y condiciones.\n\n" +
+    "Ante cualquier consulta, puede responder a este correo.\n\n" +
+    "Saludos cordiales,\n" +
+    "Equipo de INECO",
+  externoSubject: "Presupuesto - {{nombrePaciente}}",
+  externoBody:
+    "Estimado/a {{nombrePaciente}},\n\n" +
+    "Le enviamos el presupuesto del módulo de evaluación según indicación de {{nombreProfesional}}.\n\n" +
+    "Monto: {{totalEfectivo}}\n\n" +
     "Adjuntamos el detalle completo en PDF, con las prestaciones incluidas, costos y condiciones.\n\n" +
     "Ante cualquier consulta, puede responder a este correo.\n\n" +
     "Saludos cordiales,\n" +
@@ -70,8 +82,20 @@ export const ALL_PRESUPUESTO_EMAIL_TEMPLATE_VARS = [
 export type PresupuestoEmailTemplateVar =
   (typeof ALL_PRESUPUESTO_EMAIL_TEMPLATE_VARS)[number];
 
+/** Variables de la plantilla de presupuesto externo (sin énfasis en 3 cuotas). */
+export const PRESUPUESTO_EXTERNO_EMAIL_TEMPLATE_VARS = [
+  "nombrePaciente",
+  "email",
+  "nombreProfesional",
+  "fechaPresupuesto",
+  "totalEfectivo",
+  "cantidadPrestaciones",
+  "listaPrestaciones",
+] as const;
+
 export const EMAIL_TEMPLATE_VARS_BY_KIND = {
   presupuesto: PRESUPUESTO_EMAIL_TEMPLATE_VARS,
+  presupuestoExterno: PRESUPUESTO_EXTERNO_EMAIL_TEMPLATE_VARS,
   linkPago: LINK_PAGO_EMAIL_TEMPLATE_VARS,
 } as const;
 
@@ -130,6 +154,8 @@ export function presupuestoEmailConfigWithDefaults(
 ): PresupuestoEmailConfig {
   const storedSubject = stored?.subject?.trim() || "";
   const storedBody = stored?.body?.trim() || "";
+  const storedExternoSubject = stored?.externoSubject?.trim() || "";
+  const storedExternoBody = stored?.externoBody?.trim() || "";
   const storedLinkSubject = stored?.linkPagoSubject?.trim() || "";
   const storedLinkBody = stored?.linkPagoBody?.trim() || "";
 
@@ -145,6 +171,8 @@ export function presupuestoEmailConfigWithDefaults(
       DEFAULT_PRESUPUESTO_EMAIL_CONFIG.fromName,
     subject: storedSubject || DEFAULT_PRESUPUESTO_EMAIL_CONFIG.subject,
     body: storedBody || DEFAULT_PRESUPUESTO_EMAIL_CONFIG.body,
+    externoSubject: storedExternoSubject || DEFAULT_PRESUPUESTO_EMAIL_CONFIG.externoSubject,
+    externoBody: storedExternoBody || DEFAULT_PRESUPUESTO_EMAIL_CONFIG.externoBody,
     linkPagoSubject: storedLinkSubject || DEFAULT_PRESUPUESTO_EMAIL_CONFIG.linkPagoSubject,
     linkPagoBody: storedLinkBody || DEFAULT_PRESUPUESTO_EMAIL_CONFIG.linkPagoBody,
   };

@@ -17,9 +17,11 @@ import { generarPdfPresupuesto, pdfBlobFromDoc } from "../pdf/generarPresupuesto
 import {
   createPresupuesto,
   fetchPresupuestoPlantillaConfig,
+  fetchPresupuestosConfig,
   fetchPrestaciones,
   updatePresupuesto,
 } from "../services/dataService";
+import { calcPresupuestoTotales } from "../lib/presupuestoTotales";
 import type {
   ModalidadPresupuesto,
   Prestacion,
@@ -75,6 +77,7 @@ const EMPTY_FORM: PresupuestoFormData = {
   profesional: "",
   modalidadId: "",
   email: "",
+  pacienteExterno: false,
   prestacionIds: [],
 };
 
@@ -121,6 +124,8 @@ export function PresupuestoFormModal({
   const [accion, setAccion] = useState<"crear" | "enviar" | null>(null);
   const [busquedaPrest, setBusquedaPrest] = useState("");
   const [plantillaBody, setPlantillaBody] = useState("");
+  const [plantillaBodyExterno, setPlantillaBodyExterno] = useState("");
+  const [recargoExternoPorcentaje, setRecargoExternoPorcentaje] = useState(0);
   const [creandoProfesional, setCreandoProfesional] = useState(false);
   const [dragPrestacionId, setDragPrestacionId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -156,8 +161,17 @@ export function PresupuestoFormModal({
     if (!open) return;
     setBusquedaPrest("");
     void fetchPresupuestoPlantillaConfig()
-      .then((res) => setPlantillaBody(res.data.body))
-      .catch(() => setPlantillaBody(""));
+      .then((res) => {
+        setPlantillaBody(res.data.body);
+        setPlantillaBodyExterno(res.data.bodyExterno);
+      })
+      .catch(() => {
+        setPlantillaBody("");
+        setPlantillaBodyExterno("");
+      });
+    void fetchPresupuestosConfig()
+      .then((cfg) => setRecargoExternoPorcentaje(cfg.recargoExternoPorcentaje ?? 0))
+      .catch(() => setRecargoExternoPorcentaje(0));
     setForm(
       initial
         ? {
@@ -168,6 +182,7 @@ export function PresupuestoFormModal({
                 ? initial.modalidadId
                 : modalidadDefaultId,
             email: initial.email,
+            pacienteExterno: initial.pacienteExterno === true,
             prestacionIds: initial.items.map((i) => i.prestacionId),
           }
         : { ...EMPTY_FORM, modalidadId: modalidadDefaultId },
@@ -204,10 +219,11 @@ export function PresupuestoFormModal({
   }, [prestaciones, form.prestacionIds]);
 
   const totales = useMemo(() => {
-    const totalEfectivo = seleccionadas.reduce((s, p) => s + p.precioEfectivo, 0);
-    const total3Cuotas = seleccionadas.reduce((s, p) => s + p.precio3Cuotas, 0);
-    return { totalEfectivo, total3Cuotas };
-  }, [seleccionadas]);
+    return calcPresupuestoTotales(seleccionadas, {
+      pacienteExterno: form.pacienteExterno,
+      recargoExternoPorcentaje,
+    });
+  }, [seleccionadas, form.pacienteExterno, recargoExternoPorcentaje]);
 
   const prestacionesFiltradas = useMemo(() => {
     const q = busquedaPrest.trim().toLowerCase();
@@ -324,11 +340,12 @@ export function PresupuestoFormModal({
     setAccion(modo);
     setSaving(true);
     try {
-      let templateHtml = plantillaBody;
+      let templateHtml = form.pacienteExterno ? plantillaBodyExterno : plantillaBody;
       try {
         const plantilla = await fetchPresupuestoPlantillaConfig();
-        templateHtml = plantilla.data.body;
-        setPlantillaBody(templateHtml);
+        templateHtml = form.pacienteExterno ? plantilla.data.bodyExterno : plantilla.data.body;
+        setPlantillaBody(plantilla.data.body);
+        setPlantillaBodyExterno(plantilla.data.bodyExterno);
       } catch {
         if (!templateHtml.trim()) {
           throw new Error("No se pudo cargar la plantilla del presupuesto");
@@ -461,6 +478,7 @@ export function PresupuestoFormModal({
         profesional: normalizeNombrePersona(form.profesional),
         modalidadId: form.modalidadId,
         email: form.email.trim(),
+        pacienteExterno: form.pacienteExterno,
         prestacionIds: form.prestacionIds,
         pdfBase64,
         enviar: false,
@@ -703,6 +721,37 @@ export function PresupuestoFormModal({
         </div>
 
         <aside className="presup-seleccionadas" aria-label="Prestaciones seleccionadas">
+          <label
+            className={`presup-externo-switch${form.pacienteExterno ? " is-on" : ""}${
+              disabled ? " is-disabled" : ""
+            }`}
+          >
+            <span className="presup-externo-switch__text">
+              <span className="presup-externo-switch__title">
+                Paciente externo
+                {form.pacienteExterno && recargoExternoPorcentaje > 0 ? (
+                  <span className="presup-externo-switch__hint">
+                    {" "}
+                    +{recargoExternoPorcentaje}%
+                  </span>
+                ) : null}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={form.pacienteExterno}
+              disabled={disabled}
+              aria-label="Paciente externo"
+              onChange={(e) =>
+                setForm((f) => ({ ...f, pacienteExterno: e.target.checked }))
+              }
+            />
+            <span className="presup-externo-switch__track" aria-hidden>
+              <span className="presup-externo-switch__thumb" />
+            </span>
+          </label>
+
           <div className="presup-seleccionadas__header">
             <span>Seleccionadas</span>
             <strong>{form.prestacionIds.length}</strong>
@@ -769,28 +818,68 @@ export function PresupuestoFormModal({
           )}
 
             <div className="presup-totales__precios">
-              <div className="presup-totales__precio">
-                <span className="presup-totales__precio-label">Total Efect/Transf</span>
-                <strong className="presup-totales__precio-val">
-                  {totales.totalEfectivo > 0 ? formatMoney(totales.totalEfectivo) : "—"}
-                </strong>
-              </div>
-              <div className="presup-totales__precio">
-                <span className="presup-totales__precio-label">Total 3 cuotas</span>
-                <strong className="presup-totales__precio-val">
-                  {totales.total3Cuotas > 0 ? (
-                    <>
-                      {formatMoney(totales.total3Cuotas)}
-                      <span className="presup-seleccionadas__cuota">
-                        {" "}
-                        ({formatMoney(totales.total3Cuotas / 3)}/cuota)
+              {form.pacienteExterno ? (
+                <div className="presup-totales__precio presup-totales__precio--externo">
+                  <span className="presup-totales__precio-label">Total (externo)</span>
+                  {totales.baseEfectivo > 0 ? (
+                    <div className="presup-totales__cuenta">
+                      <div className="presup-totales__cuenta-cell">
+                        <span className="presup-totales__cuenta-label">Normal</span>
+                        <strong>{formatMoney(totales.baseEfectivo)}</strong>
+                      </div>
+                      <span className="presup-totales__cuenta-op" aria-hidden>
+                        +
                       </span>
-                    </>
+                      <div className="presup-totales__cuenta-cell">
+                        <span className="presup-totales__cuenta-label">
+                          {recargoExternoPorcentaje}%
+                        </span>
+                        <strong>
+                          {formatMoney(
+                            Math.max(0, totales.totalEfectivo - totales.baseEfectivo),
+                          )}
+                        </strong>
+                      </div>
+                      <span className="presup-totales__cuenta-op" aria-hidden>
+                        =
+                      </span>
+                      <div className="presup-totales__cuenta-cell">
+                        <span className="presup-totales__cuenta-label">Total</span>
+                        <strong className="presup-totales__cuenta-total">
+                          {formatMoney(totales.totalEfectivo)}
+                        </strong>
+                      </div>
+                    </div>
                   ) : (
-                    "—"
+                    <strong className="presup-totales__precio-val">—</strong>
                   )}
-                </strong>
-              </div>
+                </div>
+              ) : (
+                <>
+                  <div className="presup-totales__precio">
+                    <span className="presup-totales__precio-label">Total Efect/Transf</span>
+                    <strong className="presup-totales__precio-val">
+                      {totales.totalEfectivo > 0 ? formatMoney(totales.totalEfectivo) : "—"}
+                    </strong>
+                  </div>
+                  <div className="presup-totales__precio">
+                    <span className="presup-totales__precio-label">Total 3 cuotas</span>
+                    <strong className="presup-totales__precio-val">
+                      {totales.total3Cuotas > 0 ? (
+                        <>
+                          {formatMoney(totales.total3Cuotas)}
+                          <span className="presup-seleccionadas__cuota">
+                            {" "}
+                            ({formatMoney(totales.total3Cuotas / 3)}/cuota)
+                          </span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </strong>
+                  </div>
+                </>
+              )}
             </div>
         </aside>
       </div>

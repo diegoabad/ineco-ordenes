@@ -42,6 +42,8 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
   );
   const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
+  const [recargoExternoPorcentaje, setRecargoExternoPorcentaje] = useState(0);
+  const [recargoDraft, setRecargoDraft] = useState("0");
   const [nuevoTipo, setNuevoTipo] = useState("");
   const [nuevoColor, setNuevoColor] = useState(() => nextTipoColor(DEFAULT_TIPOS_PRESTACION));
   const [nuevoProfTitulo, setNuevoProfTitulo] = useState<string>(TITULOS_PROFESIONAL_PRESUPUESTO[0]!);
@@ -69,20 +71,25 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
             profesionales: config.profesionales,
             modalidades: modalidadesLoaded,
             motivosRechazo: config.motivosRechazo ?? [],
+            recargoExternoPorcentaje: config.recargoExternoPorcentaje ?? 0,
           });
           setTipos(saved.tiposPrestacion);
           setProfesionales(saved.profesionales);
           setModalidades(saved.modalidades);
           setMotivosRechazo(saved.motivosRechazo);
+          setRecargoExternoPorcentaje(saved.recargoExternoPorcentaje ?? 0);
+          setRecargoDraft(String(saved.recargoExternoPorcentaje ?? 0));
           setNuevoColor(nextTipoColor(saved.tiposPrestacion));
           onSaved?.();
           if (changed) toast.success("Tipos Evaluación y Tratamiento restaurados");
         } else {
-          setTipos(config.tiposPrestacion);
+          setTipos(tiposMerged);
           setProfesionales(config.profesionales);
-          setModalidades(config.modalidades);
+          setModalidades(modalidadesLoaded);
           setMotivosRechazo(config.motivosRechazo ?? []);
-          setNuevoColor(nextTipoColor(config.tiposPrestacion));
+          setRecargoExternoPorcentaje(config.recargoExternoPorcentaje ?? 0);
+          setRecargoDraft(String(config.recargoExternoPorcentaje ?? 0));
+          setNuevoColor(nextTipoColor(tiposMerged));
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "No se pudo cargar la configuración");
@@ -98,6 +105,7 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     nextModalidades: ModalidadPresupuesto[],
     nextMotivos: MotivoRechazoPresupuesto[],
     okMessage?: string,
+    nextRecargo?: number,
   ) {
     setSaving(true);
     try {
@@ -106,11 +114,15 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
         profesionales: nextProfesionales,
         modalidades: nextModalidades,
         motivosRechazo: nextMotivos,
+        recargoExternoPorcentaje:
+          nextRecargo !== undefined ? nextRecargo : recargoExternoPorcentaje,
       });
       setTipos(saved.tiposPrestacion);
       setProfesionales(saved.profesionales);
       setModalidades(saved.modalidades);
       setMotivosRechazo(saved.motivosRechazo);
+      setRecargoExternoPorcentaje(saved.recargoExternoPorcentaje ?? 0);
+      setRecargoDraft(String(saved.recargoExternoPorcentaje ?? 0));
       setNuevoColor(nextTipoColor(saved.tiposPrestacion));
       onSaved?.();
       if (okMessage) toast.success(okMessage);
@@ -126,6 +138,8 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
             : DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
         );
         setMotivosRechazo(config.motivosRechazo ?? []);
+        setRecargoExternoPorcentaje(config.recargoExternoPorcentaje ?? 0);
+        setRecargoDraft(String(config.recargoExternoPorcentaje ?? 0));
         setNuevoColor(nextTipoColor(config.tiposPrestacion));
       } catch {
         // El toast ya avisó; la lista queda como estaba en pantalla.
@@ -133,6 +147,24 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function guardarRecargoExterno() {
+    const n = Number(recargoDraft.replace(",", "."));
+    const normalized =
+      Number.isFinite(n) && n >= 0 ? Math.min(1000, Math.round(n * 100) / 100) : 0;
+    if (normalized === recargoExternoPorcentaje) {
+      setRecargoDraft(String(normalized));
+      return;
+    }
+    await persistConfig(
+      tipos,
+      profesionales,
+      modalidades,
+      motivosRechazo,
+      "Recargo externo actualizado",
+      normalized,
+    );
   }
 
   async function agregarTipo() {
@@ -318,6 +350,44 @@ export function PresupuestosConfigPanel({ onSaved }: Props) {
   return (
     <section className="presup-config-page">
       <div className="presup-config-page__scroll">
+      <details className="presup-config-accordion" open>
+        <summary className="presup-config-accordion__summary">
+          <div className="presup-config-accordion__lead">
+            <span className="presup-config-accordion__title">Pacientes externos</span>
+            <span className="presup-config-accordion__hint">
+              Porcentaje que se suma al valor en efectivo. Ejemplo: 100 + 50% = 150. Sin 3 cuotas.
+            </span>
+          </div>
+          <span className="presup-config-accordion__meta">{recargoExternoPorcentaje}%</span>
+        </summary>
+        <div className="presup-config-accordion__body">
+          <div className="presup-config-add" style={{ maxWidth: "16rem" }}>
+            <input
+              id="presup-recargo-externo"
+              type="number"
+              min={0}
+              max={1000}
+              step={1}
+              value={recargoDraft}
+              disabled={saving}
+              onChange={(e) => setRecargoDraft(e.target.value)}
+              onBlur={() => void guardarRecargoExterno()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void guardarRecargoExterno();
+                }
+              }}
+              placeholder="% recargo"
+              aria-label="Porcentaje de recargo para pacientes externos"
+            />
+            <span className="text-muted" style={{ alignSelf: "center" }}>
+              %
+            </span>
+          </div>
+        </div>
+      </details>
+
       <details className="presup-config-accordion">
         <summary className="presup-config-accordion__summary">
           <div className="presup-config-accordion__lead">
