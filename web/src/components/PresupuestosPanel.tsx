@@ -27,7 +27,6 @@ import { LoadingBlock } from "./InecoMark";
 import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
-import { PresupuestoLinkPagoEmailModal } from "./PresupuestoLinkPagoEmailModal";
 import { PresupuestoRechazoDialog } from "./PresupuestoRechazoDialog";
 import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
@@ -120,7 +119,6 @@ export function PresupuestosPanel({
   const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
   const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
-  const [linkPagoPreview, setLinkPagoPreview] = useState<Presupuesto | null>(null);
   const [viendoPdfId, setViendoPdfId] = useState<string | null>(null);
   const lastAddRequestKey = useRef(0);
 
@@ -202,24 +200,7 @@ export function PresupuestosPanel({
     motivoRechazo?: string,
   ) {
     if (guardandoEstadoId) return;
-    if (estado === "aceptado") {
-      if (p.estado === "aceptado") return;
-      if (p.pacienteExterno) {
-        setGuardandoEstadoId(p.id);
-        try {
-          const updated = await updatePresupuestoEstado(p.id, "aceptado");
-          setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-          toast.success("Presupuesto externo marcado como aceptado");
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
-        } finally {
-          setGuardandoEstadoId(null);
-        }
-        return;
-      }
-      setLinkPagoPreview(p);
-      return;
-    }
+    if (estado === "aceptado" && p.estado === "aceptado") return;
     if (
       estado === "rechazado" &&
       p.estado === "rechazado" &&
@@ -232,11 +213,13 @@ export function PresupuestosPanel({
       const updated = await updatePresupuestoEstado(p.id, estado, motivoRechazo);
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       toast.success(
-        p.estado === "rechazado"
-          ? "Motivo de rechazo actualizado"
-          : "Presupuesto marcado como rechazado",
+        estado === "aceptado"
+          ? "Presupuesto marcado como aceptado"
+          : p.estado === "rechazado"
+            ? "Motivo de rechazo actualizado"
+            : "Presupuesto marcado como rechazado",
       );
-      setARechazar(null);
+      if (estado === "rechazado") setARechazar(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
     } finally {
@@ -476,7 +459,6 @@ export function PresupuestosPanel({
                           aria-label="Marcar como aceptado"
                           disabled={
                             emailPreview?.id === p.id ||
-                            linkPagoPreview?.id === p.id ||
                             guardandoEstaFila ||
                             Boolean(guardandoEstadoId) ||
                             p.estado === "aceptado"
@@ -630,13 +612,6 @@ export function PresupuestosPanel({
           upsertPresupuesto(fallido);
           void cargar();
         }}
-      />
-
-      <PresupuestoLinkPagoEmailModal
-        open={linkPagoPreview !== null}
-        presupuesto={linkPagoPreview}
-        onClose={() => setLinkPagoPreview(null)}
-        onDone={upsertPresupuesto}
       />
 
       <PresupuestoRechazoDialog
