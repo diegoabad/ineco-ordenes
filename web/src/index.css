@@ -2792,6 +2792,98 @@ button.chip--button:disabled {
   min-width: 0;
 }
 
+.presup-externo-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--primary) 6%, var(--bg, #fff));
+  cursor: pointer;
+  user-select: none;
+}
+
+.presup-externo-switch.is-on {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg, #fff));
+}
+
+.presup-externo-switch.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.presup-externo-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.presup-externo-switch__text {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.presup-externo-switch__title {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.presup-externo-switch__hint {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--primary);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.presup-externo-switch__track {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.55rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 28%, #e5e7eb);
+  transition: background 0.18s ease;
+}
+
+.presup-externo-switch__thumb {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 0.18s ease;
+}
+
+.presup-externo-switch.is-on .presup-externo-switch__track,
+.presup-externo-switch input:checked + .presup-externo-switch__track {
+  background: var(--primary);
+}
+
+.presup-externo-switch.is-on .presup-externo-switch__thumb,
+.presup-externo-switch input:checked + .presup-externo-switch__track .presup-externo-switch__thumb {
+  transform: translateX(1.15rem);
+}
+
+.presup-externo-switch:focus-within .presup-externo-switch__track {
+  outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .fl-modal--presupuesto .form-group--presup-prest {
   display: flex;
   flex: 1;
@@ -3259,6 +3351,61 @@ button.chip--button:disabled {
   font-weight: 600;
   color: var(--text);
   line-height: 1.3;
+}
+
+.presup-totales__precio--externo {
+  grid-column: 1 / -1;
+}
+
+.presup-totales__cuenta {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content 1fr max-content;
+  align-items: end;
+  width: 100%;
+  margin-top: 0.15rem;
+  min-width: 0;
+}
+
+.presup-totales__cuenta-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.presup-totales__cuenta-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.presup-totales__cuenta-cell strong {
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--text);
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.presup-totales__cuenta-total {
+  color: var(--primary) !important;
+  font-size: 0.9375rem !important;
+}
+
+.presup-totales__cuenta-op {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: stretch;
+  height: 1.25em;
+  margin-bottom: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  line-height: 1;
 }
 
 .presup-totales__precio-val--cuotas {

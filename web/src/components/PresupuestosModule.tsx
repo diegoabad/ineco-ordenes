@@ -43,6 +43,7 @@ export function PresupuestosModule({ section, onSectionChange }: Props) {
           profesionales: config.profesionales,
           modalidades: config.modalidades,
           motivosRechazo: config.motivosRechazo ?? [],
+          recargoExternoPorcentaje: config.recargoExternoPorcentaje ?? 0,
         });
         setTiposPrestacion(saved.tiposPrestacion);
         setProfesionalesPresupuesto(saved.profesionales);

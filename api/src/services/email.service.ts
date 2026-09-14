@@ -243,6 +243,7 @@ export type SendPresupuestoEmailInput = {
   total3Cuotas?: number;
   cantidadPrestaciones?: number;
   items?: PresupuestoItem[];
+  pacienteExterno?: boolean;
   /** Si vienen, se usan tal cual (preview editable del cliente). */
   subject?: string;
   body?: string;
@@ -285,12 +286,15 @@ export async function sendPresupuestoEmail(
     listaPrestaciones: formatListaPrestaciones(input.items ?? []),
   };
 
+  const subjectTemplate = input.pacienteExterno ? config.externoSubject : config.subject;
+  const bodyTemplate = input.pacienteExterno ? config.externoBody : config.body;
+
   const subject =
     input.subject?.trim() ||
-    applyPresupuestoEmailTemplate(config.subject, vars).trim() ||
+    applyPresupuestoEmailTemplate(subjectTemplate, vars).trim() ||
     `Presupuesto - ${nombrePaciente}`;
   const bodyRaw =
-    input.body?.trim() || applyPresupuestoEmailTemplate(config.body, vars);
+    input.body?.trim() || applyPresupuestoEmailTemplate(bodyTemplate, vars);
   const bodyText = emailBodyToPlainText(bodyRaw);
   const bodyHtml = emailBodyToHtml(bodyRaw);
 

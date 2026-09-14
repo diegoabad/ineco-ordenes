@@ -1,15 +1,18 @@
 export type PresupuestoEmailConfig = {
   fromEmail: string;
   fromName: string;
-  /** Plantilla al enviar el presupuesto (PDF). */
+  /** Plantilla al enviar el presupuesto (PDF) — paciente normal. */
   subject: string;
   body: string;
+  /** Plantilla al enviar el presupuesto (PDF) — paciente externo. */
+  externoSubject: string;
+  externoBody: string;
   /** Plantilla al enviar el link de pago (Mercado Pago). */
   linkPagoSubject: string;
   linkPagoBody: string;
 };
 
-export type PresupuestoEmailTemplateKind = "presupuesto" | "linkPago";
+export type PresupuestoEmailTemplateKind = "presupuesto" | "presupuestoExterno" | "linkPago";
 
 export const PRESUPUESTO_EMAIL_TEMPLATE_VARS = [
   "nombrePaciente",
@@ -18,6 +21,16 @@ export const PRESUPUESTO_EMAIL_TEMPLATE_VARS = [
   "fechaPresupuesto",
   "totalEfectivo",
   "total3Cuotas",
+  "cantidadPrestaciones",
+  "listaPrestaciones",
+] as const;
+
+export const PRESUPUESTO_EXTERNO_EMAIL_TEMPLATE_VARS = [
+  "nombrePaciente",
+  "email",
+  "nombreProfesional",
+  "fechaPresupuesto",
+  "totalEfectivo",
   "cantidadPrestaciones",
   "listaPrestaciones",
 ] as const;
@@ -65,6 +78,7 @@ export const EMAIL_TEMPLATE_VARS_BY_KIND: Record<
   readonly PresupuestoEmailTemplateVar[]
 > = {
   presupuesto: PRESUPUESTO_EMAIL_TEMPLATE_VARS,
+  presupuestoExterno: PRESUPUESTO_EXTERNO_EMAIL_TEMPLATE_VARS,
   linkPago: LINK_PAGO_EMAIL_TEMPLATE_VARS,
 };
 
@@ -73,6 +87,8 @@ export const EMPTY_PRESUPUESTO_EMAIL_CONFIG: PresupuestoEmailConfig = {
   fromName: "",
   subject: "",
   body: "",
+  externoSubject: "",
+  externoBody: "",
   linkPagoSubject: "",
   linkPagoBody: "",
 };

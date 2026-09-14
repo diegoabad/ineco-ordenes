@@ -204,6 +204,19 @@ export function PresupuestosPanel({
     if (guardandoEstadoId) return;
     if (estado === "aceptado") {
       if (p.estado === "aceptado") return;
+      if (p.pacienteExterno) {
+        setGuardandoEstadoId(p.id);
+        try {
+          const updated = await updatePresupuestoEstado(p.id, "aceptado");
+          setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+          toast.success("Presupuesto externo marcado como aceptado");
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
+        } finally {
+          setGuardandoEstadoId(null);
+        }
+        return;
+      }
       setLinkPagoPreview(p);
       return;
     }
@@ -260,7 +273,8 @@ export function PresupuestosPanel({
 
   async function regenerarYRestaurarPdf(p: Presupuesto): Promise<Blob> {
     const plantilla = await fetchPresupuestoPlantillaConfig();
-    const body = renderPresupuestoPlantillaBody(plantilla.data.body, {
+    const templateHtml = p.pacienteExterno ? plantilla.data.bodyExterno : plantilla.data.body;
+    const body = renderPresupuestoPlantillaBody(templateHtml, {
       nombrePaciente: p.nombrePaciente,
       email: p.email,
       nombreProfesional: p.profesional,
@@ -412,6 +426,11 @@ export function PresupuestosPanel({
                       <span className="fl-texto-truncado" title={formatNombrePersona(p.nombrePaciente)}>
                         {formatNombrePersona(p.nombrePaciente) || "—"}
                       </span>
+                      {p.pacienteExterno ? (
+                        <span className="chip chip--muted" style={{ marginLeft: "0.4rem" }} title="Paciente externo">
+                          Externo
+                        </span>
+                      ) : null}
                     </td>
                     <td>
                       <span className="fl-texto-truncado" title={formatNombrePersona(p.profesional)}>

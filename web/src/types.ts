@@ -106,6 +106,8 @@ export type PresupuestosConfig = {
   profesionales: ProfesionalPresupuesto[];
   modalidades: ModalidadPresupuesto[];
   motivosRechazo: MotivoRechazoPresupuesto[];
+  /** % que se suma al valor en efectivo para pacientes externos (ej. 50 → 150 si base es 100). */
+  recargoExternoPorcentaje: number;
 };
 
 export type MotivoRechazoPresupuesto = {
@@ -191,6 +193,8 @@ export type Presupuesto = {
   modalidadTitulo: string;
   modalidadTextoPdf: string;
   email: string;
+  /** Paciente externo: valor único con recargo, sin 3 cuotas. */
+  pacienteExterno: boolean;
   items: PresupuestoItem[];
   totalEfectivo: number;
   total3Cuotas: number;
@@ -211,6 +215,7 @@ export type PresupuestoFormData = {
   profesional: string;
   modalidadId: string;
   email: string;
+  pacienteExterno: boolean;
   prestacionIds: string[];
 };
 

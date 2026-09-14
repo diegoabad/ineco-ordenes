@@ -44,7 +44,9 @@ export function PresupuestoEmailPreviewModal({
         const { data: config } = await fetchPresupuestoEmailConfig();
         if (cancelled) return;
         const vars = buildPresupuestoEmailVarsFromPresupuesto(current);
-        const rendered = renderPresupuestoEmailPreview(config, vars);
+        const rendered = renderPresupuestoEmailPreview(config, vars, {
+          pacienteExterno: current.pacienteExterno === true,
+        });
         setSubject(rendered.subject);
         setBody(rendered.body);
         setEditorKey((k) => k + 1);

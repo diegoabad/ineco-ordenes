@@ -117,15 +117,21 @@ export function buildPresupuestoEmailVarsFromPresupuesto(
 }
 
 export function renderPresupuestoEmailPreview(
-  config: Pick<PresupuestoEmailConfig, "subject" | "body">,
+  config: Pick<
+    PresupuestoEmailConfig,
+    "subject" | "body" | "externoSubject" | "externoBody"
+  >,
   vars: Record<PresupuestoEmailTemplateVar, string>,
+  options?: { pacienteExterno?: boolean },
 ): { subject: string; body: string } {
   const nombre = vars.nombrePaciente || "paciente";
+  const subjectTemplate = options?.pacienteExterno ? config.externoSubject : config.subject;
+  const bodyTemplate = options?.pacienteExterno ? config.externoBody : config.body;
   return {
     subject:
-      applyPresupuestoEmailTemplate(config.subject, vars, { plainSubject: true }).trim() ||
+      applyPresupuestoEmailTemplate(subjectTemplate, vars, { plainSubject: true }).trim() ||
       `Presupuesto - ${nombre}`,
-    body: applyPresupuestoEmailTemplate(config.body, vars),
+    body: applyPresupuestoEmailTemplate(bodyTemplate, vars),
   };
 }
 

@@ -12,6 +12,7 @@ import {
 } from "../services/dataService";
 import type {
   PresupuestoPlantillaConfig,
+  PresupuestoPlantillaKind,
   PresupuestoPlantillaVar,
 } from "../types/presupuestoPlantilla";
 import {
@@ -23,36 +24,32 @@ import { IconAlert, IconCheck } from "./Icons";
 
 const TOKEN_RE = TEMPLATE_VAR_TOKEN_RE;
 
-const VAR_GROUPS: { title: string; keys: readonly PresupuestoPlantillaVar[] }[] = [
-  {
-    title: "Paciente",
-    keys: ["nombrePaciente", "email"],
-  },
-  {
-    title: "Profesional",
-    keys: ["nombreProfesional"],
-  },
-  {
-    title: "Modalidad",
-    keys: ["modalidadTitulo", "lugarEvaluacion"],
-  },
-  {
-    title: "Presupuesto",
-    keys: ["fechaPresupuesto", "totalEfectivo", "total3Cuotas"],
-  },
-  {
-    title: "Prestaciones",
-    keys: ["cantidadPrestaciones", "listaPrestaciones"],
-  },
+const VAR_GROUPS_NORMAL: { title: string; keys: readonly PresupuestoPlantillaVar[] }[] = [
+  { title: "Paciente", keys: ["nombrePaciente", "email"] },
+  { title: "Profesional", keys: ["nombreProfesional"] },
+  { title: "Modalidad", keys: ["modalidadTitulo", "lugarEvaluacion"] },
+  { title: "Presupuesto", keys: ["fechaPresupuesto", "totalEfectivo", "total3Cuotas"] },
+  { title: "Prestaciones", keys: ["cantidadPrestaciones", "listaPrestaciones"] },
+];
+
+const VAR_GROUPS_EXTERNO: { title: string; keys: readonly PresupuestoPlantillaVar[] }[] = [
+  { title: "Paciente", keys: ["nombrePaciente", "email"] },
+  { title: "Profesional", keys: ["nombreProfesional"] },
+  { title: "Modalidad", keys: ["modalidadTitulo", "lugarEvaluacion"] },
+  { title: "Presupuesto", keys: ["fechaPresupuesto", "totalEfectivo"] },
+  { title: "Prestaciones", keys: ["cantidadPrestaciones", "listaPrestaciones"] },
 ];
 
 function sameConfig(a: PresupuestoPlantillaConfig, b: PresupuestoPlantillaConfig): boolean {
-  return richHtmlEquivalent(a.body, b.body);
+  return (
+    richHtmlEquivalent(a.body, b.body) && richHtmlEquivalent(a.bodyExterno, b.bodyExterno)
+  );
 }
 
 function normalizeConfig(config: PresupuestoPlantillaConfig): PresupuestoPlantillaConfig {
   return {
     body: canonicalRichHtml(config.body),
+    bodyExterno: canonicalRichHtml(config.bodyExterno),
   };
 }
 
@@ -69,13 +66,16 @@ function collectUsedVars(body: string): Set<string> {
 export function PresupuestoPlantillaPanel() {
   const [form, setForm] = useState<PresupuestoPlantillaConfig>(EMPTY_PRESUPUESTO_PLANTILLA_CONFIG);
   const [saved, setSaved] = useState<PresupuestoPlantillaConfig>(EMPTY_PRESUPUESTO_PLANTILLA_CONFIG);
+  const [kind, setKind] = useState<PresupuestoPlantillaKind>("normal");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editorResetKey, setEditorResetKey] = useState(0);
 
   const bodyAreaRef = useRef<HTMLDivElement | null>(null);
   const dirty = !sameConfig(form, saved);
-  const usedVars = collectUsedVars(form.body);
+  const activeBody = kind === "externo" ? form.bodyExterno : form.body;
+  const usedVars = collectUsedVars(activeBody);
+  const varGroups = kind === "externo" ? VAR_GROUPS_EXTERNO : VAR_GROUPS_NORMAL;
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +107,9 @@ export function PresupuestoPlantillaPanel() {
     el.focus();
     document.execCommand("insertText", false, token);
     const html = normalizeRichHtml(stripTemplateVarDecorations(el.innerHTML));
-    setForm((prev) => ({ ...prev, body: html }));
+    setForm((prev) =>
+      kind === "externo" ? { ...prev, bodyExterno: html } : { ...prev, body: html },
+    );
     refreshTemplateVarDecorations(el, html, true);
   }
 
@@ -125,7 +127,10 @@ export function PresupuestoPlantillaPanel() {
     if (!dirty) return;
     setSaving(true);
     try {
-      const payload = normalizeConfig({ body: normalizeRichHtml(form.body) });
+      const payload = normalizeConfig({
+        body: normalizeRichHtml(form.body),
+        bodyExterno: normalizeRichHtml(form.bodyExterno),
+      });
       const next = normalizeConfig(await savePresupuestoPlantillaConfig(payload));
       setForm(next);
       setSaved(next);
@@ -154,19 +159,36 @@ export function PresupuestoPlantillaPanel() {
           <div className="config-panel__layout">
             <div className="config-panel__main">
               <section className="config-section config-section--grow">
-                <header className="config-section__head">
+                <header className="config-section__head config-section__head--with-select">
                   <h3 className="config-section__title">Plantilla del presupuesto</h3>
+                  <label className="config-section__kind">
+                    <select
+                      value={kind}
+                      onChange={(e) => {
+                        setKind(e.target.value as PresupuestoPlantillaKind);
+                        setEditorResetKey((key) => key + 1);
+                      }}
+                      aria-label="Tipo de plantilla"
+                    >
+                      <option value="normal">Paciente normal</option>
+                      <option value="externo">Paciente externo</option>
+                    </select>
+                  </label>
                 </header>
                 <div className="form-group form-group--last">
                   <label htmlFor="presup-plantilla-body">Cuerpo</label>
                   <BasicRichTextEditor
                     id="presup-plantilla-body"
                     className="config-panel__body-editor"
-                    resetKey={`plantilla-${editorResetKey}`}
-                    value={form.body}
+                    resetKey={`plantilla-${kind}-${editorResetKey}`}
+                    value={activeBody}
                     highlightTemplateVars
                     onChange={(html) =>
-                      setForm((prev) => ({ ...prev, body: canonicalRichHtml(html) }))
+                      setForm((prev) =>
+                        kind === "externo"
+                          ? { ...prev, bodyExterno: canonicalRichHtml(html) }
+                          : { ...prev, body: canonicalRichHtml(html) },
+                      )
                     }
                     placeholder="Contenido de la plantilla. Enter = nueva línea. Pegar solo texto."
                     onAreaMount={(el) => {
@@ -182,7 +204,7 @@ export function PresupuestoPlantillaPanel() {
                 <h3 className="config-section__title">Variables</h3>
               </header>
               <div className="config-vars-groups">
-                {VAR_GROUPS.map((group) => (
+                {varGroups.map((group) => (
                   <div key={group.title} className="config-vars-group">
                     <p className="config-vars-group__title">{group.title}</p>
                     <div className="config-vars__list">

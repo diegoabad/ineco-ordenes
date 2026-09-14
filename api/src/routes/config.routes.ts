@@ -36,6 +36,8 @@ function parsePresupuestoEmailConfig(body: unknown): PresupuestoEmailConfig {
     fromName: String(raw.fromName ?? "").trim(),
     subject: String(raw.subject ?? "").trim(),
     body: String(raw.body ?? "").trim(),
+    externoSubject: String(raw.externoSubject ?? "").trim(),
+    externoBody: String(raw.externoBody ?? "").trim(),
     linkPagoSubject: String(raw.linkPagoSubject ?? "").trim(),
     linkPagoBody: String(raw.linkPagoBody ?? "").trim(),
   };

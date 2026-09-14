@@ -127,6 +127,7 @@ export function ProfesionalPresupuestoField({
         profesionales: nextProfesionales,
         modalidades: config.modalidades,
         motivosRechazo: config.motivosRechazo ?? [],
+        recargoExternoPorcentaje: config.recargoExternoPorcentaje ?? 0,
       });
       onProfesionalesChange?.(saved.profesionales);
       seleccionar(label);

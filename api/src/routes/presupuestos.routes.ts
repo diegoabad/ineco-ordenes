@@ -103,12 +103,18 @@ function parseMotivosRechazoPresupuesto(raw: unknown): MotivoRechazoPresupuesto[
 
 function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
   const raw = body as Record<string, unknown>;
+  const recargoExternoPorcentaje = (() => {
+    const n = Number(raw.recargoExternoPorcentaje);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return Math.min(1000, Math.round(n * 100) / 100);
+  })();
   if (!Array.isArray(raw.tiposPrestacion)) {
     return {
       tiposPrestacion: DEFAULT_TIPOS_PRESTACION.map((t) => ({ ...t })),
       profesionales: parseProfesionalesPresupuesto(raw.profesionales),
       modalidades: parseModalidadesPresupuesto(raw.modalidades),
       motivosRechazo: parseMotivosRechazoPresupuesto(raw.motivosRechazo),
+      recargoExternoPorcentaje,
     };
   }
 
@@ -155,6 +161,7 @@ function parsePresupuestosConfig(body: unknown): PresupuestosConfig {
     profesionales: parseProfesionalesPresupuesto(raw.profesionales),
     modalidades: parseModalidadesPresupuesto(raw.modalidades),
     motivosRechazo: parseMotivosRechazoPresupuesto(raw.motivosRechazo),
+    recargoExternoPorcentaje,
   };
 }
 
@@ -162,6 +169,7 @@ function parsePresupuestoPlantillaConfig(body: unknown): PresupuestoPlantillaCon
   const raw = body as Record<string, unknown>;
   return {
     body: String(raw.body ?? "").trim(),
+    bodyExterno: String(raw.bodyExterno ?? "").trim(),
   };
 }
 
@@ -175,6 +183,7 @@ function parseCreatePresupuesto(body: unknown): PresupuestoCreateInput {
     profesional: normalizeNombrePersona(String(raw.profesional ?? "")),
     modalidadId: String(raw.modalidadId ?? "").trim(),
     email: String(raw.email ?? "").trim(),
+    pacienteExterno: raw.pacienteExterno === true,
     prestacionIds,
     pdfBase64: String(raw.pdfBase64 ?? "").trim() || undefined,
     enviar: raw.enviar === true,

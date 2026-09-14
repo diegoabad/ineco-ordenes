@@ -17,6 +17,10 @@ import {
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
 import { normalizeNombrePersona } from "../lib/nombrePersona.js";
+import {
+  calcPresupuestoTotales,
+  normalizeRecargoExternoPorcentaje,
+} from "../lib/presupuestoTotales.js";
 import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, MotivoRechazoPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
 import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
@@ -152,6 +156,7 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     modalidadTitulo: String(raw.modalidadTitulo ?? "").trim(),
     modalidadTextoPdf: String(raw.modalidadTextoPdf ?? "").trim(),
     email: String(raw.email ?? "").trim(),
+    pacienteExterno: raw.pacienteExterno === true,
     items,
     totalEfectivo: toMoney(raw.totalEfectivo ?? raw.total),
     total3Cuotas: toMoney(raw.total3Cuotas),
@@ -175,6 +180,7 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     modalidadTitulo: p.modalidadTitulo,
     modalidadTextoPdf: p.modalidadTextoPdf,
     email: p.email,
+    pacienteExterno: p.pacienteExterno === true,
     items: p.items,
     totalEfectivo: p.totalEfectivo,
     total3Cuotas: p.total3Cuotas,
@@ -696,6 +702,8 @@ export async function getPresupuestoEmailConfig(): Promise<PresupuestoEmailConfi
     fromName: typeof data.fromName === "string" ? data.fromName : undefined,
     subject: typeof data.subject === "string" ? data.subject : undefined,
     body: typeof data.body === "string" ? data.body : undefined,
+    externoSubject: typeof data.externoSubject === "string" ? data.externoSubject : undefined,
+    externoBody: typeof data.externoBody === "string" ? data.externoBody : undefined,
     linkPagoSubject:
       typeof data.linkPagoSubject === "string" ? data.linkPagoSubject : undefined,
     linkPagoBody: typeof data.linkPagoBody === "string" ? data.linkPagoBody : undefined,
@@ -709,6 +717,8 @@ export async function savePresupuestoEmailConfig(
   const fromName = input.fromName.trim();
   const subject = input.subject.trim();
   const body = input.body.trim();
+  const externoSubject = input.externoSubject.trim();
+  const externoBody = input.externoBody.trim();
   const linkPagoSubject = input.linkPagoSubject.trim();
   const linkPagoBody = input.linkPagoBody.trim();
 
@@ -716,6 +726,8 @@ export async function savePresupuestoEmailConfig(
   if (!fromName) throw new Error("El nombre remitente es obligatorio");
   if (!subject) throw new Error("El asunto del presupuesto es obligatorio");
   if (!body) throw new Error("El cuerpo del presupuesto es obligatorio");
+  if (!externoSubject) throw new Error("El asunto del presupuesto externo es obligatorio");
+  if (!externoBody) throw new Error("El cuerpo del presupuesto externo es obligatorio");
   if (!linkPagoSubject) throw new Error("El asunto del link de pago es obligatorio");
   if (!linkPagoBody) throw new Error("El cuerpo del link de pago es obligatorio");
 
@@ -724,6 +736,8 @@ export async function savePresupuestoEmailConfig(
     fromName,
     subject,
     body,
+    externoSubject,
+    externoBody,
     linkPagoSubject,
     linkPagoBody,
   };
@@ -745,6 +759,7 @@ export async function getPresupuestoPlantillaConfig(): Promise<PresupuestoPlanti
   const data = snap.data() as Record<string, unknown>;
   return presupuestoPlantillaConfigWithDefaults({
     body: typeof data.body === "string" ? data.body : undefined,
+    bodyExterno: typeof data.bodyExterno === "string" ? data.bodyExterno : undefined,
   });
 }
 
@@ -752,7 +767,8 @@ export async function savePresupuestoPlantillaConfig(
   input: PresupuestoPlantillaConfig,
 ): Promise<PresupuestoPlantillaConfig> {
   const body = input.body.trim();
-  const config: PresupuestoPlantillaConfig = { body };
+  const bodyExterno = input.bodyExterno.trim();
+  const config: PresupuestoPlantillaConfig = { body, bodyExterno };
   await setDoc(
     doc(firestore, PRESUPUESTOS_CONFIG_COLLECTION, PRESUPUESTO_PLANTILLA_CONFIG_DOC),
     config,
@@ -769,6 +785,7 @@ export async function getPresupuestosConfig(): Promise<PresupuestosConfig> {
       profesionales: [],
       modalidades: DEFAULT_MODALIDADES_PRESUPUESTO.map((m) => ({ ...m })),
       motivosRechazo: [],
+      recargoExternoPorcentaje: 0,
     };
   }
   const data = snap.data() as Record<string, unknown>;
@@ -777,6 +794,7 @@ export async function getPresupuestosConfig(): Promise<PresupuestosConfig> {
     profesionales: normalizeProfesionalesPresupuesto(data.profesionales),
     modalidades: normalizeModalidadesPresupuesto(data.modalidades),
     motivosRechazo: normalizeMotivosRechazoPresupuesto(data.motivosRechazo),
+    recargoExternoPorcentaje: normalizeRecargoExternoPorcentaje(data.recargoExternoPorcentaje),
   };
 }
 
@@ -796,6 +814,7 @@ export async function savePresupuestosConfig(input: PresupuestosConfig): Promise
     profesionales,
     modalidades,
     motivosRechazo,
+    recargoExternoPorcentaje: normalizeRecargoExternoPorcentaje(input.recargoExternoPorcentaje),
   };
   await setDoc(doc(firestore, CONFIG, PRESUPUESTOS_CONFIG_DOC), config, { merge: true });
   return config;
@@ -1048,6 +1067,12 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
 
   const items = await loadPresupuestoItemsFromIds(input.prestacionIds);
   const modalidad = await resolveModalidadPresupuesto(input.modalidadId);
+  const pacienteExterno = input.pacienteExterno === true;
+  const presupuestosConfig = await getPresupuestosConfig();
+  const totales = calcPresupuestoTotales(items, {
+    pacienteExterno,
+    recargoExternoPorcentaje: presupuestosConfig.recargoExternoPorcentaje,
+  });
 
   const id = randomUUID();
   let pdfUrl: string | null = null;
@@ -1063,9 +1088,10 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     profesional: normalizeNombrePersona(input.profesional),
     ...modalidad,
     email: input.email.trim(),
+    pacienteExterno,
     items,
-    totalEfectivo: items.reduce((s, i) => s + i.precioEfectivo, 0),
-    total3Cuotas: items.reduce((s, i) => s + i.precio3Cuotas, 0),
+    totalEfectivo: totales.totalEfectivo,
+    total3Cuotas: totales.total3Cuotas,
     estado: "pendiente",
     pdfUrl,
     motivoRechazo: null,
@@ -1092,6 +1118,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
         total3Cuotas: presupuesto.total3Cuotas,
         cantidadPrestaciones: presupuesto.items.length,
         items: presupuesto.items,
+        pacienteExterno: presupuesto.pacienteExterno,
       });
       presupuesto.estado = "enviado";
       presupuesto.ultimoEnvioAt = nowIso();
@@ -1125,6 +1152,12 @@ export async function updatePresupuesto(
 
   const items = await loadPresupuestoItemsFromIds(input.prestacionIds);
   const modalidad = await resolveModalidadPresupuesto(input.modalidadId);
+  const pacienteExterno = input.pacienteExterno === true;
+  const presupuestosConfig = await getPresupuestosConfig();
+  const totales = calcPresupuestoTotales(items, {
+    pacienteExterno,
+    recargoExternoPorcentaje: presupuestosConfig.recargoExternoPorcentaje,
+  });
 
   let pdfUrl = current.pdfUrl;
   if (input.pdfBase64?.trim()) {
@@ -1138,9 +1171,10 @@ export async function updatePresupuesto(
     profesional: normalizeNombrePersona(input.profesional),
     ...modalidad,
     email: input.email.trim(),
+    pacienteExterno,
     items,
-    totalEfectivo: items.reduce((s, i) => s + i.precioEfectivo, 0),
-    total3Cuotas: items.reduce((s, i) => s + i.precio3Cuotas, 0),
+    totalEfectivo: totales.totalEfectivo,
+    total3Cuotas: totales.total3Cuotas,
     estado: "pendiente",
     pdfUrl,
     motivoRechazo: null,
@@ -1162,6 +1196,7 @@ export async function updatePresupuesto(
         total3Cuotas: presupuesto.total3Cuotas,
         cantidadPrestaciones: presupuesto.items.length,
         items: presupuesto.items,
+        pacienteExterno: presupuesto.pacienteExterno,
       });
       presupuesto.estado = "enviado";
       presupuesto.ultimoEnvioAt = nowIso();
@@ -1213,6 +1248,7 @@ export async function enviarPresupuesto(
       total3Cuotas: current.total3Cuotas,
       cantidadPrestaciones: current.items.length,
       items: current.items,
+      pacienteExterno: current.pacienteExterno,
       subject: overrides?.subject,
       body: overrides?.body,
     });
@@ -1265,6 +1301,9 @@ export async function ensurePresupuestoLinkPago(id: string): Promise<Presupuesto
   if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
 
   const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
+  if (current.pacienteExterno) {
+    throw new Error("Los presupuestos de pacientes externos no usan link de pago en 3 cuotas");
+  }
   if (current.mpPreferenceId && current.mpInitPoint) {
     return current;
   }
