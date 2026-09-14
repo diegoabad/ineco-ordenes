@@ -278,6 +278,13 @@ export default function App() {
       setPacientes(db.pacientes);
       setMedicos(db.medicos);
       setMedicoSeleccionadoId(db.medicoSeleccionadoId);
+      // Evitar firmas “vacías” por cache de 404 después de reiniciar el contenedor.
+      const now = Date.now();
+      const bust: Record<string, number> = {};
+      for (const m of db.medicos) {
+        if (m.firmaUrl) bust[m.id] = now;
+      }
+      setFirmaCacheBust(bust);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "No se pudieron cargar los datos");
     } finally {

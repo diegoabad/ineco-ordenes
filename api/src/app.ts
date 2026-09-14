@@ -1,9 +1,9 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import path from "node:path";
 import {
   uploadsEnviosDir,
-  uploadsFirmasDir,
   uploadsPamiDir,
   uploadsPedidosDir,
   uploadsPresupuestosDir,
@@ -21,7 +21,8 @@ import pedidosSistemaRoutes from "./routes/pedidos-sistema.routes.js";
 import prestacionesRoutes from "./routes/prestaciones.routes.js";
 import presupuestosRoutes from "./routes/presupuestos.routes.js";
 import usuariosRoutes from "./routes/usuarios.routes.js";
-import { ensureUploadsDir } from "./services/image.service.js";
+import { ensureUploadsDir, firmaCandidateIds, resolveFirmaPath } from "./services/image.service.js";
+import { listMedicos } from "./services/db.service.js";
 import { ensurePamiUploadsDir } from "./services/pami-files.service.js";
 import { ensurePedidosUploadsDir } from "./services/pedidos-files.service.js";
 
@@ -39,7 +40,43 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "ordenes-ineco-api" });
 });
 
-app.use("/uploads/firmas", express.static(uploadsFirmasDir()));
+/** Firmas: resuelve rutas legacy y sirve el archivo canónico. */
+app.get("/uploads/firmas/:filename", async (req, res, next) => {
+  try {
+    const filename = String(req.params.filename ?? "");
+    const id = filename.replace(/\.(webp|png|jpe?g)$/i, "").trim();
+    if (!id || id.includes("..") || id.includes("/") || id.includes("\\")) {
+      res.status(400).end();
+      return;
+    }
+
+    let resolved = await resolveFirmaPath(id);
+    if (!resolved) {
+      // URL vieja (otro id en el path) pero el archivo ya está bajo el id actual del médico.
+      try {
+        const medicos = await listMedicos();
+        const owner = medicos.find((m) => firmaCandidateIds(m.id, m.firmaUrl).includes(id));
+        if (owner) {
+          resolved = await resolveFirmaPath(owner.id, owner.firmaUrl);
+        }
+      } catch {
+        /* ignore lookup errors; devolvemos 404 abajo */
+      }
+    }
+
+    if (!resolved) {
+      res.status(404).end();
+      return;
+    }
+    res.setHeader("Cache-Control", "public, max-age=300, must-revalidate");
+    res.sendFile(path.resolve(resolved.path), (err) => {
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use("/uploads/envios", express.static(uploadsEnviosDir()));
 app.use(
   "/uploads/presupuestos",

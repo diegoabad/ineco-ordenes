@@ -62,3 +62,15 @@ export function legacyPresupuestoPdfDirs(): string[] {
     path.join(path.dirname(root), "presupuestos"),
   ];
 }
+
+/** Rutas históricas donde a veces quedaron firmas (fuera de uploads/firmas). */
+export function legacyFirmaDirs(): string[] {
+  const root = uploadsRootDir();
+  return [
+    root, // a veces quedaron .webp sueltos en ./uploads/
+    path.join(API_ROOT, "uploads", "firmas"),
+    path.join(API_ROOT, "firmas"),
+    path.join(path.dirname(API_ROOT), "uploads", "firmas"),
+    path.join(path.dirname(root), "firmas"),
+  ];
+}
