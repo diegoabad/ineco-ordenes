@@ -1297,7 +1297,6 @@ export async function ensurePresupuestoLinkPago(id: string): Promise<Presupuesto
       metadata: {
         ineco_presupuesto_id: id,
       },
-      auto_return: "approved",
     });
   } catch (error) {
     if (error instanceof MercadoPagoError) {
@@ -1326,20 +1325,39 @@ export type AceptarPresupuestoInput = {
   body?: string;
 };
 
-/** Marca aceptado y, si corresponde, genera link MP y envía el mail de pago. */
+export type AceptarPresupuestoResult = {
+  presupuesto: Presupuesto;
+  /** Si se pidió mail y falló el envío (el presupuesto igual queda aceptado). */
+  emailError?: string;
+};
+
+/** Marca aceptado siempre; el mail de pago es opcional y no revierte el estado si falla. */
 export async function aceptarPresupuesto(
   id: string,
   input: AceptarPresupuestoInput,
-): Promise<Presupuesto> {
+): Promise<AceptarPresupuestoResult> {
   const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
   if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
 
   let current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
   if (current.estado === "aceptado" && !input.enviarEmail) {
-    return current;
+    return { presupuesto: current };
   }
 
-  if (input.enviarEmail) {
+  if (current.estado !== "aceptado") {
+    current = {
+      ...current,
+      estado: "aceptado",
+      motivoRechazo: null,
+    };
+    await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(current));
+  }
+
+  if (!input.enviarEmail) {
+    return { presupuesto: current };
+  }
+
+  try {
     if (!current.email.trim()) {
       throw new Error("El presupuesto no tiene email cargado");
     }
@@ -1363,16 +1381,13 @@ export async function aceptarPresupuesto(
       motivoRechazo: null,
       linkPagoEnviadoAt: nowIso(),
     };
-  } else {
-    current = {
-      ...current,
-      estado: "aceptado",
-      motivoRechazo: null,
-    };
+    await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(current));
+    return { presupuesto: current };
+  } catch (error) {
+    const emailError =
+      error instanceof Error ? error.message : "No se pudo enviar el mail con el link de pago";
+    return { presupuesto: current, emailError };
   }
-
-  await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(current));
-  return current;
 }
 
 export async function deletePresupuesto(id: string): Promise<void> {

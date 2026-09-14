@@ -1,6 +1,6 @@
 /** HTML permitido en cuerpos de mail: negrita, cursiva, subrayado, listas, alineación, tamaño y saltos de línea. */
 
-const ALLOWED_TAGS = new Set(["b", "strong", "i", "em", "u", "br", "p", "div", "ul", "ol", "li", "span"]);
+const ALLOWED_TAGS = new Set(["b", "strong", "i", "em", "u", "br", "p", "div", "ul", "ol", "li", "span", "a"]);
 
 const RICH_ALIGN_CLASSES = {
   left: "rich-align-left",
@@ -33,7 +33,7 @@ function escapeHtml(text: string): string {
 }
 
 export function looksLikeRichHtml(text: string): boolean {
-  return /<(?:b|strong|i|em|u|br|p|div|ul|ol|li|span)\b/i.test(text);
+  return /<(?:a|b|strong|i|em|u|br|p|div|ul|ol|li|span)\b/i.test(text);
 }
 
 export function plainTextToHtml(text: string): string {
@@ -110,14 +110,27 @@ export function sanitizeRichHtml(html: string): string {
       openBlockTag(tag.toLowerCase() as "p" | "div", attrs),
     )
     .replace(/<span\b([^>]*)>/gi, (_match, attrs: string) => openSpanTag(attrs))
+    .replace(/<a\b([^>]*)>/gi, (_match, attrs: string) => {
+      const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+      const rawHref = (hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? "").trim();
+      const href = rawHref
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
+      if (!/^https?:\/\//i.test(href)) return "";
+      return `<a href="${escapeHtml(href)}">`;
+    })
     .replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag: string) => {
       const name = tag.toLowerCase();
-      if (name === "p" || name === "div" || name === "span") return match;
+      if (name === "p" || name === "div" || name === "span" || name === "a") return match;
       if (!ALLOWED_TAGS.has(name)) return "";
       if (match.startsWith("</")) return `</${name}>`;
       if (name === "br") return "<br>";
       return `<${name}>`;
     })
+    .replace(/<a(?:\s+href="[^"]*")?>(\s*)<\/a>/gi, "$1")
     .replace(/<span>([\s\S]*?)<\/span>/gi, "$1")
     .replace(/<div><br><\/div>/gi, "<br>")
     .replace(/<p><br><\/p>/gi, "<br>")
@@ -154,6 +167,12 @@ export function stripRichHtml(input: string): string {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
     .replace(/<\/div>/gi, "\n")
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
+      const label = String(text).replace(/<[^>]+>/g, "").trim();
+      const url = String(href).trim();
+      if (label && label !== url) return `${label}: ${url}`;
+      return url;
+    })
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -167,7 +186,14 @@ export function emailBodyToHtml(body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return "";
   if (looksLikeRichHtml(trimmed)) {
-    return richClassesToInlineStyles(sanitizeRichHtml(trimmed));
+    // Plantillas en texto plano + {{linkPago}} como <a> dejan \n sueltos.
+    const withBreaks = trimmed.includes("\n")
+      ? trimmed.replace(/\r\n/g, "\n").replace(/\n/g, "<br>")
+      : trimmed;
+    return richClassesToInlineStyles(sanitizeRichHtml(withBreaks)).replace(
+      /<a href="([^"]+)">/gi,
+      '<a href="$1" style="color:#a61948;font-weight:600;text-decoration:underline">',
+    );
   }
   return plainTextToHtml(trimmed);
 }

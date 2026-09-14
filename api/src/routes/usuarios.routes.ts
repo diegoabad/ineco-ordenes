@@ -12,6 +12,7 @@ import {
   approveUser,
   deleteUser,
   getAuthAccessConfig,
+  listApprovedDirectory,
   listUsersByStatus,
   rejectUser,
   saveAuthAccessConfig,
@@ -23,12 +24,25 @@ import { clearEmailErrorMessage } from "../services/email.service.js";
 
 const router = Router();
 
-router.use(requireAuth, requireRole("admin"));
-
 function paramId(req: { params: { id?: string | string[] } }): string {
   const id = req.params.id;
   return Array.isArray(id) ? id[0]! : id!;
 }
+
+/** Directory liviano: cualquier usuario autenticado (para asignar/compartir en Inicio). */
+router.get("/directory", requireAuth, async (_req, res) => {
+  try {
+    const data = await listApprovedDirectory();
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al listar usuarios",
+    });
+  }
+});
+
+router.use(requireAuth, requireRole("admin"));
 
 function parseApproveBody(body: unknown): ApproveUserInput {
   const raw = body as Record<string, unknown>;

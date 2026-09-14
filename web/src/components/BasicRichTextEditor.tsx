@@ -21,11 +21,14 @@ import {
 import {
   applySizeToTemplateVarChip,
   captureScrollChain,
+  clearTemplateVarChipSelection,
   decorateTemplateVarsInHtml,
   expandDomSelectionToTemplateVars,
   findSelectedTemplateVar,
+  findTemplateVarChipForDelete,
   getSelectionOffsets,
   indexOfTemplateVarChip,
+  removeTemplateVarChip,
   restoreScrollChain,
   runWithEditableTemplateVars,
   selectTemplateVarChip,
@@ -167,6 +170,8 @@ type Props = {
   onAreaMount?: (el: HTMLDivElement | null) => void;
   /** Resalta {{variables}} en el editor; no se guardan en el HTML. */
   highlightTemplateVars?: boolean;
+  /** Doble clic sobre un chip {{variable}}. */
+  onTemplateVarDoubleClick?: (token: string) => void;
 };
 
 export function BasicRichTextEditor({
@@ -179,7 +184,9 @@ export function BasicRichTextEditor({
   onAreaFocus,
   onAreaMount,
   highlightTemplateVars = false,
+  onTemplateVarDoubleClick,
 }: Props) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastEmitted = useRef(value);
   const [formatActive, setFormatActive] = useState<FormatToolbarState>(INACTIVE_FORMAT);
@@ -266,6 +273,28 @@ export function BasicRichTextEditor({
     document.addEventListener("selectionchange", refreshToolbar);
     return () => document.removeEventListener("selectionchange", refreshToolbar);
   }, [refreshToolbar]);
+
+  // Si hay un chip marcado y se hace clic afuera del editor (no la toolbar), limpiar.
+  useEffect(() => {
+    if (!highlightTemplateVars) return;
+    function onPointerDownCapture(e: PointerEvent) {
+      const root = rootRef.current;
+      const editor = editorRef.current;
+      if (!root || !editor) return;
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      // Toolbar y área editable: no deseleccionar (hace falta para negrita / formato).
+      if (root.contains(target)) return;
+      if (!editor.querySelector(`.${TEMPLATE_VAR_CLASS}.${TEMPLATE_VAR_SELECTED_CLASS}`)) return;
+      clearTemplateVarChipSelection(editor);
+      const sel = document.getSelection();
+      if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+        sel.removeAllRanges();
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () => document.removeEventListener("pointerdown", onPointerDownCapture, true);
+  }, [highlightTemplateVars]);
 
   function reselectChipAfterSync(editor: HTMLDivElement, chipIndex: number) {
     requestAnimationFrame(() => {
@@ -361,13 +390,11 @@ export function BasicRichTextEditor({
   }
 
   function handleBlur(_e: FocusEvent<HTMLDivElement>) {
-    syncToState();
     const editor = editorRef.current;
     if (editor && highlightTemplateVars) {
-      for (const chip of editor.querySelectorAll(`.${TEMPLATE_VAR_CLASS}`)) {
-        chip.classList.remove(TEMPLATE_VAR_SELECTED_CLASS);
-      }
+      clearTemplateVarChipSelection(editor);
     }
+    syncToState();
     setFormatActive(INACTIVE_FORMAT);
     setFormatMixed(INACTIVE_FORMAT);
     setListActive(INACTIVE_LIST);
@@ -380,6 +407,22 @@ export function BasicRichTextEditor({
     refreshToolbar();
   }
 
+  function handleEditorKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (!highlightTemplateVars) return;
+    if (e.key !== "Backspace" && e.key !== "Delete") return;
+
+    const el = editorRef.current;
+    if (!el) return;
+
+    const chip = findTemplateVarChipForDelete(el, e.key);
+    if (!chip) return;
+
+    e.preventDefault();
+    removeTemplateVarChip(el, chip);
+    syncToState();
+    requestAnimationFrame(refreshToolbar);
+  }
+
   function handleEditorKeyUp(_e: KeyboardEvent<HTMLDivElement>) {
     refreshToolbar();
   }
@@ -390,10 +433,27 @@ export function BasicRichTextEditor({
     if (!editor) return;
     const target = e.target as HTMLElement | null;
     const chip = target?.closest?.(`.${TEMPLATE_VAR_CLASS}`);
+    if (chip instanceof HTMLElement && editor.contains(chip)) {
+      e.preventDefault();
+      selectTemplateVarChip(editor, chip);
+      refreshToolbar();
+      return;
+    }
+    clearTemplateVarChipSelection(editor);
+  }
+
+  function handleEditorDoubleClick(e: MouseEvent<HTMLDivElement>) {
+    if (!highlightTemplateVars || !onTemplateVarDoubleClick) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    const target = e.target as HTMLElement | null;
+    const chip = target?.closest?.(`.${TEMPLATE_VAR_CLASS}`);
     if (!(chip instanceof HTMLElement) || !editor.contains(chip)) return;
     e.preventDefault();
-    selectTemplateVarChip(editor, chip);
-    refreshToolbar();
+    e.stopPropagation();
+    const token = (chip.textContent ?? "").trim();
+    if (!token) return;
+    onTemplateVarDoubleClick(token);
   }
 
   function handleEditorMouseUp(_e: MouseEvent<HTMLDivElement>) {
@@ -403,7 +463,7 @@ export function BasicRichTextEditor({
   const empty = !value.trim();
 
   return (
-    <div className={`rich-text-editor${className ? ` ${className}` : ""}`}>
+    <div ref={rootRef} className={`rich-text-editor${className ? ` ${className}` : ""}`}>
       <div className="rich-text-editor__toolbar" role="toolbar" aria-label="Formato de texto">
         <button
           type="button"
@@ -532,8 +592,10 @@ export function BasicRichTextEditor({
         onPaste={handlePaste}
         onFocus={handleFocus}
         onBlur={handleBlur}
+        onKeyDown={handleEditorKeyDown}
         onKeyUp={handleEditorKeyUp}
         onMouseDown={handleEditorMouseDown}
+        onDoubleClick={handleEditorDoubleClick}
         onMouseUp={handleEditorMouseUp}
         suppressContentEditableWarning
       />

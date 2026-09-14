@@ -356,6 +356,7 @@ export async function sendLinkPagoEmail(
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaRaw);
     return m ? `${m[3]}/${m[2]}/${m[1]}` : fechaRaw || "—";
   })();
+  const linkUrl = input.linkPago.trim();
   const vars = {
     nombrePaciente,
     email: to,
@@ -366,12 +367,15 @@ export async function sendLinkPagoEmail(
     cantidadPrestaciones:
       input.cantidadPrestaciones !== undefined ? String(input.cantidadPrestaciones) : "—",
     listaPrestaciones: formatListaPrestaciones(input.items ?? []),
-    linkPago: input.linkPago.trim(),
+    linkPago: linkUrl,
+    linkPagoHipervinculo: "",
   };
 
   const subject =
     input.subject?.trim() ||
-    applyPresupuestoEmailTemplate(config.linkPagoSubject, vars).trim() ||
+    applyPresupuestoEmailTemplate(config.linkPagoSubject, vars, {
+      plainSubject: true,
+    }).trim() ||
     `Link de pago - ${nombrePaciente}`;
   const bodyRaw =
     input.body?.trim() || applyPresupuestoEmailTemplate(config.linkPagoBody, vars);

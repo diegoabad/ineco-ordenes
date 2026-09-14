@@ -196,7 +196,6 @@ export function OrdenEmailPreviewModal({
           </div>
 
           <div className="form-group">
-            <label htmlFor="orden-email-preview-body">Cuerpo *</label>
             <BasicRichTextEditor
               id="orden-email-preview-body"
               value={body}

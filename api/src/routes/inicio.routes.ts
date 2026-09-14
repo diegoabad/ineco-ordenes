@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { AuthedRequest } from "../middleware/auth.middleware.js";
 import {
+  aceptarInicioRecordatorio,
   createInicioItem,
   deleteInicioItem,
   listInicioItems,
@@ -13,6 +14,7 @@ import type {
   InicioItemTipo,
   InicioItemUpdateInput,
   InicioNotaColor,
+  InicioRecurrencia,
 } from "../types.js";
 
 const router = Router();
@@ -37,15 +39,43 @@ function isNotaColor(value: unknown): value is InicioNotaColor {
   );
 }
 
+function isRecurrencia(value: unknown): value is InicioRecurrencia {
+  return (
+    value === "none" ||
+    value === "semanal" ||
+    value === "mensual" ||
+    value === "cada_n_dias"
+  );
+}
+
+function parseIntervaloDias(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error("Intervalo de días inválido");
+  return Math.trunc(n);
+}
+
 function requireUserId(req: AuthedRequest): string {
   const id = req.user?.id?.trim();
   if (!id) throw new Error("No autenticado");
   return id;
 }
 
+function parseSharedWithIds(raw: unknown): string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) throw new Error("Lista de usuarios inválida");
+  return raw.map((id) => String(id ?? "").trim()).filter(Boolean);
+}
+
 function parseCreateInput(body: unknown): InicioItemCreateInput {
   const raw = (body ?? {}) as Record<string, unknown>;
   if (!isTipo(raw.tipo)) throw new Error("Tipo inválido");
+  let recurrencia: InicioRecurrencia | undefined;
+  if (raw.recurrencia !== undefined) {
+    if (!isRecurrencia(raw.recurrencia)) throw new Error("Recurrencia inválida");
+    recurrencia = raw.recurrencia;
+  }
+  const sharedWithIds = parseSharedWithIds(raw.sharedWithIds);
   return {
     tipo: raw.tipo,
     titulo: String(raw.titulo ?? "").trim(),
@@ -54,12 +84,17 @@ function parseCreateInput(body: unknown): InicioItemCreateInput {
     ...(isNotaColor(raw.color) ? { color: raw.color } : {}),
     ...(raw.avisoApp !== undefined ? { avisoApp: Boolean(raw.avisoApp) } : {}),
     ...(raw.avisoEmail !== undefined ? { avisoEmail: Boolean(raw.avisoEmail) } : {}),
+    ...(recurrencia !== undefined ? { recurrencia } : {}),
+    ...(raw.intervaloDias !== undefined
+      ? { intervaloDias: parseIntervaloDias(raw.intervaloDias) }
+      : {}),
     ...(raw.origenTareaId !== undefined
       ? {
           origenTareaId:
             raw.origenTareaId == null ? null : String(raw.origenTareaId).trim() || null,
         }
       : {}),
+    ...(sharedWithIds !== undefined ? { sharedWithIds } : {}),
   };
 }
 
@@ -82,7 +117,17 @@ function parseUpdateInput(body: unknown): InicioItemUpdateInput {
     input.emailEnviadoAt =
       raw.emailEnviadoAt == null ? null : String(raw.emailEnviadoAt);
   }
+  if (raw.recurrencia !== undefined) {
+    if (!isRecurrencia(raw.recurrencia)) throw new Error("Recurrencia inválida");
+    input.recurrencia = raw.recurrencia;
+  }
+  if (raw.intervaloDias !== undefined) {
+    input.intervaloDias = parseIntervaloDias(raw.intervaloDias);
+  }
   if (raw.pinned !== undefined) input.pinned = Boolean(raw.pinned);
+  if (raw.sharedWithIds !== undefined) {
+    input.sharedWithIds = parseSharedWithIds(raw.sharedWithIds) ?? [];
+  }
   return input;
 }
 
@@ -105,9 +150,10 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const userId = requireUserId(req as AuthedRequest);
+    const authed = req as AuthedRequest;
+    const userId = requireUserId(authed);
     const input = parseCreateInput(req.body);
-    const data = await createInicioItem(userId, input);
+    const data = await createInicioItem(userId, input, authed.user?.nombre);
     res.status(201).json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al crear";
@@ -120,7 +166,11 @@ router.post("/", async (req, res) => {
             message.includes("adelante") ||
             message.includes("pasado") ||
             message.includes("Elegí") ||
-            message.includes("Escribí")
+            message.includes("Escribí") ||
+            message.includes("Recurrencia") ||
+            message.includes("Intervalo") ||
+            message.includes("cuántos días") ||
+            message.includes("usuarios")
           ? 400
           : 500;
     res.status(status).json({ ok: false, message });
@@ -146,6 +196,27 @@ router.put("/reorder", async (req, res) => {
             message.includes("duplicad")
           ? 400
           : 500;
+    res.status(status).json({ ok: false, message });
+  }
+});
+
+router.post("/:id/aceptar", async (req, res) => {
+  try {
+    const userId = requireUserId(req as AuthedRequest);
+    const result = await aceptarInicioRecordatorio(userId, paramId(req));
+    res.json({ ok: true, deleted: result.deleted, data: result.item });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error al aceptar";
+    const status =
+      message === "No autenticado"
+        ? 401
+        : message === "Ítem no encontrado"
+          ? 404
+          : message.includes("permiso")
+            ? 403
+            : message.includes("No es") || message.includes("no tiene") || message.includes("recurrente")
+              ? 400
+              : 500;
     res.status(status).json({ ok: false, message });
   }
 });
@@ -203,7 +274,14 @@ router.patch("/:id", async (req, res) => {
                 message.includes("inválid") ||
                 message.includes("adelante") ||
                 message.includes("pasado") ||
-                message.includes("Elegí")
+                message.includes("Elegí") ||
+                message.includes("Recurrencia") ||
+                message.includes("Intervalo") ||
+                message.includes("cuántos días") ||
+                message.includes("dueño") ||
+                message.includes("compartir") ||
+                message.includes("asignar") ||
+                message.includes("usuarios")
               ? 400
               : 500;
     res.status(status).json({ ok: false, message });
@@ -222,7 +300,7 @@ router.delete("/:id", async (req, res) => {
         ? 401
         : message === "Ítem no encontrado"
           ? 404
-          : message.includes("permiso")
+          : message.includes("dueño") || message.includes("permiso")
             ? 403
             : 500;
     res.status(status).json({ ok: false, message });

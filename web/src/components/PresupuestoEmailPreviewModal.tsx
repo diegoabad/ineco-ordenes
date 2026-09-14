@@ -160,7 +160,6 @@ export function PresupuestoEmailPreviewModal({
           </div>
 
           <div className="form-group">
-            <label htmlFor="presup-email-preview-body">Cuerpo *</label>
             <BasicRichTextEditor
               id="presup-email-preview-body"
               value={body}

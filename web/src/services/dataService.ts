@@ -22,6 +22,7 @@ import type {
   Presupuesto,
   PresupuestoFormData,
   PresupuestosConfig,
+  UserDirectoryEntry,
 } from "../types";
 import type { PamiAnalisisGuardado, PamiAnalisisResumen } from "../types/pami";
 import type { PamiAnalisisResult } from "../lib/pami";
@@ -354,15 +355,21 @@ export async function prepararPresupuestoLinkPago(id: string): Promise<Presupues
 export async function aceptarPresupuesto(
   id: string,
   input: { enviarEmail: boolean; subject?: string; body?: string },
-): Promise<Presupuesto> {
-  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(
-    `/api/presupuestos/${id}/aceptar`,
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
-  return res.data;
+): Promise<{ presupuesto: Presupuesto; emailError?: string }> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: Presupuesto;
+    emailError?: string;
+  }>(`/api/presupuestos/${id}/aceptar`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return {
+    presupuesto: res.data,
+    ...(typeof res.emailError === "string" && res.emailError.trim()
+      ? { emailError: res.emailError.trim() }
+      : {}),
+  };
 }
 
 export async function fetchPresupuestoPdfBlob(id: string): Promise<Blob> {
@@ -480,6 +487,13 @@ export async function fetchInicioItems(tipo?: InicioItemTipo): Promise<InicioIte
   return res.data;
 }
 
+export async function fetchUserDirectory(): Promise<UserDirectoryEntry[]> {
+  const res = await apiFetch<{ ok: boolean; data: UserDirectoryEntry[] }>(
+    "/api/usuarios/directory",
+  );
+  return res.data;
+}
+
 export async function createInicioItem(data: InicioItemCreateInput): Promise<InicioItem> {
   const res = await apiFetch<{ ok: boolean; data: InicioItem }>("/api/inicio", {
     method: "POST",
@@ -505,6 +519,17 @@ export async function notifyInicioRecordatorioEmail(id: string): Promise<InicioI
     { method: "POST", body: "{}" },
   );
   return res.data;
+}
+
+export async function aceptarInicioRecordatorio(
+  id: string,
+): Promise<{ deleted: boolean; item: InicioItem | null }> {
+  const res = await apiFetch<{
+    ok: boolean;
+    deleted: boolean;
+    data: InicioItem | null;
+  }>(`/api/inicio/${id}/aceptar`, { method: "POST", body: "{}" });
+  return { deleted: Boolean(res.deleted), item: res.data ?? null };
 }
 
 export async function deleteInicioItem(id: string): Promise<void> {

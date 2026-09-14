@@ -27,7 +27,13 @@ export type CreateMpPreferenceInput = {
     installments?: number;
     default_installments?: number;
   };
+  /** Requiere back_urls.success si se usa. */
   auto_return?: "approved" | "all";
+  back_urls?: {
+    success?: string;
+    pending?: string;
+    failure?: string;
+  };
 };
 
 export type MpPreference = {
