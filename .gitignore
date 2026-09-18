@@ -17,6 +17,8 @@ api/uploads/firmas/*
 !api/uploads/firmas/.gitkeep
 api/uploads/envios/*
 !api/uploads/envios/.gitkeep
+api/data/whatsapp-session/
+api/data/whatsapp-media/
 api/.env
 api/firebase-service-account.json
 

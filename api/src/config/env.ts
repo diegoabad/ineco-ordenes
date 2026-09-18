@@ -54,6 +54,11 @@ export const env = {
     password: process.env.MEDEXIS_PASSWORD || "",
     token: process.env.MEDEXIS_TOKEN || "",
   },
+  /** WhatsApp (Baileys) — sesión y media en disco; chats/mensajes en Firestore. */
+  whatsapp: {
+    sessionPath: (process.env.WHATSAPP_SESSION_PATH || "data/whatsapp-session").trim(),
+    mediaPath: (process.env.WHATSAPP_MEDIA_PATH || "data/whatsapp-media").trim(),
+  },
   mercadoPago: {
     accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN?.trim() || "",
     sandbox: process.env.MERCADOPAGO_SANDBOX === "true",

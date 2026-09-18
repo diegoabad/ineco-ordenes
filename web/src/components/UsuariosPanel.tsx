@@ -59,7 +59,7 @@ function formatDate(iso: string | null | undefined): string {
 export function UsuariosPanel() {
   const { user: currentUser } = useAuth();
   const { pendingUsersCount, refreshPendingUsersCount } = usePendingUsers();
-  const [tab, setTab] = useState<Tab>("pending");
+  const [tab, setTab] = useState<Tab>("approved");
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<AccessDraft | null>(null);
@@ -317,6 +317,13 @@ export function UsuariosPanel() {
       <ScrollableAppTabs aria-label="Secciones de usuarios">
         <button
           type="button"
+          className={`app-tabs__btn${tab === "approved" ? " is-active" : ""}`}
+          onClick={() => setTab("approved")}
+        >
+          Activos
+        </button>
+        <button
+          type="button"
           className={`app-tabs__btn${tab === "pending" ? " is-active" : ""}`}
           onClick={() => setTab("pending")}
         >
@@ -326,13 +333,6 @@ export function UsuariosPanel() {
               {pendingUsersCount > 99 ? "99+" : pendingUsersCount}
             </span>
           ) : null}
-        </button>
-        <button
-          type="button"
-          className={`app-tabs__btn${tab === "approved" ? " is-active" : ""}`}
-          onClick={() => setTab("approved")}
-        >
-          Activos
         </button>
         <button
           type="button"
@@ -562,13 +562,14 @@ export function UsuariosPanel() {
               </button>
             </div>
             <div className="fl-modal__body">
-              <p className="confirm-dialog__message">
+              <p className="usuarios-draft-identity">
                 <strong>{formatNombrePersona(draft.nombre)}</strong>{" "}
                 <span className="usuarios-draft-email">({draft.email})</span>
               </p>
               <label className="form-group">
                 <span>Rol</span>
                 <select
+                  className="ui-select"
                   value={draft.role}
                   onChange={(e) => setRole(e.target.value as UserRole)}
                 >

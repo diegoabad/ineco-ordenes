@@ -21,6 +21,7 @@ import pedidosSistemaRoutes from "./routes/pedidos-sistema.routes.js";
 import prestacionesRoutes from "./routes/prestaciones.routes.js";
 import presupuestosRoutes from "./routes/presupuestos.routes.js";
 import usuariosRoutes from "./routes/usuarios.routes.js";
+import whatsappCrmRoutes from "./routes/whatsapp-crm.routes.js";
 import { ensureUploadsDir, firmaCandidateIds, resolveFirmaPath } from "./services/image.service.js";
 import { listMedicos } from "./services/db.service.js";
 import { ensurePamiUploadsDir } from "./services/pami-files.service.js";
@@ -144,6 +145,12 @@ app.use(
   requireAuth,
   requireModule("busca-turno"),
   buscaTurnoRoutes,
+);
+app.use(
+  "/api/whatsapp-crm",
+  requireAuth,
+  requireModule("whatsapp"),
+  whatsappCrmRoutes,
 );
 app.use(
   "/api/pedidos-sistema",

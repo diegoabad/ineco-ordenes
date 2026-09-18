@@ -10,13 +10,25 @@ service cloud.firestore {
     //   email, nombre, role (user|admin), modules[], status (pending|approved|rejected)
     // ordenes_config/auth:
     //   allowedDomains[]
+    // ordenes_config/whatsapp_operators:
+    //   userIds[] y colors{} de usuarios activos que pueden recibir chats derivados
+    // ordenes_config/whatsapp_quick_replies:
+    //   items[] de respuestas rápidas (trigger, body, isActive)
+    // ordenes_config/whatsapp_tags:
+    //   groups[] (name) e items[] de etiquetas (name, color, groupId)
     // ordenes_config/busca_turno:
     //   config compartida del módulo Busca turno
     // ordenes_pedidos_sistema/{id}:
     //   pedidos internos (titulo, detalle, estado, prioridad, fotos)
     // ordenes_inicio_items/{id}:
     //   tareas, notas y recordatorios personales (tipo, titulo, userId, fechaHora, hecha)
-    // Módulos: inicio | ordenes | presupuestos | pami | busca-turno | pedidos-sistema | usuarios
+    // whatsapp_contacts/{id}:
+    //   contactos del CRM (phoneNumber, displayName, whatsappName, isBlocked)
+    // whatsapp_conversations/{id}:
+    //   hilos (contactId, status OPEN|ARCHIVED, unreadCount, lastMessageAt)
+    // whatsapp_messages/{id}:
+    //   mensajes (conversationId, direction, type, text, status, mediaPath)
+    // Módulos: inicio | ordenes | presupuestos | pami | busca-turno | whatsapp | pedidos-sistema | usuarios
 
     match /ordenes_usuarios/{userId} {
       allow read, write: if true;
@@ -59,6 +71,18 @@ service cloud.firestore {
     }
 
     match /ordenes_inicio_items/{docId} {
+      allow read, write: if true;
+    }
+
+    match /whatsapp_contacts/{docId} {
+      allow read, write: if true;
+    }
+
+    match /whatsapp_conversations/{docId} {
+      allow read, write: if true;
+    }
+
+    match /whatsapp_messages/{docId} {
       allow read, write: if true;
     }
   }

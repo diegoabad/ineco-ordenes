@@ -1,4 +1,13 @@
+import { useCallback, useRef, useState } from "react";
 import { WHATSAPP_SECTIONS, type WhatsappSection } from "../lib/appNav";
+import { IconPlus } from "./Icons";
+import {
+  WhatsAppConversationsPanel,
+  type WaConnectionBanner,
+} from "./WhatsAppConversationsPanel";
+import { WhatsAppOperatorsPanel } from "./WhatsAppOperatorsPanel";
+import { WhatsAppQuickRepliesPanel } from "./WhatsAppQuickRepliesPanel";
+import { WhatsAppTagsPanel } from "./WhatsAppTagsPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -7,23 +16,120 @@ type Props = {
 export function WhatsAppModule({ section }: Props) {
   const label =
     WHATSAPP_SECTIONS.find((item) => item.id === section)?.label ?? "WhatsApp";
+  const [connection, setConnection] = useState<WaConnectionBanner>({
+    connected: false,
+    connecting: false,
+    label: "Desconectado",
+  });
+  const onConnectionChange = useCallback((status: WaConnectionBanner) => {
+    setConnection(status);
+  }, []);
+  const connectRef = useRef<(() => void) | null>(null);
+  const createReplyRef = useRef<(() => void) | null>(null);
+  const createTagRef = useRef<(() => void) | null>(null);
+  const createGroupRef = useRef<(() => void) | null>(null);
+  const addOperatorRef = useRef<(() => void) | null>(null);
 
   return (
     <div className="app-shell">
-      <header className="app-header">
+      <header className={`app-header${section === "conversaciones" ? " wa-header" : ""}`}>
         <div className="app-header__brand">
           <div>
-            <h1>WhatsApp</h1>
-            <p>{label}</p>
+            <h1>{label}</h1>
+            {section === "conversaciones" ? (
+              <p>Chats del WhatsApp vinculado</p>
+            ) : section === "operadoras" ? (
+              <p>Usuarios a los que se pueden derivar las conversaciones</p>
+            ) : section === "respuestas-rapidas" ? (
+              <p>Atajos con disparadores tipo /saludo y variables como {"{{nombre}}"}</p>
+            ) : section === "etiquetas" ? (
+              <p>Grupos y etiquetas para clasificar las conversaciones</p>
+            ) : null}
           </div>
         </div>
+        {section === "conversaciones" ? (
+          <div className="wa-header__status">
+            <span
+              className={`wa-inbox__status-dot${connection.connected ? " is-online" : ""}`}
+            />
+            <span className="busca-turno-header-status__label">{connection.label}</span>
+          </div>
+        ) : null}
+        {section === "conversaciones" ? (
+          <div className="app-header__actions wa-header-actions">
+            {!connection.connected ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => connectRef.current?.()}
+                disabled={connection.connecting}
+              >
+                {connection.connecting ? "Conectando…" : "Conectar"}
+              </button>
+            ) : null}
+          </div>
+        ) : section === "operadoras" ? (
+          <div className="app-header__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => addOperatorRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Agregar
+            </button>
+          </div>
+        ) : section === "etiquetas" ? (
+          <div className="app-header__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => createGroupRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Crear grupo
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => createTagRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Nueva etiqueta
+            </button>
+          </div>
+        ) : section === "respuestas-rapidas" ? (
+          <div className="app-header__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => createReplyRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Nueva respuesta
+            </button>
+          </div>
+        ) : null}
       </header>
-      <div className="fl-table-empty fl-table-empty--fill">
-        <p className="fl-table-empty__title">Próximamente</p>
-        <p className="fl-table-empty__hint">
-          Esta sección todavía no está integrada.
-        </p>
-      </div>
+      {section === "conversaciones" ? (
+        <WhatsAppConversationsPanel
+          onConnectionChange={onConnectionChange}
+          connectRef={connectRef}
+        />
+      ) : section === "operadoras" ? (
+        <WhatsAppOperatorsPanel addRef={addOperatorRef} />
+      ) : section === "respuestas-rapidas" ? (
+        <WhatsAppQuickRepliesPanel createRef={createReplyRef} />
+      ) : section === "etiquetas" ? (
+        <WhatsAppTagsPanel createRef={createTagRef} createGroupRef={createGroupRef} />
+      ) : (
+        <div className="fl-table-empty fl-table-empty--fill">
+          <p className="fl-table-empty__title">Próximamente</p>
+          <p className="fl-table-empty__hint">
+            Esta sección todavía no está integrada.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

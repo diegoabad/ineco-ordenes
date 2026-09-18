@@ -1,0 +1,457 @@
+import { Router } from "express";
+import { getUserById } from "../services/users.service.js";
+import {
+  addWhatsappOperator,
+  isWhatsappOperator,
+  listWhatsappOperators,
+  removeWhatsappOperator,
+} from "../whatsapp/operators.js";
+import {
+  createQuickReply,
+  deleteQuickReply,
+  listQuickReplies,
+  updateQuickReply,
+} from "../whatsapp/quick-replies.js";
+import multer from "multer";
+import { createReadStream, existsSync } from "node:fs";
+import {
+  connectWhatsapp,
+  disconnectWhatsapp,
+  getConversation,
+  getMessage,
+  getWhatsappStatus,
+  listConversations,
+  listMessagesByConversation,
+  logoutWhatsapp,
+  markConversationRead,
+  mediaStorage,
+  sendConversationMedia,
+  sendConversationText,
+  setConversationAssignee,
+  setConversationTags,
+} from "../whatsapp/runtime.js";
+import {
+  createWhatsappTag,
+  createWhatsappTagGroup,
+  deleteWhatsappTag,
+  deleteWhatsappTagGroup,
+  listWhatsappTagCatalog,
+  listWhatsappTags,
+  updateWhatsappTag,
+  updateWhatsappTagGroup,
+} from "../whatsapp/tags.js";
+
+const router = Router();
+const uploadMedia = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024 },
+});
+
+function sendError(res: import("express").Response, error: unknown, fallback = "Error WhatsApp"): void {
+  const raw = error instanceof Error ? error.message : fallback;
+  const message = raw.includes("Missing or insufficient permissions")
+    ? "Firestore rechazó WhatsApp: faltan las reglas de whatsapp_contacts, whatsapp_conversations y whatsapp_messages."
+    : raw;
+  const status =
+    message.includes("no está conectado") || message.includes("no encontrada")
+      ? 400
+      : raw.includes("Missing or insufficient permissions")
+        ? 403
+        : 500;
+  res.status(status).json({ ok: false, message });
+}
+
+router.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    configured: true,
+    status: getWhatsappStatus().status,
+  });
+});
+
+router.get("/whatsapp/status", (_req, res) => {
+  res.json({ ok: true, data: getWhatsappStatus() });
+});
+
+router.post("/whatsapp/connect", async (_req, res) => {
+  try {
+    const data = await connectWhatsapp();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo conectar WhatsApp");
+  }
+});
+
+router.post("/whatsapp/disconnect", async (_req, res) => {
+  try {
+    const data = await disconnectWhatsapp();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post("/whatsapp/logout", async (_req, res) => {
+  try {
+    const data = await logoutWhatsapp();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/operators", async (_req, res) => {
+  try {
+    const data = await listWhatsappOperators();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron listar las operadoras");
+  }
+});
+
+router.post("/operators", async (req, res) => {
+  try {
+    const userId = String(req.body?.userId ?? "").trim();
+    if (!userId) {
+      res.status(400).json({ ok: false, message: "Elegí un usuario" });
+      return;
+    }
+    const data = await addWhatsappOperator(userId, String(req.body?.color ?? ""));
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo agregar";
+    const status = message.includes("no está activo") || message.includes("color") ? 400 : 500;
+    res.status(status).json({ ok: false, message });
+  }
+});
+
+router.delete("/operators/:userId", async (req, res) => {
+  try {
+    const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+    const data = await removeWhatsappOperator(String(userId ?? ""));
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo quitar la operadora");
+  }
+});
+
+function quickReplyStatus(message: string): number {
+  if (message.includes("no encontrada")) return 404;
+  if (
+    message.includes("disparador") ||
+    message.includes("vacío") ||
+    message.includes("Ya existe")
+  ) {
+    return 400;
+  }
+  return 500;
+}
+
+router.get("/quick-replies", async (_req, res) => {
+  try {
+    const data = await listQuickReplies();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron listar las respuestas rápidas");
+  }
+});
+
+router.post("/quick-replies", async (req, res) => {
+  try {
+    const data = await createQuickReply({
+      trigger: String(req.body?.trigger ?? ""),
+      title: req.body?.title != null ? String(req.body.title) : null,
+      body: String(req.body?.body ?? ""),
+      isActive: req.body?.isActive !== false,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo crear la respuesta";
+    res.status(quickReplyStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.patch("/quick-replies/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const data = await updateQuickReply(String(id ?? ""), {
+      trigger: req.body?.trigger != null ? String(req.body.trigger) : undefined,
+      title: req.body?.title !== undefined ? (req.body.title == null ? null : String(req.body.title)) : undefined,
+      body: req.body?.body != null ? String(req.body.body) : undefined,
+      isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo guardar la respuesta";
+    res.status(quickReplyStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.delete("/quick-replies/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    await deleteQuickReply(String(id ?? ""));
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo eliminar la respuesta";
+    res.status(quickReplyStatus(message)).json({ ok: false, message });
+  }
+});
+
+function tagStatus(message: string): number {
+  if (message.includes("no encontrad")) return 404;
+  if (
+    message.includes("nombre") ||
+    message.includes("color") ||
+    message.includes("grupo") ||
+    message.includes("Ya existe")
+  ) {
+    return 400;
+  }
+  return 500;
+}
+
+router.get("/tags", async (_req, res) => {
+  try {
+    const data = await listWhatsappTagCatalog();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron listar las etiquetas");
+  }
+});
+
+router.post("/tag-groups", async (req, res) => {
+  try {
+    const data = await createWhatsappTagGroup(String(req.body?.name ?? ""));
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo crear el grupo";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.patch("/tag-groups/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const data = await updateWhatsappTagGroup(String(id ?? ""), String(req.body?.name ?? ""));
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo guardar el grupo";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.delete("/tag-groups/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    await deleteWhatsappTagGroup(String(id ?? ""));
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo eliminar el grupo";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.post("/tags", async (req, res) => {
+  try {
+    const data = await createWhatsappTag({
+      name: String(req.body?.name ?? ""),
+      color: String(req.body?.color ?? ""),
+      groupId: String(req.body?.groupId ?? ""),
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo crear la etiqueta";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.patch("/tags/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const data = await updateWhatsappTag(String(id ?? ""), {
+      name: req.body?.name != null ? String(req.body.name) : undefined,
+      color: req.body?.color != null ? String(req.body.color) : undefined,
+      groupId: req.body?.groupId != null ? String(req.body.groupId) : undefined,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo guardar la etiqueta";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.delete("/tags/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    await deleteWhatsappTag(String(id ?? ""));
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo eliminar la etiqueta";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.get("/conversations", async (req, res) => {
+  try {
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const data = await listConversations({ search, status });
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron listar conversaciones");
+  }
+});
+
+router.get("/conversations/:id", async (req, res) => {
+  try {
+    const data = await getConversation(req.params.id);
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post("/conversations/:id/read", async (req, res) => {
+  try {
+    const data = await markConversationRead(req.params.id);
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.patch("/conversations/:id/assignee", async (req, res) => {
+  try {
+    const kind = req.body?.kind;
+    if (kind !== "bot" && kind !== "user" && kind !== "none") {
+      res.status(400).json({ ok: false, message: "Asignación inválida" });
+      return;
+    }
+    let userId: string | null = null;
+    let name: string | null = null;
+    if (kind === "bot") {
+      name = "Bot";
+    } else if (kind === "user") {
+      userId = String(req.body?.userId ?? "").trim();
+      const user = userId ? await getUserById(userId) : null;
+      if (!user || user.status !== "approved") {
+        res.status(400).json({ ok: false, message: "Usuario no encontrado" });
+        return;
+      }
+      if (!(await isWhatsappOperator(user.id))) {
+        res.status(400).json({
+          ok: false,
+          message: "Esa persona no está entre las operadoras",
+        });
+        return;
+      }
+      name = user.nombre.trim() || user.email;
+    }
+    const data = await setConversationAssignee(req.params.id, { kind, userId, name });
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo asignar la conversación");
+  }
+});
+
+router.patch("/conversations/:id/tags", async (req, res) => {
+  try {
+    const raw = Array.isArray(req.body?.tagIds) ? req.body.tagIds : null;
+    if (!raw) {
+      res.status(400).json({ ok: false, message: "Etiquetas inválidas" });
+      return;
+    }
+    const catalog = await listWhatsappTags();
+    const allowed = new Set(catalog.map((tag) => tag.id));
+    const tagIds = [...new Set(raw.map((id: unknown) => String(id ?? "").trim()).filter(Boolean))];
+    if (tagIds.some((id) => !allowed.has(id))) {
+      res.status(400).json({ ok: false, message: "Hay una etiqueta que no existe" });
+      return;
+    }
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const data = await setConversationTags(String(id ?? ""), tagIds);
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron guardar las etiquetas");
+  }
+});
+
+router.post("/conversations/:id/messages", uploadMedia.single("file"), async (req, res) => {
+  try {
+    if (req.file) {
+      const caption = String(req.body?.message ?? "").trim();
+      const data = await sendConversationMedia(
+        req.params.id,
+        {
+          buffer: req.file.buffer,
+          mimeType: req.file.mimetype || "application/octet-stream",
+          fileName: req.file.originalname || "archivo",
+        },
+        caption || undefined,
+      );
+      res.status(201).json({ ok: true, data });
+      return;
+    }
+
+    const message = String(req.body?.message ?? "").trim();
+    if (!message) {
+      res.status(400).json({ ok: false, message: "El mensaje no puede estar vacío" });
+      return;
+    }
+    const data = await sendConversationText(req.params.id, message);
+    res.status(201).json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo enviar el mensaje");
+  }
+});
+
+router.get("/messages/conversation/:conversationId", async (req, res) => {
+  try {
+    const limit = Number(req.query.limit ?? 100) || 100;
+    const data = await listMessagesByConversation(req.params.conversationId, limit);
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron cargar mensajes");
+  }
+});
+
+router.get("/messages/:id/media", async (req, res) => {
+  try {
+    const message = await getMessage(req.params.id);
+    if (!message?.mediaPath) {
+      res.status(404).json({ ok: false, message: "Media no encontrado" });
+      return;
+    }
+    const absolute = mediaStorage.resolve(message.mediaPath);
+    if (!existsSync(absolute)) {
+      res.status(404).json({ ok: false, message: "Archivo de media no encontrado" });
+      return;
+    }
+    if (message.mimeType) res.setHeader("Content-Type", message.mimeType);
+    if (message.fileName) {
+      res.setHeader("Content-Disposition", `inline; filename="${message.fileName}"`);
+    }
+    createReadStream(absolute).pipe(res);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+export default router;
