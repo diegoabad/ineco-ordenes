@@ -3,15 +3,14 @@ import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
 import { fechaHoyIso, parseYmd, toYmd } from "../lib/fechas";
 import {
-  aceptarInicioRecordatorio,
   createInicioItem,
   deleteInicioItem,
   fetchInicioItems,
-  notifyInicioRecordatorioEmail,
   reorderInicioItems,
   updateInicioItem,
 } from "../services/dataService";
-import type { InicioItem, InicioNotaColor, InicioRecurrencia } from "../types";
+import { notifyInicioItemsChanged, subscribeInicioItemsChanged } from "../lib/inicioEvents";
+import type { InicioItem, InicioNotaColor, InicioRecurrencia, InicioUserRef, UserDirectoryEntry } from "../types";
 import {
   INICIO_NOTA_COLOR_LABEL,
   INICIO_NOTA_COLORES,
@@ -22,9 +21,9 @@ import { DatePicker } from "./DatePicker";
 import { DateTimePicker } from "./DateTimePicker";
 import {
   IconCalendar,
-  IconCheck,
   IconClock,
   IconGrip,
+  IconMoreVertical,
   IconPencil,
   IconPin,
   IconPlus,
@@ -32,7 +31,13 @@ import {
   IconUsers,
   IconX,
 } from "./Icons";
-import { InicioSharePicker, UserAvatarStack } from "./InicioSharePicker";
+import {
+  InicioSharePicker,
+  loadUserDirectoryCached,
+  peekUserDirectoryCache,
+  UserAssigneeField,
+  UserAvatarStack,
+} from "./InicioSharePicker";
 import { Modal } from "./Modal";
 import { TimePicker } from "./TimePicker";
 
@@ -51,6 +56,38 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** IDs para el campo Asignar a: dueño + compartidos (sin vacíos). */
+function assigneeIdsFromItem(item: InicioItem, fallbackUserId = ""): string[] {
+  const ids = [
+    item.userId,
+    ...(item.sharedWith ?? []).map((u) => u.id),
+  ]
+    .map((id) => String(id ?? "").trim())
+    .filter(Boolean);
+  const unique = [...new Set(ids)];
+  if (unique.length > 0) return unique;
+  return fallbackUserId ? [fallbackUserId] : [];
+}
+
+/** En las cards solo se muestran asignados que no son el dueño. */
+function assigneesForDisplay(item: {
+  userId: string;
+  sharedWith?: InicioItem["sharedWith"];
+}): InicioUserRef[] {
+  const ownerId = String(item.userId ?? "").trim();
+  return (item.sharedWith ?? []).filter((u) => u.id && u.id !== ownerId);
+}
+
+/** Quita líneas de contexto WhatsApp del detalle (para preview en cards). */
+function detalleSinContextoWa(detalle: string): string {
+  return detalle
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^WhatsApp:\s*/i.test(line))
+    .join("\n")
+    .trim();
+}
+
 function cleanMonth(s: string): string {
   return capitalize(s.replace(/\.$/, ""));
 }
@@ -62,22 +99,6 @@ function formatItemFecha(iso: string | null): string | null {
   const date = `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
   const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return `${date} ${time}`;
-}
-
-/** Fecha corta dd/mm/aa para el modal de aviso. */
-function formatItemFechaAlert(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return null;
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${yy}`;
-}
-
-function formatItemSoloHora(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return null;
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function pad2(n: number): string {
@@ -124,12 +145,6 @@ function validateRecSchedule(fecha: string, hora: string): string | null {
   return null;
 }
 
-function isRecordatorioDue(item: InicioItem, nowMs = Date.now()): boolean {
-  if (item.tipo !== "recordatorio" || !item.fechaHora) return false;
-  const t = Date.parse(item.fechaHora);
-  return Number.isFinite(t) && t <= nowMs;
-}
-
 function formatRecurrenciaLabel(item: InicioItem): string | null {
   if (item.tipo !== "recordatorio") return null;
   const recurrencia = item.recurrencia || "none";
@@ -141,51 +156,10 @@ function formatRecurrenciaLabel(item: InicioItem): string | null {
   return INICIO_RECURRENCIA_LABEL[recurrencia];
 }
 
-/** Timbre tipo campana al abrir el aviso de recordatorio (Web Audio, sin archivo). */
-function playRecordatorioChime(): void {
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const master = ctx.createGain();
-    master.gain.value = 0.85;
-    master.connect(ctx.destination);
-
-    // Dos golpes de campana (fundamentales + armónicos).
-    const strikes = [
-      { at: 0, freqs: [523.25, 784.0, 1046.5], peak: 0.55 },
-      { at: 0.42, freqs: [659.25, 987.75, 1318.5], peak: 0.48 },
-    ];
-
-    for (const strike of strikes) {
-      strike.freqs.forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = i === 0 ? "triangle" : "sine";
-        osc.frequency.value = freq;
-        const start = ctx.currentTime + strike.at;
-        const peak = strike.peak * (i === 0 ? 1 : i === 1 ? 0.55 : 0.28);
-        const dur = 1.05 - i * 0.12;
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(Math.max(peak, 0.001), start + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-        osc.connect(gain);
-        gain.connect(master);
-        osc.start(start);
-        osc.stop(start + dur + 0.05);
-      });
-    }
-
-    void ctx.resume().finally(() => {
-      window.setTimeout(() => {
-        void ctx.close().catch(() => undefined);
-      }, 1800);
-    });
-  } catch {
-    // Autoplay bloqueado o AudioContext no disponible.
-  }
+function isRecordatorioDue(item: InicioItem, nowMs = Date.now()): boolean {
+  if (item.tipo !== "recordatorio" || !item.fechaHora) return false;
+  const t = Date.parse(item.fechaHora);
+  return Number.isFinite(t) && t <= nowMs;
 }
 
 type DropEdge = "before" | "after";
@@ -233,9 +207,13 @@ export function InicioPanel({ userName }: Props) {
   const [now, setNow] = useState(() => new Date());
   const [items, setItems] = useState<InicioItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tareaDraft, setTareaDraft] = useState("");
+  const [tareaModalOpen, setTareaModalOpen] = useState(false);
   const [editingTareaId, setEditingTareaId] = useState<string | null>(null);
-  const [editTareaTitulo, setEditTareaTitulo] = useState("");
+  const [tareaTitulo, setTareaTitulo] = useState("");
+  const [tareaDetalle, setTareaDetalle] = useState("");
+  const [tareaAssigneeIds, setTareaAssigneeIds] = useState<string[]>([]);
+  const [viewTarea, setViewTarea] = useState<InicioItem | null>(null);
+  const [viewRec, setViewRec] = useState<InicioItem | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [viewNota, setViewNota] = useState<InicioItem | null>(null);
@@ -254,13 +232,13 @@ export function InicioPanel({ userName }: Props) {
   const [recAvisoEmail, setRecAvisoEmail] = useState(true);
   const [recRecurrencia, setRecRecurrencia] = useState<InicioRecurrencia>("none");
   const [recIntervaloDias, setRecIntervaloDias] = useState("7");
-  const [alertRec, setAlertRec] = useState<InicioItem | null>(null);
-  const [posponerOpen, setPosponerOpen] = useState(false);
-  const [posFecha, setPosFecha] = useState(() => defaultRecSchedule().fecha);
-  const [posHora, setPosHora] = useState(() => defaultRecSchedule().hora);
+  const [recAssigneeIds, setRecAssigneeIds] = useState<string[]>([]);
+  const [directory, setDirectory] = useState<UserDirectoryEntry[]>(() =>
+    peekUserDirectoryCache(),
+  );
+  const [directoryLoading, setDirectoryLoading] = useState(false);
   const [shareTarget, setShareTarget] = useState<InicioItem | null>(null);
-  const emailNotifyRef = useRef<Set<string>>(new Set());
-  const alertSoundPlayedRef = useRef<string | null>(null);
+  const [actionsMenuId, setActionsMenuId] = useState<string | null>(null);
   const pendingCreatesRef = useRef(new Map<string, Promise<InicioItem>>());
   const savingRecRef = useRef(false);
   const addingTareaRef = useRef(false);
@@ -287,29 +265,70 @@ export function InicioPanel({ userName }: Props) {
   const dragTareaAllowedRef = useRef(false);
 
   useEffect(() => {
+    if (!actionsMenuId) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(`[data-inicio-actions="${actionsMenuId}"]`)) return;
+      setActionsMenuId(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [actionsMenuId]);
+
+  useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 15_000);
     return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    void fetchInicioItems()
+    function load(showSpinner: boolean) {
+      if (showSpinner) setLoading(true);
+      void fetchInicioItems()
+        .then((data) => {
+          if (!cancelled) setItems(data);
+        })
+        .catch((error) => {
+          if (!cancelled && showSpinner) {
+            toast.error(error instanceof Error ? error.message : "No se pudieron cargar los ítems");
+          }
+        })
+        .finally(() => {
+          if (!cancelled && showSpinner) setLoading(false);
+        });
+    }
+    load(true);
+    const unsubscribe = subscribeInicioItemsChanged(() => load(false));
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tareaModalOpen && !recordatorioOpen) return;
+    let cancelled = false;
+    const cached = peekUserDirectoryCache();
+    if (cached.length > 0) {
+      setDirectory(cached);
+      setDirectoryLoading(false);
+    } else {
+      setDirectoryLoading(true);
+    }
+    void loadUserDirectoryCached()
       .then((data) => {
-        if (!cancelled) setItems(data);
+        if (!cancelled) setDirectory(data);
       })
-      .catch((error) => {
-        if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "No se pudieron cargar los ítems");
-        }
+      .catch(() => {
+        if (!cancelled) toast.error("No se pudo cargar el directorio de usuarios");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setDirectoryLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tareaModalOpen, recordatorioOpen]);
 
   const firstName = userName?.trim().split(/\s+/)[0];
   const saludo = firstName ? `Hola, ${firstName}` : "Hola";
@@ -347,44 +366,6 @@ export function InicioPanel({ userName }: Props) {
       if (a.orden !== b.orden) return a.orden - b.orden;
       return Date.parse(b.creadoAt) - Date.parse(a.creadoAt);
     });
-
-  useEffect(() => {
-    const due = recordatorios.filter((it) => isRecordatorioDue(it, now.getTime()));
-    for (const item of due) {
-      if (!item.avisoEmail || item.emailEnviadoAt) continue;
-      if (emailNotifyRef.current.has(item.id)) continue;
-      emailNotifyRef.current.add(item.id);
-      void notifyInicioRecordatorioEmail(item.id)
-        .then((next) => {
-          setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
-        })
-        .catch(() => {
-          emailNotifyRef.current.delete(item.id);
-        });
-    }
-
-    if (alertRec) {
-      const still = items.find((it) => it.id === alertRec.id);
-      if (!still || still.tipo !== "recordatorio") {
-        setAlertRec(null);
-        setPosponerOpen(false);
-      }
-      return;
-    }
-
-    const nextAlert = due.find((it) => it.avisoApp);
-    if (nextAlert) setAlertRec(nextAlert);
-  }, [now, recordatorios, alertRec, items]);
-
-  useEffect(() => {
-    if (!alertRec) {
-      alertSoundPlayedRef.current = null;
-      return;
-    }
-    if (alertSoundPlayedRef.current === alertRec.id) return;
-    alertSoundPlayedRef.current = alertRec.id;
-    playRecordatorioChime();
-  }, [alertRec?.id]);
 
   async function persistNotasOrder(nextNotas: InicioItem[]) {
     const owned = nextNotas.filter((it) => it.userId === myUserId);
@@ -504,10 +485,88 @@ export function InicioPanel({ userName }: Props) {
     void persistTareasOrder([...nextOwned, ...shared]);
   }
 
-  async function addTarea() {
-    const texto = tareaDraft.trim();
-    if (!texto || addingTareaRef.current) return;
+  function openTareaModal(item?: InicioItem) {
+    setViewTarea(null);
+    if (item?.tipo === "tarea") {
+      setEditingTareaId(item.id);
+      setTareaTitulo(item.titulo);
+      setTareaDetalle(item.detalle ?? "");
+      setTareaAssigneeIds(assigneeIdsFromItem(item, myUserId));
+    } else {
+      setEditingTareaId(null);
+      setTareaTitulo("");
+      setTareaDetalle("");
+      setTareaAssigneeIds(myUserId ? [myUserId] : []);
+    }
+    setTareaModalOpen(true);
+  }
+
+  function openTareaView(item: InicioItem) {
+    setViewTarea(item);
+  }
+
+  function openRecordatorioView(item: InicioItem) {
+    setViewRec(item);
+  }
+
+  function closeTareaModal() {
+    if (addingTareaRef.current) return;
+    setTareaModalOpen(false);
+    setEditingTareaId(null);
+    setTareaTitulo("");
+    setTareaDetalle("");
+    setTareaAssigneeIds([]);
+  }
+
+  async function guardarTarea(e: FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const titulo = tareaTitulo.trim();
+    if (!titulo || addingTareaRef.current) return;
+    if (tareaAssigneeIds.length === 0) {
+      toast.error("Asigná la tarea a alguien");
+      return;
+    }
+    const detalle = tareaDetalle.trim();
+    const editingId = editingTareaId;
+    const sharedWithIds = [...tareaAssigneeIds];
+
     addingTareaRef.current = true;
+    setTareaModalOpen(false);
+    setEditingTareaId(null);
+    setTareaTitulo("");
+    setTareaDetalle("");
+    setTareaAssigneeIds([]);
+
+    if (editingId) {
+      const previous = items.find((it) => it.id === editingId);
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === editingId
+            ? { ...it, titulo, detalle, actualizadoAt: new Date().toISOString() }
+            : it,
+        ),
+      );
+      try {
+        const next = await updateInicioItem(editingId, {
+          titulo,
+          detalle,
+          sharedWithIds,
+        });
+        setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
+      } catch (error) {
+        if (previous) {
+          setItems((prev) =>
+            prev.map((it) => (it.id === previous.id ? previous : it)),
+          );
+        }
+        toast.error(error instanceof Error ? error.message : "No se pudo guardar la tarea");
+      } finally {
+        addingTareaRef.current = false;
+      }
+      return;
+    }
+
     const tempId = `local-${crypto.randomUUID()}`;
     const nowIso = new Date().toISOString();
     const minOrden = tareas.reduce(
@@ -517,8 +576,8 @@ export function InicioPanel({ userName }: Props) {
     const optimistic: InicioItem = {
       id: tempId,
       tipo: "tarea",
-      titulo: texto,
-      detalle: "",
+      titulo,
+      detalle,
       fechaHora: null,
       hecha: false,
       orden: Number.isFinite(minOrden) ? minOrden - 1 : 0,
@@ -532,20 +591,23 @@ export function InicioPanel({ userName }: Props) {
       origenTareaId: null,
       participantIds: myUserId ? [myUserId] : [],
       sharedWith: [],
+      mostrarEnInicio: true,
+      whatsappContactId: null,
+      whatsappContactLabel: null,
       ownerNombre: user?.nombre ?? userName ?? "",
       userId: myUserId,
       creadoAt: nowIso,
       actualizadoAt: nowIso,
     };
-    setTareaDraft("");
     setItems((prev) => [optimistic, ...prev]);
 
     try {
       const item = await createInicioItem({
         tipo: "tarea",
-        titulo: texto,
-        detalle: "",
+        titulo,
+        detalle,
         fechaHora: null,
+        sharedWithIds,
       });
       setItems((prev) => prev.map((it) => (it.id === tempId ? item : it)));
     } catch (error) {
@@ -557,6 +619,7 @@ export function InicioPanel({ userName }: Props) {
   }
 
   function openRecordatorioModal(item?: InicioItem) {
+    setViewRec(null);
     if (item?.tipo === "recordatorio") {
       const schedule = scheduleFromIso(item.fechaHora);
       setEditingRecId(item.id);
@@ -569,6 +632,7 @@ export function InicioPanel({ userName }: Props) {
       setRecAvisoEmail(item.avisoEmail);
       setRecRecurrencia(item.recurrencia || "none");
       setRecIntervaloDias(String(item.intervaloDias && item.intervaloDias > 0 ? item.intervaloDias : 7));
+      setRecAssigneeIds(assigneeIdsFromItem(item, myUserId));
     } else if (item?.tipo === "tarea") {
       const schedule = defaultRecSchedule();
       setEditingRecId(null);
@@ -581,6 +645,7 @@ export function InicioPanel({ userName }: Props) {
       setRecAvisoEmail(true);
       setRecRecurrencia("none");
       setRecIntervaloDias("7");
+      setRecAssigneeIds(assigneeIdsFromItem(item, myUserId));
     } else {
       const schedule = defaultRecSchedule();
       setEditingRecId(null);
@@ -593,6 +658,7 @@ export function InicioPanel({ userName }: Props) {
       setRecAvisoEmail(true);
       setRecRecurrencia("none");
       setRecIntervaloDias("7");
+      setRecAssigneeIds(myUserId ? [myUserId] : []);
     }
     setRecordatorioOpen(true);
   }
@@ -602,6 +668,7 @@ export function InicioPanel({ userName }: Props) {
     setRecordatorioOpen(false);
     setEditingRecId(null);
     setConvertFromTareaId(null);
+    setRecAssigneeIds([]);
   }
 
   const tituloRecBloqueado =
@@ -616,6 +683,10 @@ export function InicioPanel({ userName }: Props) {
     e.stopPropagation();
     const titulo = recTitulo.trim();
     if (!titulo || savingRecRef.current) return;
+    if (recAssigneeIds.length === 0) {
+      toast.error("Asigná el recordatorio a alguien");
+      return;
+    }
     if (!recAvisoApp && !recAvisoEmail) {
       toast.error("Elegí al menos un aviso: aplicación o mail");
       return;
@@ -645,14 +716,16 @@ export function InicioPanel({ userName }: Props) {
     const avisoApp = recAvisoApp;
     const avisoEmail = recAvisoEmail;
     const recurrencia = recRecurrencia;
-    const fromTareaId = convertFromTareaId;
-    const editingId = editingRecId;
-    const tituloLocked = tituloRecBloqueado;
+    const sharedWithIds = [...recAssigneeIds];
     const fechaHora = when.toISOString();
+    const editingId = editingRecId;
+    const fromTareaId = convertFromTareaId;
+    const tituloLocked = tituloRecBloqueado;
 
     setRecordatorioOpen(false);
     setEditingRecId(null);
     setConvertFromTareaId(null);
+    setRecAssigneeIds([]);
 
     if (editingId) {
       const previous = items.find((it) => it.id === editingId);
@@ -673,22 +746,6 @@ export function InicioPanel({ userName }: Props) {
             : it,
         ),
       );
-      if (alertRec?.id === editingId) {
-        setAlertRec((prev) =>
-          prev
-            ? {
-                ...prev,
-                ...(tituloLocked ? {} : { titulo }),
-                detalle,
-                fechaHora,
-                avisoApp,
-                avisoEmail,
-                recurrencia,
-                intervaloDias,
-              }
-            : prev,
-        );
-      }
       try {
         const item = await updateInicioItem(editingId, {
           ...(tituloLocked ? {} : { titulo }),
@@ -698,13 +755,13 @@ export function InicioPanel({ userName }: Props) {
           avisoEmail,
           recurrencia,
           intervaloDias,
+          sharedWithIds,
         });
         setItems((prev) => prev.map((it) => (it.id === item.id ? item : it)));
-        if (alertRec?.id === item.id) setAlertRec(item);
+        notifyInicioItemsChanged();
       } catch (error) {
         if (previous) {
           setItems((prev) => prev.map((it) => (it.id === previous.id ? previous : it)));
-          if (alertRec?.id === previous.id) setAlertRec(previous);
         }
         toast.error(error instanceof Error ? error.message : "No se pudo guardar el recordatorio");
       } finally {
@@ -733,6 +790,9 @@ export function InicioPanel({ userName }: Props) {
       origenTareaId: fromTareaId,
       participantIds: myUserId ? [myUserId] : [],
       sharedWith: [],
+      mostrarEnInicio: true,
+      whatsappContactId: null,
+      whatsappContactLabel: null,
       ownerNombre: user?.nombre ?? userName ?? "",
       userId: myUserId,
       creadoAt: nowIso,
@@ -750,6 +810,7 @@ export function InicioPanel({ userName }: Props) {
         avisoEmail,
         recurrencia,
         intervaloDias,
+        sharedWithIds,
         ...(fromTareaId ? { origenTareaId: fromTareaId } : {}),
       });
       setItems((prev) => {
@@ -758,6 +819,7 @@ export function InicioPanel({ userName }: Props) {
         }
         return prev.map((it) => (it.id === tempId ? item : it));
       });
+    notifyInicioItemsChanged();
     } catch (error) {
       setItems((prev) => prev.filter((it) => it.id !== tempId));
       toast.error(error instanceof Error ? error.message : "No se pudo crear el recordatorio");
@@ -766,107 +828,17 @@ export function InicioPanel({ userName }: Props) {
     }
   }
 
-  async function aceptarRecordatorioAlert() {
-    if (!alertRec) return;
-    const id = alertRec.id;
-    const previous = alertRec;
-    const isRecurrente = (previous.recurrencia || "none") !== "none";
-    setAlertRec(null);
-    setPosponerOpen(false);
-    emailNotifyRef.current.delete(id);
-    alertSoundPlayedRef.current = null;
-
-    if (isLocalInicioId(id)) {
-      pendingCreatesRef.current.delete(id);
-      if (isRecurrente) {
-        // Local pending create: keep optimistic until server id exists; just dismiss.
-        return;
-      }
-      setItems((prev) => prev.filter((it) => it.id !== id));
-      return;
-    }
-
-    if (isRecurrente) {
-      try {
-        const result = await aceptarInicioRecordatorio(id);
-        if (result.deleted || !result.item) {
-          setItems((prev) => prev.filter((it) => it.id !== id));
-        } else {
-          setItems((prev) => prev.map((it) => (it.id === result.item!.id ? result.item! : it)));
-        }
-      } catch (error) {
-        setItems((prev) =>
-          prev.some((it) => it.id === previous.id) ? prev : [previous, ...prev],
-        );
-        setAlertRec(previous);
-        toast.error(error instanceof Error ? error.message : "No se pudo aceptar el recordatorio");
-      }
-      return;
-    }
-
-    setItems((prev) => prev.filter((it) => it.id !== id));
-    try {
-      await aceptarInicioRecordatorio(id);
-    } catch (error) {
-      setItems((prev) => (prev.some((it) => it.id === previous.id) ? prev : [previous, ...prev]));
-      setAlertRec(previous);
-      toast.error(error instanceof Error ? error.message : "No se pudo aceptar el recordatorio");
-    }
-  }
-
-  function openPosponer() {
-    const schedule = defaultRecSchedule();
-    setPosFecha(schedule.fecha);
-    setPosHora(schedule.hora);
-    setPosponerOpen(true);
-  }
-
-  async function confirmarPosponer(e: FormEvent) {
-    e.preventDefault();
-    if (!alertRec) return;
-    const scheduleError = validateRecSchedule(posFecha, posHora);
-    if (scheduleError) {
-      toast.error(scheduleError);
-      return;
-    }
-    const when = combineRecSchedule(posFecha, posHora);
-    if (!when) {
-      toast.error("Fecha u hora inválida");
-      return;
-    }
-    const id = alertRec.id;
-    const previous = alertRec;
-    const fechaHora = when.toISOString();
-    const optimistic = { ...alertRec, fechaHora, actualizadoAt: new Date().toISOString() };
-    setItems((prev) => prev.map((it) => (it.id === id ? optimistic : it)));
-    emailNotifyRef.current.delete(id);
-    setAlertRec(null);
-    setPosponerOpen(false);
-    try {
-      const next = await updateInicioItem(id, { fechaHora });
-      setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
-    } catch (error) {
-      setItems((prev) => prev.map((it) => (it.id === previous.id ? previous : it)));
-      setAlertRec(previous);
-      toast.error(error instanceof Error ? error.message : "No se pudo posponer");
-    }
-  }
-
   function crearNotaVacia() {
     const tempId = `local-${crypto.randomUUID()}`;
     const nowIso = new Date().toISOString();
-    const minOrden = notas.reduce(
-      (min, it) => Math.min(min, it.orden),
-      Number.POSITIVE_INFINITY,
-    );
-    const optimistic: InicioItem = {
+    const draft: InicioItem = {
       id: tempId,
       tipo: "nota",
       titulo: "",
       detalle: "",
       fechaHora: null,
       hecha: false,
-      orden: Number.isFinite(minOrden) ? minOrden - 1 : 0,
+      orden: 0,
       color: "gris",
       avisoApp: false,
       avisoEmail: false,
@@ -877,54 +849,18 @@ export function InicioPanel({ userName }: Props) {
       origenTareaId: null,
       participantIds: myUserId ? [myUserId] : [],
       sharedWith: [],
+      mostrarEnInicio: true,
+      whatsappContactId: null,
+      whatsappContactLabel: null,
       ownerNombre: user?.nombre ?? userName ?? "",
       userId: myUserId,
       creadoAt: nowIso,
       actualizadoAt: nowIso,
     };
-
-    setItems((prev) => {
-      const rest = prev.filter((it) => it.tipo !== "nota");
-      const notasPrev = prev.filter((it) => it.tipo === "nota");
-      return [...rest, optimistic, ...notasPrev];
-    });
     setEditTitulo("");
     setEditDetalle("");
     setEditColor("gris");
-    setViewNota(optimistic);
-
-    const createPromise = createInicioItem({
-      tipo: "nota",
-      titulo: "",
-      detalle: "",
-      fechaHora: null,
-      color: "gris",
-    })
-      .then((item) => {
-        setItems((prev) => prev.map((it) => (it.id === tempId ? { ...item, color: it.color, pinned: it.pinned, titulo: it.titulo, detalle: it.detalle } : it)));
-        setViewNota((prev) =>
-          prev?.id === tempId
-            ? {
-                ...item,
-                titulo: prev.titulo,
-                detalle: prev.detalle,
-                color: prev.color || item.color,
-                pinned: prev.pinned,
-              }
-            : prev,
-        );
-        pendingCreatesRef.current.delete(tempId);
-        return item;
-      })
-      .catch((error) => {
-        pendingCreatesRef.current.delete(tempId);
-        setItems((prev) => prev.filter((it) => it.id !== tempId));
-        setViewNota((prev) => (prev?.id === tempId ? null : prev));
-        toast.error(error instanceof Error ? error.message : "No se pudo crear la nota");
-        throw error;
-      });
-
-    pendingCreatesRef.current.set(tempId, createPromise);
+    setViewNota(draft);
   }
 
   function openNota(item: InicioItem) {
@@ -936,21 +872,85 @@ export function InicioPanel({ userName }: Props) {
 
   async function closeNotaModal() {
     if (!viewNota) return;
+    const draft = viewNota;
     const titulo = editTitulo.trim();
     const detalle = editDetalle.trim();
-    const dirty = titulo !== viewNota.titulo.trim() || detalle !== viewNota.detalle.trim();
-    const closingId = viewNota.id;
+    const color = editColor;
+    const closingId = draft.id;
+    const isDraft = isLocalInicioId(closingId);
+    const hadContent =
+      draft.titulo.trim().length > 0 || draft.detalle.trim().length > 0;
+    const hasContent = titulo.length > 0 || detalle.length > 0;
+
     setViewNota(null);
+
+    if (!hasContent) {
+      if (isDraft) {
+        pendingCreatesRef.current.delete(closingId);
+        return;
+      }
+      if (!hadContent) return;
+      setItems((prev) => prev.filter((it) => it.id !== closingId));
+      try {
+        await deleteInicioItem(closingId);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "No se pudo eliminar la nota vacía");
+        void fetchInicioItems()
+          .then(setItems)
+          .catch(() => undefined);
+      }
+      return;
+    }
+
+    if (isDraft) {
+      const minOrden = notas.reduce(
+        (min, it) => Math.min(min, it.orden),
+        Number.POSITIVE_INFINITY,
+      );
+      const optimistic: InicioItem = {
+        ...draft,
+        titulo,
+        detalle,
+        color,
+        orden: Number.isFinite(minOrden) ? minOrden - 1 : 0,
+        actualizadoAt: new Date().toISOString(),
+      };
+      setItems((prev) => {
+        const rest = prev.filter((it) => it.tipo !== "nota");
+        const notasPrev = prev.filter((it) => it.tipo === "nota");
+        return [...rest, optimistic, ...notasPrev];
+      });
+      try {
+        const item = await createInicioItem({
+          tipo: "nota",
+          titulo,
+          detalle,
+          fechaHora: null,
+          color,
+          sharedWithIds: myUserId ? [myUserId] : [],
+        });
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === closingId ? { ...item, color: it.color, pinned: it.pinned } : it,
+          ),
+        );
+      } catch (error) {
+        setItems((prev) => prev.filter((it) => it.id !== closingId));
+        toast.error(error instanceof Error ? error.message : "No se pudo crear la nota");
+      }
+      return;
+    }
+
+    const dirty =
+      titulo !== draft.titulo.trim() ||
+      detalle !== draft.detalle.trim() ||
+      color !== (draft.color || "gris");
     if (!dirty) return;
 
     setBusyId(closingId);
     try {
-      const realId = await resolveNotaId(closingId);
-      if (!realId) return;
-      const next = await updateInicioItem(realId, { titulo, detalle });
-      setItems((prev) =>
-        prev.map((it) => (it.id === next.id || it.id === closingId ? next : it)),
-      );
+      const next = await updateInicioItem(closingId, { titulo, detalle, color });
+      setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo guardar la nota");
     } finally {
@@ -974,57 +974,23 @@ export function InicioPanel({ userName }: Props) {
     }
   }
 
-  function startEditTarea(item: InicioItem) {
-    setEditingTareaId(item.id);
-    setEditTareaTitulo(item.titulo);
-  }
-
-  function cancelEditTarea() {
-    setEditingTareaId(null);
-    setEditTareaTitulo("");
-  }
-
-  async function saveEditTarea(item: InicioItem) {
-    const titulo = editTareaTitulo.trim();
-    if (!titulo) {
-      toast.error("El título es obligatorio");
-      return;
-    }
-    if (titulo === item.titulo.trim()) {
-      cancelEditTarea();
-      return;
-    }
-    const previous = item.titulo;
-    setItems((prev) =>
-      prev.map((it) => (it.id === item.id ? { ...it, titulo } : it)),
-    );
-    setEditingTareaId(null);
-    setEditTareaTitulo("");
-    try {
-      const next = await updateInicioItem(item.id, { titulo });
-      setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
-    } catch (error) {
-      setItems((prev) =>
-        prev.map((it) => (it.id === item.id ? { ...it, titulo: previous } : it)),
-      );
-      toast.error(error instanceof Error ? error.message : "No se pudo guardar la tarea");
-    }
-  }
-
   function changeNotaColor(itemId: string, color: InicioNotaColor) {
-    const req = ++colorReqRef.current;
     const previousColor = editColor;
     setEditColor(color);
+    setViewNota((prev) => (prev?.id === itemId ? { ...prev, color } : prev));
+
+    if (isLocalInicioId(itemId)) {
+      return;
+    }
+
+    const req = ++colorReqRef.current;
     setItems((prev) =>
       prev.map((it) => (it.id === itemId ? { ...it, color } : it)),
     );
-    setViewNota((prev) => (prev?.id === itemId ? { ...prev, color } : prev));
 
     void (async () => {
       try {
-        const realId = await resolveNotaId(itemId);
-        if (!realId) throw new Error("No se pudo guardar el color");
-        const next = await updateInicioItem(realId, { color });
+        const next = await updateInicioItem(itemId, { color });
         if (colorReqRef.current !== req) return;
         setItems((prev) =>
           prev.map((it) =>
@@ -1066,13 +1032,21 @@ export function InicioPanel({ userName }: Props) {
         ? ids.length
           ? "Tarea asignada"
           : "Asignación actualizada"
-        : ids.length
-          ? "Nota compartida"
-          : "Compartido actualizado",
+        : previous.tipo === "recordatorio"
+          ? ids.length
+            ? "Recordatorio asignado"
+            : "Asignación actualizada"
+          : ids.length
+            ? "Nota compartida"
+            : "Compartido actualizado",
     );
   }
 
   async function toggleNotaPinned(item: InicioItem) {
+    if (isLocalInicioId(item.id)) {
+      toast.info("Escribí algo en la nota para poder fijarla");
+      return;
+    }
     const previousPinned = item.pinned;
     const nextPinned = !item.pinned;
     setItems((prev) =>
@@ -1115,9 +1089,19 @@ export function InicioPanel({ userName }: Props) {
     setDeleteId(null);
     setItems((prev) => prev.filter((it) => it.id !== id));
     setViewNota((prev) => (prev?.id === id ? null : prev));
-    setAlertRec((prev) => (prev?.id === id ? null : prev));
-    setEditingTareaId((prev) => (prev === id ? null : prev));
-    emailNotifyRef.current.delete(id);
+    setViewTarea((prev) => (prev?.id === id ? null : prev));
+    setViewRec((prev) => (prev?.id === id ? null : prev));
+
+    setEditingTareaId((prev) => {
+      if (prev === id) {
+        setTareaModalOpen(false);
+        setTareaTitulo("");
+        setTareaDetalle("");
+        return null;
+      }
+      return prev;
+    });
+
     toast.success("Eliminado");
 
     if (isLocalInicioId(id)) {
@@ -1127,6 +1111,7 @@ export function InicioPanel({ userName }: Props) {
 
     try {
       await deleteInicioItem(id);
+      if (previous?.tipo === "recordatorio") notifyInicioItemsChanged();
     } catch (error) {
       if (previous) {
         setItems((prev) => (prev.some((it) => it.id === previous.id) ? prev : [previous, ...prev]));
@@ -1169,6 +1154,15 @@ export function InicioPanel({ userName }: Props) {
         <section className="inicio-card inicio-card--tareas">
           <div className="inicio-card__head">
             <h2 className="inicio-card__title">Tareas</h2>
+            <button
+              type="button"
+              className="btn btn-primary inicio-composer__btn"
+              onClick={() => openTareaModal()}
+              aria-label="Nueva tarea"
+              data-tooltip="Nueva tarea"
+            >
+              <IconPlus size={16} />
+            </button>
           </div>
 
           <div className="inicio-card__body">
@@ -1186,15 +1180,15 @@ export function InicioPanel({ userName }: Props) {
                     dropHint?.id === item.id && dragTareaId && dragTareaId !== item.id
                       ? dropHint.edge
                       : null;
-                  const editing = editingTareaId === item.id;
                   const shared = item.sharedWith ?? [];
+                  const detallePreview = detalleSinContextoWa(item.detalle);
                   return (
                   <li
                     key={item.id}
                     className={`inicio-list__item inicio-list__item--tarea${item.hecha ? " is-done" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}${!isOwner ? " is-shared" : ""}`}
-                    draggable={!reordering && !editing && isOwner}
+                    draggable={!reordering && isOwner}
                     onDragStart={(e) => {
-                      if (!dragTareaAllowedRef.current || editing || !isOwner) {
+                      if (!dragTareaAllowedRef.current || !isOwner) {
                         e.preventDefault();
                         return;
                       }
@@ -1243,7 +1237,7 @@ export function InicioPanel({ userName }: Props) {
                       data-tooltip={isOwner ? "Arrastrar" : "Solo el dueño puede reordenar"}
                       aria-hidden="true"
                       onPointerDown={() => {
-                        if (!reordering && !editing && isOwner) {
+                        if (!reordering && isOwner) {
                           dragTareaAllowedRef.current = true;
                         }
                       }}
@@ -1258,40 +1252,36 @@ export function InicioPanel({ userName }: Props) {
                       onChange={() => void toggleHecha(item)}
                       aria-label={item.hecha ? "Marcar como pendiente" : "Marcar como hecha"}
                     />
-                    {editing ? (
-                      <input
-                        className="inicio-list__edit"
-                        value={editTareaTitulo}
-                        onChange={(e) => setEditTareaTitulo(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void saveEditTarea(item);
-                          }
-                          if (e.key === "Escape") {
-                            e.preventDefault();
-                            cancelEditTarea();
-                          }
-                        }}
-                        autoFocus
-                        aria-label="Editar tarea"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="inicio-list__title-btn"
-                        onClick={() => startEditTarea(item)}
-                      >
+                    <button
+                      type="button"
+                      className="inicio-list__title-btn"
+                      onClick={() => openTareaView(item)}
+                    >
+                      <span className="inicio-list__main">
                         <span className="inicio-list__title inicio-list__title--ellipsis">
                           {item.titulo}
                         </span>
-                        {!isOwner && item.ownerNombre ? (
-                          <span className="inicio-list__owner">De {item.ownerNombre}</span>
-                        ) : null}
-                      </button>
-                    )}
+                        {detallePreview ? (
+                          <span className="inicio-list__detalle inicio-list__title--ellipsis">
+                            {detallePreview}
+                          </span>
+                        ) : (
+                          <span className="inicio-list__detalle inicio-list__detalle--empty">
+                            Sin detalle
+                          </span>
+                        )}
+                      </span>
+                      {item.whatsappContactId || item.whatsappContactLabel ? (
+                        <span className="inicio-list__wa" title="WhatsApp">
+                          WA
+                        </span>
+                      ) : null}
+                      {!isOwner && item.ownerNombre ? (
+                        <span className="inicio-list__owner">De {item.ownerNombre}</span>
+                      ) : null}
+                    </button>
                     <UserAvatarStack
-                      users={shared}
+                      users={assigneesForDisplay(item)}
                       emptyLabel={isOwner ? "Asignar" : "Asignados"}
                       disabled={busyId === item.id || reordering || !isOwner}
                       onClick={() => {
@@ -1302,68 +1292,86 @@ export function InicioPanel({ userName }: Props) {
                         setShareTarget(item);
                       }}
                     />
-                    <div className="inicio-list__actions">
-                      {editing ? (
-                        <>
+                    <div
+                      className="inicio-list__actions"
+                      data-inicio-actions={item.id}
+                    >
+                      {isOwner ? (
+                        <div className="inicio-list__more">
                           <button
                             type="button"
-                            className="fl-icon-btn fl-icon-btn--success"
-                            aria-label="Guardar"
-                            data-tooltip="Guardar"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => void saveEditTarea(item)}
+                            className="fl-icon-btn"
+                            aria-label="Más acciones"
+                            aria-expanded={actionsMenuId === item.id}
+                            disabled={busyId === item.id || reordering}
+                            onClick={() =>
+                              setActionsMenuId((prev) =>
+                                prev === item.id ? null : item.id,
+                              )
+                            }
                           >
-                            <IconCheck size={15} />
+                            <IconMoreVertical size={15} />
                           </button>
-                          <button
-                            type="button"
-                            className="fl-icon-btn fl-icon-btn--danger"
-                            aria-label="Cancelar"
-                            data-tooltip="Cancelar"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => cancelEditTarea()}
-                          >
-                            <IconX size={15} />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          {isOwner ? (
-                            <button
-                              type="button"
-                              className={`fl-icon-btn${
-                                yaConvertida ? " fl-icon-btn--muted" : " fl-icon-btn--success"
-                              }`}
-                              aria-label={
-                                yaConvertida
-                                  ? "Ya tiene recordatorio (crear otro)"
-                                  : "Convertir a recordatorio"
-                              }
-                              data-tooltip={
-                                yaConvertida
-                                  ? "Ya tiene recordatorio"
-                                  : "Convertir a recordatorio"
-                              }
-                              disabled={busyId === item.id || reordering}
-                              onClick={() => openRecordatorioModal(item)}
-                            >
-                              <IconClock size={15} />
-                            </button>
+                          {actionsMenuId === item.id ? (
+                            <div className="inicio-list__more-menu" role="menu">
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--edit"
+                                role="menuitem"
+                                aria-label="Editar"
+                                title="Editar"
+                                disabled={busyId === item.id || reordering}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  openTareaModal(item);
+                                }}
+                              >
+                                <IconPencil size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                className={`fl-icon-btn${
+                                  yaConvertida
+                                    ? " fl-icon-btn--muted"
+                                    : " fl-icon-btn--success"
+                                }`}
+                                role="menuitem"
+                                aria-label={
+                                  yaConvertida
+                                    ? "Ya tiene recordatorio (crear otro)"
+                                    : "Convertir a recordatorio"
+                                }
+                                title={
+                                  yaConvertida
+                                    ? "Ya tiene recordatorio"
+                                    : "Convertir a recordatorio"
+                                }
+                                disabled={busyId === item.id || reordering}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  openRecordatorioModal(item);
+                                }}
+                              >
+                                <IconClock size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                className="fl-icon-btn fl-icon-btn--danger"
+                                role="menuitem"
+                                aria-label="Eliminar"
+                                title="Eliminar"
+                                disabled={busyId === item.id || reordering}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  setDeleteId(item.id);
+                                }}
+                              >
+                                <IconTrash size={15} />
+                              </button>
+                            </div>
                           ) : null}
-                          {isOwner ? (
-                            <button
-                              type="button"
-                              className="fl-icon-btn fl-icon-btn--danger"
-                              aria-label="Eliminar"
-                              data-tooltip="Eliminar"
-                              disabled={busyId === item.id || reordering}
-                              onClick={() => setDeleteId(item.id)}
-                            >
-                              <IconTrash size={15} />
-                            </button>
-                          ) : null}
-                        </>
-                      )}
+                        </div>
+                      ) : null}
                     </div>
                   </li>
                   );
@@ -1371,30 +1379,6 @@ export function InicioPanel({ userName }: Props) {
               </ul>
             )}
           </div>
-
-          <form
-            className="inicio-composer"
-            onSubmit={(e: FormEvent) => {
-              e.preventDefault();
-              void addTarea();
-            }}
-          >
-            <input
-              className="inicio-composer__input"
-              value={tareaDraft}
-              onChange={(e) => setTareaDraft(e.target.value)}
-              placeholder="Agregar una tarea"
-              aria-label="Agregar una tarea"
-            />
-            <button
-              type="submit"
-              className="btn btn-primary inicio-composer__btn"
-              disabled={!tareaDraft.trim()}
-              aria-label="Agregar"
-            >
-              <IconPlus size={16} />
-            </button>
-          </form>
         </section>
 
         <section className="inicio-card inicio-card--recordatorios">
@@ -1422,45 +1406,114 @@ export function InicioPanel({ userName }: Props) {
                   const fechaLabel = formatItemFecha(item.fechaHora);
                   const recLabel = formatRecurrenciaLabel(item);
                   const due = isRecordatorioDue(item, now.getTime());
+                  const detallePreview = detalleSinContextoWa(item.detalle);
+                  const isOwner = item.userId === myUserId;
                   return (
                     <li
                       key={item.id}
                       className={`inicio-list__item inicio-list__item--rec${due ? " is-due" : ""}`}
                     >
                       {fechaLabel ? (
-                        <span className="inicio-list__meta inicio-list__meta--inline" data-tooltip={fechaLabel}>
+                        <span className="inicio-list__meta inicio-list__meta--inline">
                           {fechaLabel}
                         </span>
                       ) : null}
-                      <span className="inicio-list__title inicio-list__title--ellipsis" data-tooltip={item.titulo}>
-                        {item.titulo}
-                      </span>
-                      {recLabel ? (
-                        <span className="inicio-list__recurrencia" data-tooltip={recLabel}>
-                          {recLabel}
+                      <button
+                        type="button"
+                        className="inicio-list__title-btn"
+                        onClick={() => openRecordatorioView(item)}
+                      >
+                        <span className="inicio-list__main">
+                          <span className="inicio-list__title inicio-list__title--ellipsis">
+                            {item.titulo}
+                          </span>
+                          {detallePreview ? (
+                            <span className="inicio-list__detalle inicio-list__title--ellipsis">
+                              {detallePreview}
+                            </span>
+                          ) : (
+                            <span className="inicio-list__detalle inicio-list__detalle--empty">
+                              Sin detalle
+                            </span>
+                          )}
                         </span>
-                      ) : null}
-                      <div className="inicio-list__actions">
-                        <button
-                          type="button"
-                          className="fl-icon-btn"
-                          aria-label="Editar"
-                          data-tooltip="Editar"
-                          disabled={busyId === item.id}
-                          onClick={() => openRecordatorioModal(item)}
-                        >
-                          <IconPencil size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className="fl-icon-btn fl-icon-btn--danger"
-                          aria-label="Eliminar"
-                          data-tooltip="Eliminar"
-                          disabled={busyId === item.id}
-                          onClick={() => setDeleteId(item.id)}
-                        >
-                          <IconTrash size={15} />
-                        </button>
+                        {item.whatsappContactId || item.whatsappContactLabel ? (
+                          <span className="inicio-list__wa" title="WhatsApp">
+                            WA
+                          </span>
+                        ) : null}
+                        {recLabel ? (
+                          <span className="inicio-list__recurrencia" data-tooltip={recLabel}>
+                            {recLabel}
+                          </span>
+                        ) : null}
+                      </button>
+                      <UserAvatarStack
+                        users={assigneesForDisplay(item)}
+                        emptyLabel={isOwner ? "Asignar" : "Asignados"}
+                        disabled={busyId === item.id || !isOwner}
+                        onClick={() => {
+                          if (!isOwner) {
+                            toast.info("Solo el dueño puede cambiar la asignación");
+                            return;
+                          }
+                          setShareTarget(item);
+                        }}
+                      />
+                      <div
+                        className="inicio-list__actions"
+                        data-inicio-actions={item.id}
+                      >
+                        {isOwner ? (
+                          <div className="inicio-list__more">
+                            <button
+                              type="button"
+                              className="fl-icon-btn"
+                              aria-label="Más acciones"
+                              aria-expanded={actionsMenuId === item.id}
+                              disabled={busyId === item.id}
+                              onClick={() =>
+                                setActionsMenuId((prev) =>
+                                  prev === item.id ? null : item.id,
+                                )
+                              }
+                            >
+                              <IconMoreVertical size={15} />
+                            </button>
+                            {actionsMenuId === item.id ? (
+                              <div className="inicio-list__more-menu" role="menu">
+                                <button
+                                  type="button"
+                                  className="fl-icon-btn fl-icon-btn--edit"
+                                  role="menuitem"
+                                  aria-label="Editar"
+                                  title="Editar"
+                                  disabled={busyId === item.id}
+                                  onClick={() => {
+                                    setActionsMenuId(null);
+                                    openRecordatorioModal(item);
+                                  }}
+                                >
+                                  <IconPencil size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="fl-icon-btn fl-icon-btn--danger"
+                                  role="menuitem"
+                                  aria-label="Eliminar"
+                                  title="Eliminar"
+                                  disabled={busyId === item.id}
+                                  onClick={() => {
+                                    setActionsMenuId(null);
+                                    setDeleteId(item.id);
+                                  }}
+                                >
+                                  <IconTrash size={15} />
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     </li>
                   );
@@ -1561,14 +1614,14 @@ export function InicioPanel({ userName }: Props) {
                         </span>
                       ) : null}
                       <div className="inicio-paper__actions">
-                        {(shared.length > 0 || isOwner) && (
+                        {(assigneesForDisplay(item).length > 0 || isOwner) && (
                           <span
                             className="inicio-paper__share"
                             onClick={(e) => e.stopPropagation()}
                             onMouseDown={(e) => e.stopPropagation()}
                           >
                             <UserAvatarStack
-                              users={shared}
+                              users={assigneesForDisplay(item)}
                               size={20}
                               emptyLabel="Compartir"
                               disabled={reordering || !isOwner}
@@ -1664,7 +1717,7 @@ export function InicioPanel({ userName }: Props) {
                 aria-label="Título de la nota"
               />
               <div className="inicio-nota-editor__top-actions">
-                {viewNota.userId === myUserId ? (
+                {viewNota.userId === myUserId && !isLocalInicioId(viewNota.id) ? (
                   <button
                     type="button"
                     className="inicio-nota-editor__icon-btn"
@@ -1675,9 +1728,10 @@ export function InicioPanel({ userName }: Props) {
                     <IconUsers size={18} />
                   </button>
                 ) : null}
-                {(viewNota.sharedWith?.length ?? 0) > 0 ? (
+                {!isLocalInicioId(viewNota.id) &&
+                (assigneesForDisplay(viewNota).length > 0 || viewNota.userId === myUserId) ? (
                   <UserAvatarStack
-                    users={viewNota.sharedWith ?? []}
+                    users={assigneesForDisplay(viewNota)}
                     size={24}
                     emptyLabel="Compartir"
                     disabled={viewNota.userId !== myUserId}
@@ -1721,10 +1775,182 @@ export function InicioPanel({ userName }: Props) {
                 value={editColor}
                 onChange={(color) => changeNotaColor(viewNota.id, color)}
               />
+              <button
+                type="button"
+                className="btn btn-primary btn-sm inicio-nota-editor__save"
+                disabled={
+                  !(editTitulo.trim() || editDetalle.trim()) || busyId === viewNota.id
+                }
+                onClick={() => void closeNotaModal()}
+              >
+                {isLocalInicioId(viewNota.id) ? "Crear" : "Guardar"}
+              </button>
             </div>
           </div>
         </div>
       ) : null}
+
+      <Modal
+        open={viewTarea != null}
+        wide
+        title="Tarea"
+        onClose={() => setViewTarea(null)}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setViewTarea(null)}>
+              Cerrar
+            </button>
+            {viewTarea && viewTarea.userId === myUserId ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const item = viewTarea;
+                  setViewTarea(null);
+                  openTareaModal(item);
+                }}
+              >
+                Editar
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        {viewTarea ? (
+          <div className="inicio-item-view">
+            <h3 className="inicio-item-view__title">{viewTarea.titulo}</h3>
+            {detalleSinContextoWa(viewTarea.detalle) ? (
+              <p className="inicio-item-view__detalle">{detalleSinContextoWa(viewTarea.detalle)}</p>
+            ) : (
+              <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">Sin detalle</p>
+            )}
+            {viewTarea.whatsappContactId || viewTarea.whatsappContactLabel ? (
+              <p className="inicio-item-view__meta">WhatsApp</p>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={viewRec != null}
+        wide
+        title="Recordatorio"
+        onClose={() => setViewRec(null)}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setViewRec(null)}>
+              Cerrar
+            </button>
+            {viewRec && viewRec.userId === myUserId ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const item = viewRec;
+                  setViewRec(null);
+                  openRecordatorioModal(item);
+                }}
+              >
+                Editar
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        {viewRec ? (
+          <div className="inicio-item-view">
+            <h3 className="inicio-item-view__title">{viewRec.titulo}</h3>
+            {detalleSinContextoWa(viewRec.detalle) ? (
+              <p className="inicio-item-view__detalle">{detalleSinContextoWa(viewRec.detalle)}</p>
+            ) : (
+              <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">Sin detalle</p>
+            )}
+            <dl className="inicio-item-view__facts">
+              {formatItemFecha(viewRec.fechaHora) ? (
+                <div>
+                  <dt>Cuándo</dt>
+                  <dd>{formatItemFecha(viewRec.fechaHora)}</dd>
+                </div>
+              ) : null}
+              {formatRecurrenciaLabel(viewRec) ? (
+                <div>
+                  <dt>Repite</dt>
+                  <dd>{formatRecurrenciaLabel(viewRec)}</dd>
+                </div>
+              ) : null}
+              {viewRec.whatsappContactId || viewRec.whatsappContactLabel ? (
+                <div>
+                  <dt>Origen</dt>
+                  <dd>WhatsApp</dd>
+                </div>
+              ) : null}
+            </dl>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={tareaModalOpen}
+        wide
+        title={editingTareaId ? "Editar tarea" : "Nueva tarea"}
+        onClose={closeTareaModal}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={closeTareaModal}>
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              form="inicio-tarea-form"
+              className="btn btn-primary"
+              disabled={!tareaTitulo.trim() || tareaAssigneeIds.length === 0}
+            >
+              {editingTareaId ? "Guardar" : "Crear"}
+            </button>
+          </>
+        }
+      >
+        <form
+          id="inicio-tarea-form"
+          className="form-grid"
+          onSubmit={(e) => void guardarTarea(e)}
+        >
+          <div className="form-group form-group--full">
+            <label htmlFor="tarea-titulo">Título</label>
+            <input
+              id="tarea-titulo"
+              value={tareaTitulo}
+              onChange={(e) => setTareaTitulo(e.target.value)}
+              placeholder="Texto de la tarea"
+              autoFocus
+              required
+            />
+          </div>
+          <div className="form-group form-group--full">
+            <label htmlFor="tarea-detalle">Detalle</label>
+            <textarea
+              id="tarea-detalle"
+              value={tareaDetalle}
+              onChange={(e) => setTareaDetalle(e.target.value)}
+              placeholder="Opcional"
+              rows={4}
+            />
+          </div>
+          <UserAssigneeField
+            label="Asignar a"
+            loading={directoryLoading}
+            options={directory}
+            selectedIds={tareaAssigneeIds}
+            onChange={setTareaAssigneeIds}
+            currentUserId={myUserId || undefined}
+            currentUser={
+              user
+                ? { id: user.id, nombre: user.nombre, email: user.email }
+                : null
+            }
+          />
+        </form>
+      </Modal>
 
       <Modal
         open={recordatorioOpen}
@@ -1750,7 +1976,11 @@ export function InicioPanel({ userName }: Props) {
               type="submit"
               form="inicio-recordatorio-form"
               className="btn btn-primary"
-              disabled={!recTitulo.trim() || (!recAvisoApp && !recAvisoEmail)}
+              disabled={
+                !recTitulo.trim() ||
+                (!recAvisoApp && !recAvisoEmail) ||
+                recAssigneeIds.length === 0
+              }
             >
               {editingRecId
                 ? "Guardar"
@@ -1787,17 +2017,19 @@ export function InicioPanel({ userName }: Props) {
               }
             />
           </div>
-          <div className="form-group form-group--full">
-            <label htmlFor="rec-detalle">Detalle</label>
-            <textarea
-              id="rec-detalle"
-              value={recDetalle}
-              onChange={(e) => setRecDetalle(e.target.value)}
-              placeholder="Opcional"
-              rows={3}
-              autoFocus={tituloRecBloqueado}
-            />
-          </div>
+          {!convertFromTareaId ? (
+            <div className="form-group form-group--full">
+              <label htmlFor="rec-detalle">Detalle</label>
+              <textarea
+                id="rec-detalle"
+                value={recDetalle}
+                onChange={(e) => setRecDetalle(e.target.value)}
+                placeholder="Opcional"
+                rows={3}
+                autoFocus={tituloRecBloqueado}
+              />
+            </div>
+          ) : null}
           <div className="form-group">
             <label htmlFor="rec-cuando-fecha">Fecha y hora</label>
             <DateTimePicker
@@ -1860,163 +2092,43 @@ export function InicioPanel({ userName }: Props) {
               </label>
             </div>
           </div>
+          <UserAssigneeField
+            label="Asignar a"
+            loading={directoryLoading}
+            options={directory}
+            selectedIds={recAssigneeIds}
+            onChange={setRecAssigneeIds}
+            currentUserId={myUserId || undefined}
+            currentUser={
+              user
+                ? { id: user.id, nombre: user.nombre, email: user.email }
+                : null
+            }
+          />
         </form>
       </Modal>
 
-      <Modal
-        open={alertRec != null && !posponerOpen}
-        title="Recordatorio"
-        onClose={() => undefined}
-        hideClose
-        alert
-        footer={
-          <>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={busyId === alertRec?.id}
-              onClick={openPosponer}
-            >
-              Posponer
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busyId === alertRec?.id}
-              onClick={() => void aceptarRecordatorioAlert()}
-            >
-              {busyId === alertRec?.id
-                ? "…"
-                : alertRec?.recurrencia && alertRec.recurrencia !== "none"
-                  ? "Listo"
-                  : "Aceptar"}
-            </button>
-          </>
-        }
-      >
-        {alertRec ? (
-          <div className="inicio-rec-alert">
-            <div className="inicio-rec-alert__meta">
-              {formatItemFechaAlert(alertRec.fechaHora) ? (
-                <div className="inicio-rec-alert__meta-item">
-                  <span className="inicio-rec-alert__meta-icon" aria-hidden="true">
-                    <IconCalendar size={18} />
-                  </span>
-                  <span className="inicio-rec-alert__meta-copy">
-                    <span className="inicio-rec-alert__meta-label">Fecha</span>
-                    <span className="inicio-rec-alert__meta-value">
-                      {formatItemFechaAlert(alertRec.fechaHora)}
-                    </span>
-                  </span>
-                </div>
-              ) : null}
-              {formatItemSoloHora(alertRec.fechaHora) ? (
-                <div className="inicio-rec-alert__meta-item">
-                  <span className="inicio-rec-alert__meta-icon" aria-hidden="true">
-                    <IconClock size={18} />
-                  </span>
-                  <span className="inicio-rec-alert__meta-copy">
-                    <span className="inicio-rec-alert__meta-label">Hora</span>
-                    <span className="inicio-rec-alert__meta-value">
-                      {formatItemSoloHora(alertRec.fechaHora)} hs
-                    </span>
-                  </span>
-                </div>
-              ) : null}
-              {formatRecurrenciaLabel(alertRec) ? (
-                <div className="inicio-rec-alert__meta-item">
-                  <span className="inicio-rec-alert__meta-copy">
-                    <span className="inicio-rec-alert__meta-label">Repite</span>
-                    <span className="inicio-rec-alert__meta-value">
-                      {formatRecurrenciaLabel(alertRec)}
-                    </span>
-                  </span>
-                </div>
-              ) : null}
-            </div>
-            <div className="inicio-rec-alert__body">
-              <p className="inicio-rec-alert__title">{alertRec.titulo}</p>
-              <p
-                className={`inicio-rec-alert__detalle${
-                  alertRec.detalle.trim() ? "" : " inicio-rec-alert__detalle--empty"
-                }`}
-              >
-                {alertRec.detalle.trim() || "Sin detalle"}
-              </p>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
-
-      <Modal
-        open={alertRec != null && posponerOpen}
-        wide
-        title="Posponer recordatorio"
-        onClose={() => undefined}
-        hideClose
-        footer={
-          <>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={busyId === alertRec?.id}
-              onClick={() => setPosponerOpen(false)}
-            >
-              Volver
-            </button>
-            <button
-              type="submit"
-              form="inicio-posponer-form"
-              className="btn btn-primary"
-              disabled={busyId === alertRec?.id}
-            >
-              {busyId === alertRec?.id ? "Guardando…" : "Guardar"}
-            </button>
-          </>
-        }
-      >
-        <form
-          id="inicio-posponer-form"
-          className="form-grid inicio-rec-form"
-          onSubmit={(e) => void confirmarPosponer(e)}
-        >
-          <div className="form-group">
-            <label htmlFor="pos-fecha">Nueva fecha</label>
-            <DatePicker
-              id="pos-fecha"
-              value={posFecha}
-              onChange={setPosFecha}
-              min={fechaHoyIso()}
-              placeholder="dd/mm/aaaa"
-              aria-label="Nueva fecha"
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="pos-hora">Nueva hora</label>
-            <TimePicker
-              id="pos-hora"
-              value={posHora}
-              onChange={setPosHora}
-              fecha={posFecha}
-              placeholder="hh:mm"
-              aria-label="Nueva hora"
-            />
-          </div>
-        </form>
-      </Modal>
 
       <InicioSharePicker
         open={shareTarget != null}
         title={
-          shareTarget?.tipo === "tarea" ? "Asignar tarea" : "Compartir nota"
+          shareTarget?.tipo === "tarea"
+            ? "Asignar tarea"
+            : shareTarget?.tipo === "recordatorio"
+              ? "Asignar recordatorio"
+              : "Compartir nota"
         }
         subtitle={
           shareTarget?.tipo === "tarea"
             ? "Elegí uno o más usuarios. Ellos van a ver la tarea en su Inicio."
-            : "Elegí con quién compartir. Pueden ver y editar la nota."
+            : shareTarget?.tipo === "recordatorio"
+              ? "Elegí operadoras o administrativos. Van a ver el recordatorio en su Inicio."
+              : "Elegí con quién compartir. Pueden ver y editar la nota."
         }
-        selectedIds={(shareTarget?.sharedWith ?? []).map((u) => u.id)}
-        excludeUserId={myUserId}
+        selectedIds={
+          shareTarget ? assigneeIdsFromItem(shareTarget, myUserId) : []
+        }
+        excludeUserId={shareTarget?.tipo === "nota" ? myUserId : undefined}
         onClose={() => setShareTarget(null)}
         onSave={saveShare}
       />

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getUserById } from "../services/users.service.js";
 import {
   addWhatsappOperator,
+  countOperatorAssignments,
   isWhatsappOperator,
   listWhatsappOperators,
   removeWhatsappOperator,
@@ -30,6 +31,7 @@ import {
   setConversationAssignee,
   setConversationTags,
 } from "../whatsapp/runtime.js";
+import { updateContactDisplayName } from "../whatsapp/firestore-store.js";
 import {
   createWhatsappTag,
   createWhatsappTagGroup,
@@ -125,13 +127,54 @@ router.post("/operators", async (req, res) => {
   }
 });
 
+router.get("/operators/:userId/assignments", async (req, res) => {
+  try {
+    const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+    const count = await countOperatorAssignments(String(userId ?? ""));
+    res.json({ ok: true, data: { count } });
+  } catch (error) {
+    sendError(res, error, "No se pudieron consultar las conversaciones asignadas");
+  }
+});
+
 router.delete("/operators/:userId", async (req, res) => {
   try {
     const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
-    const data = await removeWhatsappOperator(String(userId ?? ""));
+    const reassignRaw = req.body?.reassign;
+    const reassign =
+      reassignRaw && typeof reassignRaw === "object"
+        ? {
+            kind: String((reassignRaw as { kind?: unknown }).kind ?? "") as "none" | "bot" | "user",
+            userId:
+              (reassignRaw as { userId?: unknown }).userId != null
+                ? String((reassignRaw as { userId?: unknown }).userId)
+                : undefined,
+          }
+        : null;
+    const data = await removeWhatsappOperator(String(userId ?? ""), reassign);
     res.json({ ok: true, data });
   } catch (error) {
-    sendError(res, error, "No se pudo quitar la operadora");
+    const message = error instanceof Error ? error.message : "No se pudo quitar la operadora";
+    if (message === "HAS_ASSIGNED") {
+      const count =
+        error instanceof Error && "assignedCount" in error
+          ? Number((error as Error & { assignedCount: number }).assignedCount)
+          : 0;
+      res.status(409).json({
+        ok: false,
+        code: "HAS_ASSIGNED",
+        message: "La operadora tiene conversaciones asignadas",
+        data: { count },
+      });
+      return;
+    }
+    const status =
+      message.includes("Elegí") ||
+      message.includes("no encontrado") ||
+      message.includes("operadoras")
+        ? 400
+        : 500;
+    res.status(status).json({ ok: false, message });
   }
 });
 
@@ -222,7 +265,10 @@ router.get("/tags", async (_req, res) => {
 
 router.post("/tag-groups", async (req, res) => {
   try {
-    const data = await createWhatsappTagGroup(String(req.body?.name ?? ""));
+    const data = await createWhatsappTagGroup({
+      name: String(req.body?.name ?? ""),
+      color: String(req.body?.color ?? ""),
+    });
     res.json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo crear el grupo";
@@ -233,7 +279,10 @@ router.post("/tag-groups", async (req, res) => {
 router.patch("/tag-groups/:id", async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const data = await updateWhatsappTagGroup(String(id ?? ""), String(req.body?.name ?? ""));
+    const data = await updateWhatsappTagGroup(String(id ?? ""), {
+      name: req.body?.name != null ? String(req.body.name) : undefined,
+      color: req.body?.color != null ? String(req.body.color) : undefined,
+    });
     res.json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo guardar el grupo";
@@ -256,7 +305,6 @@ router.post("/tags", async (req, res) => {
   try {
     const data = await createWhatsappTag({
       name: String(req.body?.name ?? ""),
-      color: String(req.body?.color ?? ""),
       groupId: String(req.body?.groupId ?? ""),
     });
     res.json({ ok: true, data });
@@ -271,7 +319,6 @@ router.patch("/tags/:id", async (req, res) => {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const data = await updateWhatsappTag(String(id ?? ""), {
       name: req.body?.name != null ? String(req.body.name) : undefined,
-      color: req.body?.color != null ? String(req.body.color) : undefined,
       groupId: req.body?.groupId != null ? String(req.body.groupId) : undefined,
     });
     res.json({ ok: true, data });
@@ -292,12 +339,42 @@ router.delete("/tags/:id", async (req, res) => {
   }
 });
 
+router.patch("/contacts/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const displayName =
+      typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+    if (!displayName) {
+      res.status(400).json({ ok: false, message: "El nombre es obligatorio" });
+      return;
+    }
+    const data = await updateContactDisplayName(String(id ?? ""), displayName);
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Contacto no encontrado" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo actualizar el contacto";
+    const status = message.includes("obligatorio") ? 400 : 500;
+    res.status(status).json({ ok: false, message });
+  }
+});
+
 router.get("/conversations", async (req, res) => {
   try {
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
-    const data = await listConversations({ search, status });
-    res.json({ ok: true, data });
+    const limit =
+      typeof req.query.limit === "string" && req.query.limit.trim()
+        ? Number(req.query.limit)
+        : undefined;
+    const offset =
+      typeof req.query.offset === "string" && req.query.offset.trim()
+        ? Number(req.query.offset)
+        : undefined;
+    const data = await listConversations({ search, status, limit, offset });
+    res.json({ ok: true, data: data.items, total: data.total, hasMore: data.hasMore, nextOffset: data.nextOffset });
   } catch (error) {
     sendError(res, error, "No se pudieron listar conversaciones");
   }

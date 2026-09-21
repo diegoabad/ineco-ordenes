@@ -18,9 +18,8 @@ import {
   setWaConversationTags,
   waMediaUrl,
 } from "../services/whatsappCrmService";
-import type { WaConversation, WaMessage, WaTag, WaTagGroup } from "../types/whatsappCrm";
+import type { WaConversation, WaMessage, WaOperator, WaTag, WaTagGroup } from "../types/whatsappCrm";
 import { waAssigneeLabel, waContactLabel } from "../types/whatsappCrm";
-import type { UserDirectoryEntry } from "../types";
 import {
   extractSlashQuery,
   formatTrigger,
@@ -28,9 +27,15 @@ import {
   resolveQuickReply,
   type QuickReply,
 } from "../lib/quickReplies";
-import { IconSearch } from "./Icons";
+import { IconCheckSquare, IconClock, IconMinus, IconNote, IconPlus, IconSearch, IconTag, IconUsers } from "./Icons";
 import { LoadingBlock } from "./InecoMark";
 import { Modal } from "./Modal";
+import {
+  WhatsAppContactFollowUpModal,
+  type WaFollowUpKind,
+} from "./WhatsAppContactFollowUpModal";
+
+const CONVERSATIONS_PAGE_SIZE = 40;
 
 function formatPreviewTime(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -95,7 +100,10 @@ type Props = {
   connectRef?: MutableRefObject<(() => void) | null>;
 };
 
-export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: Props) {
+export function WhatsAppConversationsPanel({
+  onConnectionChange,
+  connectRef,
+}: Props) {
   const [ready, setReady] = useState(false);
   const [waStatus, setWaStatus] = useState<string>("");
   const [qr, setQr] = useState<string | null>(null);
@@ -103,6 +111,9 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
   const [connecting, setConnecting] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreConversations, setHasMoreConversations] = useState(false);
+  const [nextConversationsOffset, setNextConversationsOffset] = useState<number | null>(null);
   const [conversations, setConversations] = useState<WaConversation[]>([]);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -112,24 +123,35 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
   const [draft, setDraft] = useState("");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
-  const [operators, setOperators] = useState<UserDirectoryEntry[]>([]);
+  const [operators, setOperators] = useState<WaOperator[]>([]);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [tags, setTags] = useState<WaTag[]>([]);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
-  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [tagsModalOpen, setTagsModalOpen] = useState(false);
+  const [tagsModalGroupId, setTagsModalGroupId] = useState("");
+  const [tagsModalQuery, setTagsModalQuery] = useState("");
+  const [tagsModalGroupMenuOpen, setTagsModalGroupMenuOpen] = useState(false);
+  const [tagsModalDragOver, setTagsModalDragOver] = useState<"available" | "assigned" | null>(
+    null,
+  );
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpKind, setFollowUpKind] = useState<WaFollowUpKind>("tarea");
   const [slashIndex, setSlashIndex] = useState(0);
   const [assigning, setAssigning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const tagPickerRef = useRef<HTMLDivElement | null>(null);
+  const listBodyRef = useRef<HTMLDivElement | null>(null);
+  const tagsGroupPickerRef = useRef<HTMLDivElement | null>(null);
   const searchTimer = useRef<number | null>(null);
+  const loadingMoreRef = useRef(false);
   const pollState = useRef({
     search: "",
     selectedId: null as string | null,
+    loadedCount: 0,
   });
   const pendingTags = useRef<string[] | null>(null);
   const savingTags = useRef(false);
-  pollState.current = { search, selectedId };
+  pollState.current = { search, selectedId, loadedCount: conversations.length };
 
   const refreshStatus = useCallback(async () => {
     const status = await fetchWhatsappStatus();
@@ -141,19 +163,55 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
 
   const loadList = useCallback(async (q?: string) => {
     setLoadingList(true);
+    setHasMoreConversations(false);
+    setNextConversationsOffset(null);
     try {
-      const data = await fetchWaConversations({
+      const page = await fetchWaConversations({
         search: q,
         status: "OPEN",
+        limit: CONVERSATIONS_PAGE_SIZE,
+        offset: 0,
       });
-      setConversations(data);
+      setConversations(page.items);
+      setHasMoreConversations(page.hasMore);
+      setNextConversationsOffset(page.nextOffset);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudieron cargar las conversaciones");
       setConversations([]);
+      setHasMoreConversations(false);
+      setNextConversationsOffset(null);
     } finally {
       setLoadingList(false);
     }
   }, []);
+
+  const loadMoreConversations = useCallback(async () => {
+    if (loadingMoreRef.current || loadingList || !hasMoreConversations || nextConversationsOffset == null) {
+      return;
+    }
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const page = await fetchWaConversations({
+        search: search.trim() || undefined,
+        status: "OPEN",
+        limit: CONVERSATIONS_PAGE_SIZE,
+        offset: nextConversationsOffset,
+      });
+      setConversations((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const appended = page.items.filter((item) => !seen.has(item.id));
+        return [...prev, ...appended];
+      });
+      setHasMoreConversations(page.hasMore);
+      setNextConversationsOffset(page.nextOffset);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudieron cargar más conversaciones");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [hasMoreConversations, loadingList, nextConversationsOffset, search]);
 
   const loadThread = useCallback(async (id: string) => {
     setLoadingMessages(true);
@@ -162,10 +220,12 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
         fetchWaConversation(id),
         fetchWaMessages(id),
       ]);
+      if (pollState.current.selectedId !== id) return;
       setSelected(conv);
       setMessages(msgs);
       void markWaConversationRead(id)
         .then((updated) => {
+          if (pollState.current.selectedId !== id) return;
           setSelected(updated);
           setConversations((prev) =>
             prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)),
@@ -175,10 +235,11 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
           /* ignore */
         });
     } catch (error) {
+      if (pollState.current.selectedId !== id) return;
       toast.error(error instanceof Error ? error.message : "No se pudo abrir la conversación");
       setMessages([]);
     } finally {
-      setLoadingMessages(false);
+      if (pollState.current.selectedId === id) setLoadingMessages(false);
     }
   }, []);
 
@@ -190,12 +251,10 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
         if (cancelled) return;
         setReady(true);
         await refreshStatus();
+        const ops = await fetchWaOperators().catch(() => [] as WaOperator[]);
+        if (cancelled) return;
+        setOperators(ops);
         await loadList();
-        void fetchWaOperators()
-          .then(setOperators)
-          .catch(() => {
-            /* el chat sigue usable sin el listado */
-          });
         void fetchQuickReplies()
           .then(setQuickReplies)
           .catch(() => {
@@ -239,8 +298,24 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
           fetchWaConversations({
             search: snap.search.trim() || undefined,
             status: "OPEN",
+            limit: Math.max(snap.loadedCount, CONVERSATIONS_PAGE_SIZE),
+            offset: 0,
           })
-            .then((list) => setConversations(list))
+            .then((page) => {
+              setConversations((prev) => {
+                const byId = new Map(page.items.map((item) => [item.id, item]));
+                const merged = prev.map((item) => byId.get(item.id) ?? item);
+                const known = new Set(merged.map((item) => item.id));
+                const fresh = page.items.filter((item) => !known.has(item.id));
+                return [...fresh, ...merged].sort((a, b) => {
+                  const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+                  const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+                  return tb - ta;
+                });
+              });
+              setHasMoreConversations(page.hasMore);
+              setNextConversationsOffset(page.nextOffset);
+            })
             .catch(() => undefined),
         );
         if (snap.selectedId) {
@@ -264,6 +339,7 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
       setMessages([]);
       return;
     }
+    setMessages([]);
     void loadThread(selectedId);
   }, [selectedId, loadThread]);
 
@@ -287,17 +363,9 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
   }, [qrModalOpen]);
 
   useEffect(() => {
-    setTagPickerOpen(false);
+    setTagsModalOpen(false);
+    setTagsModalGroupId("");
   }, [selectedId]);
-
-  useEffect(() => {
-    if (!tagPickerOpen) return;
-    function onPointer(event: MouseEvent) {
-      if (!tagPickerRef.current?.contains(event.target as Node)) setTagPickerOpen(false);
-    }
-    window.addEventListener("mousedown", onPointer);
-    return () => window.removeEventListener("mousedown", onPointer);
-  }, [tagPickerOpen]);
 
   useEffect(() => {
     onConnectionChange?.({
@@ -324,6 +392,87 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
     () => waContactLabel(selected?.contact),
     [selected],
   );
+
+  function selectConversation(conversation: WaConversation) {
+    setSelectedId(conversation.id);
+    setSelected(conversation);
+    setDraft("");
+    setAttachment(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+  const assignedTags = useMemo(
+    () => tags.filter((tag) => (selected?.tagIds ?? []).includes(tag.id)),
+    [tags, selected?.tagIds],
+  );
+  const availableTags = useMemo(
+    () => tags.filter((tag) => !(selected?.tagIds ?? []).includes(tag.id)),
+    [tags, selected?.tagIds],
+  );
+  const assignedModalTags = useMemo(() => {
+    const q = tagsModalQuery.trim().toLowerCase();
+    return assignedTags.filter((tag) => {
+      if (tagsModalGroupId && tag.groupId !== tagsModalGroupId) return false;
+      if (!q) return true;
+      const groupName =
+        tagGroups.find((group) => group.id === tag.groupId)?.name?.toLowerCase() ?? "";
+      return tag.name.toLowerCase().includes(q) || groupName.includes(q);
+    });
+  }, [assignedTags, tagsModalGroupId, tagsModalQuery, tagGroups]);
+  const availableModalTags = useMemo(() => {
+    const q = tagsModalQuery.trim().toLowerCase();
+    return availableTags.filter((tag) => {
+      if (tagsModalGroupId && tag.groupId !== tagsModalGroupId) return false;
+      if (!q) return true;
+      const groupName =
+        tagGroups.find((group) => group.id === tag.groupId)?.name?.toLowerCase() ?? "";
+      return tag.name.toLowerCase().includes(q) || groupName.includes(q);
+    });
+  }, [availableTags, tagsModalGroupId, tagsModalQuery, tagGroups]);
+
+  function tagColor(tag: { groupId: string }): string {
+    return tagGroups.find((group) => group.id === tag.groupId)?.color ?? "#a61948";
+  }
+
+  function tagGroupLabel(tag: { groupId: string }): string {
+    return tagGroups.find((group) => group.id === tag.groupId)?.name ?? "Sin grupo";
+  }
+
+  const tagsModalSelectedGroup = useMemo(
+    () => tagGroups.find((group) => group.id === tagsModalGroupId) ?? null,
+    [tagGroups, tagsModalGroupId],
+  );
+
+  useEffect(() => {
+    if (!tagsModalGroupMenuOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!tagsGroupPickerRef.current?.contains(e.target as Node)) {
+        setTagsModalGroupMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [tagsModalGroupMenuOpen]);
+
+  function setConversationTag(tagId: string, assigned: boolean) {
+    const current = pendingTags.current ?? selected?.tagIds ?? [];
+    const has = current.includes(tagId);
+    if (assigned === has) return;
+    const next = assigned ? [...current, tagId] : current.filter((id) => id !== tagId);
+    void applyTags(next);
+  }
+
+  function assigneeColor(conversation: {
+    assigneeKind?: "none" | "bot" | "user" | null;
+    assigneeUserId?: string | null;
+  }): string {
+    if (conversation.assigneeKind === "bot") return "#a61948";
+    if (conversation.assigneeKind === "user" && conversation.assigneeUserId) {
+      return (
+        operators.find((user) => user.id === conversation.assigneeUserId)?.color ?? "#94a3b8"
+      );
+    }
+    return "#94a3b8";
+  }
   const slashQuery = useMemo(() => extractSlashQuery(draft), [draft]);
   const slashSuggestions = useMemo(() => {
     if (slashQuery === null) return [];
@@ -450,12 +599,29 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
         await sendWaMessage(selectedId, text);
       }
       setDraft("");
-      const [msgs, list] = await Promise.all([
+      const [msgs, page] = await Promise.all([
         fetchWaMessages(selectedId),
-        fetchWaConversations({ search: search.trim() || undefined, status: "OPEN" }),
+        fetchWaConversations({
+          search: search.trim() || undefined,
+          status: "OPEN",
+          limit: Math.max(conversations.length, CONVERSATIONS_PAGE_SIZE),
+          offset: 0,
+        }),
       ]);
       setMessages(msgs);
-      setConversations(list);
+      setConversations((prev) => {
+        const byId = new Map(page.items.map((item) => [item.id, item]));
+        const merged = prev.map((item) => byId.get(item.id) ?? item);
+        const known = new Set(merged.map((item) => item.id));
+        const fresh = page.items.filter((item) => !known.has(item.id));
+        return [...fresh, ...merged].sort((a, b) => {
+          const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+          const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+          return tb - ta;
+        });
+      });
+      setHasMoreConversations(page.hasMore);
+      setNextConversationsOffset(page.nextOffset);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo enviar el mensaje");
     } finally {
@@ -490,8 +656,17 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
             />
           </div>
         </div>
-        <div className="wa-inbox__list-body">
-          {loadingList ? (
+        <div
+          className="wa-inbox__list-body"
+          ref={listBodyRef}
+          onScroll={(event) => {
+            const el = event.currentTarget;
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+              void loadMoreConversations();
+            }
+          }}
+        >
+          {loadingList && conversations.length === 0 ? (
             <p className="wa-inbox__empty">Cargando…</p>
           ) : conversations.length === 0 ? (
             <p className="wa-inbox__empty">
@@ -500,53 +675,48 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
                 : "Conectá WhatsApp para empezar a recibir chats."}
             </p>
           ) : (
-            conversations.map((c) => {
-              const label = waContactLabel(c.contact);
-              const active = c.id === selectedId;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`wa-inbox__item${active ? " is-active" : ""}`}
-                  onClick={() => setSelectedId(c.id)}
-                >
-                  <div className="wa-inbox__item-top">
-                    <strong className="wa-inbox__item-name">{label}</strong>
-                    <span className="wa-inbox__item-time">
-                      {formatPreviewTime(c.lastMessageAt)}
-                    </span>
-                  </div>
-                  {tags.some((tag) => (c.tagIds ?? []).includes(tag.id)) ? (
-                    <div className="wa-inbox__item-tags">
-                      {tags
-                        .filter((tag) => (c.tagIds ?? []).includes(tag.id))
-                        .map((tag) => (
-                          <span
-                            key={tag.id}
-                            className="wa-tag wa-tag--mini"
-                            style={{ "--tag": tag.color } as CSSProperties}
-                          >
-                            {tag.name}
-                          </span>
-                        ))}
+            <>
+              {conversations.map((c) => {
+                const label = waContactLabel(c.contact);
+                const active = c.id === selectedId;
+                const color = assigneeColor(c);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`wa-inbox__item${active ? " is-active" : ""}`}
+                    style={{ "--assignee": color } as CSSProperties}
+                    onClick={() => selectConversation(c)}
+                  >
+                    <div className="wa-inbox__item-top">
+                      <strong className="wa-inbox__item-name">{label}</strong>
+                      <span className="wa-inbox__item-time">
+                        {formatPreviewTime(c.lastMessageAt)}
+                      </span>
                     </div>
-                  ) : null}
-                  <div className="wa-inbox__item-bottom">
-                    <span className="wa-inbox__item-preview">
-                      {c.lastMessagePreview || "Sin mensajes"}
-                    </span>
-                    <span
-                      className={`wa-inbox__assignee${c.assigneeKind === "bot" ? " is-bot" : ""}`}
-                    >
-                      {waAssigneeLabel(c)}
-                    </span>
-                    {c.unreadCount > 0 ? (
-                      <span className="wa-inbox__badge">{c.unreadCount}</span>
-                    ) : null}
-                  </div>
+                    <div className="wa-inbox__item-bottom">
+                      <span className="wa-inbox__item-preview">
+                        {c.lastMessagePreview || "Sin mensajes"}
+                      </span>
+                      <span className="wa-inbox__assignee">{waAssigneeLabel(c)}</span>
+                      {c.unreadCount > 0 ? (
+                        <span className="wa-inbox__badge">{c.unreadCount}</span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
+              {loadingMore ? <p className="wa-inbox__empty wa-inbox__empty--more">Cargando más…</p> : null}
+              {!loadingMore && hasMoreConversations ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm wa-inbox__load-more"
+                  onClick={() => void loadMoreConversations()}
+                >
+                  Cargar más
                 </button>
-              );
-            })
+              ) : null}
+            </>
           )}
         </div>
       </aside>
@@ -564,6 +734,67 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
                 <p>{selected?.contact?.phoneNumber ?? ""}</p>
               </div>
               <div className="wa-inbox__assign">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tarea"
+                  disabled={!selected?.contactId}
+                  aria-label="Tarea"
+                  onClick={() => {
+                    setFollowUpKind("tarea");
+                    setFollowUpOpen(true);
+                  }}
+                >
+                  <IconCheckSquare size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--rec"
+                  disabled={!selected?.contactId}
+                  aria-label="Recordatorio"
+                  onClick={() => {
+                    setFollowUpKind("recordatorio");
+                    setFollowUpOpen(true);
+                  }}
+                >
+                  <IconClock size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--nota"
+                  disabled={!selected?.contactId}
+                  aria-label="Notas"
+                  onClick={() => {
+                    setFollowUpKind("nota");
+                    setFollowUpOpen(true);
+                  }}
+                >
+                  <IconNote size={16} />
+                </button>
+                {tags.length > 0 ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tag"
+                    aria-label="Etiquetas"
+                    onClick={() => {
+                      setTagsModalGroupId("");
+                      setTagsModalOpen(true);
+                    }}
+                  >
+                    <IconTag size={16} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--contacto"
+                  disabled={!selected?.contactId}
+                  aria-label="Agendar contacto"
+                  onClick={() => {
+                    setFollowUpKind("agendar");
+                    setFollowUpOpen(true);
+                  }}
+                >
+                  <IconUsers size={16} />
+                </button>
                 <select
                   className="ui-select"
                   aria-label="Asignar operadora"
@@ -592,84 +823,25 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
                 </select>
               </div>
             </header>
-            {tags.length > 0 ? (
-              <div className="wa-inbox__tags">
-                {tags
-                  .filter((tag) => (selected?.tagIds ?? []).includes(tag.id))
-                  .map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className="wa-tag"
-                      style={{ "--tag": tag.color } as CSSProperties}
-                      title="Quitar etiqueta"
-                      onClick={() => toggleConversationTag(tag.id)}
-                    >
-                      {tag.name}
-                      <span aria-hidden>×</span>
-                    </button>
-                  ))}
-                <div className="wa-tag-picker" ref={tagPickerRef}>
+            <div className="wa-inbox__tags">
+              {assignedTags.length > 0 ? (
+                assignedTags.map((tag) => (
                   <button
+                    key={tag.id}
                     type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setTagPickerOpen((open) => !open)}
+                    className="wa-tag"
+                    style={{ "--tag": tagColor(tag) } as CSSProperties}
+                    title="Quitar etiqueta"
+                    onClick={() => toggleConversationTag(tag.id)}
                   >
-                    + Etiqueta
+                    {tag.name}
+                    <span aria-hidden>×</span>
                   </button>
-                  {tagPickerOpen ? (
-                    <div className="wa-tag-picker__menu" role="listbox" aria-label="Elegir etiquetas">
-                      {tagGroups.map((group) => {
-                        const options = tags.filter((tag) => tag.groupId === group.id);
-                        if (options.length === 0) return null;
-                        return (
-                          <div key={group.id}>
-                            <p className="wa-tag-picker__group">{group.name}</p>
-                            {options.map((tag) => {
-                              const checked = (selected?.tagIds ?? []).includes(tag.id);
-                              return (
-                                <label key={tag.id} className="usuarios-modules-check wa-tag-picker__item">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleConversationTag(tag.id)}
-                                  />
-                                  <span className="wa-tag" style={{ "--tag": tag.color } as CSSProperties}>
-                                    {tag.name}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                      {tags.every((tag) => tagGroups.some((group) => group.id === tag.groupId)) ? null : (
-                        <div>
-                          <p className="wa-tag-picker__group">Sin grupo</p>
-                          {tags
-                            .filter((tag) => !tagGroups.some((group) => group.id === tag.groupId))
-                            .map((tag) => {
-                              const checked = (selected?.tagIds ?? []).includes(tag.id);
-                              return (
-                                <label key={tag.id} className="usuarios-modules-check wa-tag-picker__item">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleConversationTag(tag.id)}
-                                  />
-                                  <span className="wa-tag" style={{ "--tag": tag.color } as CSSProperties}>
-                                    {tag.name}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
+                ))
+              ) : (
+                <p className="wa-inbox__tags-empty">Sin etiquetas asignadas</p>
+              )}
+            </div>
             <div className="wa-inbox__messages">
               {loadingMessages ? (
                 <p className="wa-inbox__empty">Cargando mensajes…</p>
@@ -859,6 +1031,247 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
       </section>
 
       <Modal
+        open={tagsModalOpen}
+        title="Etiquetas de la conversación"
+        wide
+        className="fl-modal--wa-tags"
+        onClose={() => {
+          setTagsModalOpen(false);
+          setTagsModalDragOver(null);
+          setTagsModalQuery("");
+          setTagsModalGroupMenuOpen(false);
+        }}
+        footer={
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setTagsModalOpen(false)}
+          >
+            Listo
+          </button>
+        }
+      >
+        <div className="wa-tags-modal">
+          <div className="wa-tags-modal__toolbar">
+            <input
+              type="search"
+              className="wa-tags-modal__search-input"
+              value={tagsModalQuery}
+              onChange={(event) => setTagsModalQuery(event.target.value)}
+              placeholder="Buscar etiqueta…"
+              autoComplete="off"
+              aria-label="Buscar etiqueta"
+            />
+            <div className="wa-tags-modal__group-picker" ref={tagsGroupPickerRef}>
+              <button
+                type="button"
+                className="wa-tags-modal__group-trigger"
+                aria-label="Filtrar por grupo"
+                aria-expanded={tagsModalGroupMenuOpen}
+                onClick={() => setTagsModalGroupMenuOpen((open) => !open)}
+              >
+                {tagsModalSelectedGroup ? (
+                  <span
+                    className="wa-tags-modal__group-swatch"
+                    style={{ background: tagsModalSelectedGroup.color }}
+                    aria-hidden
+                  />
+                ) : (
+                  <span className="wa-tags-modal__group-swatch wa-tags-modal__group-swatch--all" aria-hidden />
+                )}
+                <span className="wa-tags-modal__group-trigger-label">
+                  {tagsModalSelectedGroup ? tagsModalSelectedGroup.name : "Grupo: todos"}
+                </span>
+              </button>
+              {tagsModalGroupMenuOpen ? (
+                <ul className="wa-tags-modal__group-menu" role="listbox">
+                  <li>
+                    <button
+                      type="button"
+                      className={`wa-tags-modal__group-option${!tagsModalGroupId ? " is-active" : ""}`}
+                      onClick={() => {
+                        setTagsModalGroupId("");
+                        setTagsModalGroupMenuOpen(false);
+                      }}
+                    >
+                      <span
+                        className="wa-tags-modal__group-swatch wa-tags-modal__group-swatch--all"
+                        aria-hidden
+                      />
+                      <span>Grupo: todos</span>
+                    </button>
+                  </li>
+                  {tagGroups.map((group) => (
+                    <li key={group.id}>
+                      <button
+                        type="button"
+                        className={`wa-tags-modal__group-option${
+                          tagsModalGroupId === group.id ? " is-active" : ""
+                        }`}
+                        onClick={() => {
+                          setTagsModalGroupId(group.id);
+                          setTagsModalGroupMenuOpen(false);
+                        }}
+                      >
+                        <span
+                          className="wa-tags-modal__group-swatch"
+                          style={{ background: group.color }}
+                          aria-hidden
+                        />
+                        <span>{group.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="wa-tags-modal__columns">
+            <section
+              className={`wa-tags-modal__col${tagsModalDragOver === "available" ? " is-drop-target" : ""}`}
+              aria-label="Etiquetas disponibles"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setTagsModalDragOver("available");
+              }}
+              onDragLeave={() => setTagsModalDragOver((prev) => (prev === "available" ? null : prev))}
+              onDrop={(e) => {
+                e.preventDefault();
+                setTagsModalDragOver(null);
+                const tagId = e.dataTransfer.getData("text/tag-id");
+                if (tagId) setConversationTag(tagId, false);
+              }}
+            >
+              <header className="wa-tags-modal__col-head">
+                <h3>Disponibles</h3>
+                {availableModalTags.length > 0 ? (
+                  <span className="wa-tags-modal__count">{availableModalTags.length}</span>
+                ) : null}
+              </header>
+              <div className="wa-tags-modal__col-body">
+                {availableModalTags.length === 0 ? (
+                  <p className="form-hint">
+                    {tagsModalQuery.trim()
+                      ? "Ninguna etiqueta disponible coincide con la búsqueda."
+                      : tagsModalGroupId
+                        ? "No hay etiquetas disponibles en ese grupo."
+                        : "No quedan etiquetas para agregar."}
+                  </p>
+                ) : (
+                  <div className="wa-tags-modal__list" role="list">
+                    {availableModalTags.map((tag) => (
+                      <div
+                        key={tag.id}
+                        role="listitem"
+                        className="wa-tags-modal__row"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/tag-id", tag.id);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => setTagsModalDragOver(null)}
+                      >
+                        <span
+                          className="wa-tags-modal__swatch"
+                          style={{ background: tagColor(tag) }}
+                          aria-hidden
+                        />
+                        <span className="wa-tags-modal__main">
+                          <span className="wa-tags-modal__tag-name">{tag.name}</span>
+                          <span className="wa-tags-modal__group-name">{tagGroupLabel(tag)}</span>
+                        </span>
+                        <button
+                          type="button"
+                          className="wa-tags-modal__action"
+                          aria-label={`Asignar ${tag.name}`}
+                          title={`Asignar ${tag.name}`}
+                          onClick={() => setConversationTag(tag.id, true)}
+                        >
+                          <IconPlus size={15} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section
+              className={`wa-tags-modal__col${tagsModalDragOver === "assigned" ? " is-drop-target" : ""}`}
+              aria-label="Etiquetas asignadas"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setTagsModalDragOver("assigned");
+              }}
+              onDragLeave={() => setTagsModalDragOver((prev) => (prev === "assigned" ? null : prev))}
+              onDrop={(e) => {
+                e.preventDefault();
+                setTagsModalDragOver(null);
+                const tagId = e.dataTransfer.getData("text/tag-id");
+                if (tagId) setConversationTag(tagId, true);
+              }}
+            >
+              <header className="wa-tags-modal__col-head">
+                <h3>Asignadas</h3>
+                {assignedModalTags.length > 0 ? (
+                  <span className="wa-tags-modal__count">{assignedModalTags.length}</span>
+                ) : null}
+              </header>
+              <div className="wa-tags-modal__col-body">
+                {assignedModalTags.length === 0 ? (
+                  <p className="form-hint">
+                    {tagsModalQuery.trim()
+                      ? "Ninguna etiqueta asignada coincide con la búsqueda."
+                      : tagsModalGroupId
+                        ? "No hay etiquetas asignadas en ese grupo."
+                        : "Arrastrá o usá el ícono para asignar."}
+                  </p>
+                ) : (
+                  <div className="wa-tags-modal__list" role="list">
+                    {assignedModalTags.map((tag) => (
+                      <div
+                        key={tag.id}
+                        role="listitem"
+                        className="wa-tags-modal__row"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/tag-id", tag.id);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => setTagsModalDragOver(null)}
+                      >
+                        <span
+                          className="wa-tags-modal__swatch"
+                          style={{ background: tagColor(tag) }}
+                          aria-hidden
+                        />
+                        <span className="wa-tags-modal__main">
+                          <span className="wa-tags-modal__tag-name">{tag.name}</span>
+                          <span className="wa-tags-modal__group-name">{tagGroupLabel(tag)}</span>
+                        </span>
+                        <button
+                          type="button"
+                          className="wa-tags-modal__action"
+                          aria-label={`Quitar ${tag.name}`}
+                          title={`Quitar ${tag.name}`}
+                          onClick={() => setConversationTag(tag.id, false)}
+                        >
+                          <IconMinus size={15} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={qrModalOpen && !connected}
         title="Vincular WhatsApp"
         onClose={() => setQrModalOpen(false)}
@@ -883,6 +1296,25 @@ export function WhatsAppConversationsPanel({ onConnectionChange, connectRef }: P
           )}
         </div>
       </Modal>
+
+      <WhatsAppContactFollowUpModal
+        open={followUpOpen}
+        contact={selected?.contact}
+        kind={followUpKind}
+        onClose={() => setFollowUpOpen(false)}
+        onContactSaved={(updated) => {
+          setSelected((prev) =>
+            prev && prev.contactId === updated.id
+              ? { ...prev, contact: updated }
+              : prev,
+          );
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.contactId === updated.id ? { ...c, contact: updated } : c,
+            ),
+          );
+        }}
+      />
     </div>
   );
 }

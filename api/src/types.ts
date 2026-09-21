@@ -372,11 +372,17 @@ export type InicioItem = {
   origenTareaId: string | null;
   /**
    * Usuarios con acceso (incluye al dueño). Indexable con array-contains.
-   * En tareas = asignados + dueño; en notas = compartidos + dueño.
+   * En tareas/recordatorios = asignados + dueño; en notas = compartidos + dueño.
    */
   participantIds: string[];
   /** Otros usuarios (sin el dueño) para chips/UI. */
   sharedWith: InicioUserRef[];
+  /** Si false, no aparece en Inicio (p. ej. notas de un contacto WA). */
+  mostrarEnInicio: boolean;
+  /** Contacto WhatsApp vinculado (si aplica). */
+  whatsappContactId: string | null;
+  /** Etiqueta denormalizada del contacto WA. */
+  whatsappContactLabel: string | null;
   /** Nombre del dueño (denormalizado). */
   ownerNombre: string;
   userId: string;
@@ -398,6 +404,10 @@ export type InicioItemCreateInput = {
   origenTareaId?: string | null;
   /** Ids de usuarios a asignar/compartir (sin el dueño). */
   sharedWithIds?: string[];
+  /** Default true. Notas de contacto WA usan false. */
+  mostrarEnInicio?: boolean;
+  whatsappContactId?: string | null;
+  whatsappContactLabel?: string | null;
 };
 
 export type InicioItemUpdateInput = {

@@ -1,6 +1,10 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
 import { getUserById } from "../services/users.service.js";
+import {
+  listConversationIdsAssignedToUser,
+  reassignConversationsFromUser,
+} from "./firestore-store.js";
 
 export type WaOperator = {
   id: string;
@@ -9,9 +13,14 @@ export type WaOperator = {
   color: string;
 };
 
+export type OperatorReassign = {
+  kind: "none" | "bot" | "user";
+  userId?: string;
+};
+
 const OPERATORS_DOC = doc(firestore, "ordenes_config", "whatsapp_operators");
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-const DEFAULT_COLOR = "#a61948";
+const DEFAULT_COLOR = "#3b82f6";
 
 type Stored = {
   userIds: string[];
@@ -90,8 +99,49 @@ export async function addWhatsappOperator(userId: string, color: string): Promis
   return listWhatsappOperators();
 }
 
-export async function removeWhatsappOperator(userId: string): Promise<WaOperator[]> {
+export async function countOperatorAssignments(userId: string): Promise<number> {
+  return (await listConversationIdsAssignedToUser(userId)).length;
+}
+
+export async function removeWhatsappOperator(
+  userId: string,
+  reassign?: OperatorReassign | null,
+): Promise<WaOperator[]> {
   const id = userId.trim();
+  if (!id) throw new Error("Operadora no encontrada");
+  const assigned = await listConversationIdsAssignedToUser(id);
+  if (assigned.length > 0) {
+    if (!reassign || (reassign.kind !== "none" && reassign.kind !== "bot" && reassign.kind !== "user")) {
+      const error = new Error("HAS_ASSIGNED");
+      (error as Error & { assignedCount: number }).assignedCount = assigned.length;
+      throw error;
+    }
+    let name: string | null = null;
+    let targetUserId: string | null = null;
+    if (reassign.kind === "bot") {
+      name = "Bot";
+    } else if (reassign.kind === "user") {
+      targetUserId = String(reassign.userId ?? "").trim();
+      if (!targetUserId || targetUserId === id) {
+        throw new Error("Elegí otra operadora");
+      }
+      const user = await getUserById(targetUserId);
+      if (!user || user.status !== "approved") {
+        throw new Error("Usuario no encontrado");
+      }
+      const stored = await readStored();
+      if (!stored.userIds.includes(user.id)) {
+        throw new Error("Esa persona no está entre las operadoras");
+      }
+      name = user.nombre.trim() || user.email;
+    }
+    await reassignConversationsFromUser(id, {
+      kind: reassign.kind,
+      userId: targetUserId,
+      name,
+    });
+  }
+
   const stored = await readStored();
   stored.userIds = stored.userIds.filter((item) => item !== id);
   delete stored.colors[id];

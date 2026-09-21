@@ -99,6 +99,28 @@ export async function getContact(id: string): Promise<WaContact | null> {
   return normalizeContact(snap.id, snap.data() as Record<string, unknown>);
 }
 
+export async function updateContactDisplayName(
+  id: string,
+  displayName: string,
+): Promise<WaContact | null> {
+  const existing = await getContact(id);
+  if (!existing) return null;
+  const name = displayName.trim();
+  if (!name) {
+    throw new Error("El nombre es obligatorio");
+  }
+  const now = nowIso();
+  await updateDoc(doc(firestore, CONTACTS, id), {
+    displayName: name,
+    updatedAt: now,
+  });
+  return {
+    ...existing,
+    displayName: name,
+    updatedAt: now,
+  };
+}
+
 export async function findOrCreateContact(input: {
   phoneNumber: string;
   whatsappName?: string | null;
@@ -183,11 +205,31 @@ export async function getConversation(id: string): Promise<WaConversation | null
   return { ...conversation, contact: contact ?? undefined };
 }
 
+export type ConversationListResult = {
+  items: WaConversation[];
+  total: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+};
+
+async function withContacts(items: WaConversation[]): Promise<WaConversation[]> {
+  return Promise.all(
+    items.map(async (c) => {
+      const contact = await getContact(c.contactId);
+      return { ...c, contact: contact ?? undefined };
+    }),
+  );
+}
+
 export async function listConversations(opts?: {
   status?: string;
   search?: string;
-}): Promise<WaConversation[]> {
+  limit?: number;
+  offset?: number;
+}): Promise<ConversationListResult> {
   const status = opts?.status?.trim() || "OPEN";
+  const pageSize = Math.min(Math.max(Number(opts?.limit ?? 40) || 40, 1), 100);
+  const offset = Math.max(Number(opts?.offset ?? 0) || 0, 0);
   const q = query(collection(firestore, CONVERSATIONS), where("status", "==", status));
   const snap = await getDocs(q);
   const items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
@@ -197,30 +239,43 @@ export async function listConversations(opts?: {
     return tb - ta;
   });
 
-  const withContacts = await Promise.all(
-    items.map(async (c) => {
-      const contact = await getContact(c.contactId);
-      return { ...c, contact: contact ?? undefined };
-    }),
-  );
-
   const search = opts?.search?.trim().toLowerCase();
-  if (!search) return withContacts;
+  if (search) {
+    const hydrated = await withContacts(items);
+    const filtered = hydrated.filter((c) => {
+      const phone = c.contact?.phoneNumber?.toLowerCase() ?? "";
+      const name = [
+        c.contact?.displayName,
+        c.contact?.firstName,
+        c.contact?.lastName,
+        c.contact?.whatsappName,
+        c.lastMessagePreview,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return phone.includes(search) || name.includes(search);
+    });
+    const page = filtered.slice(offset, offset + pageSize);
+    const nextOffset = offset + page.length;
+    return {
+      items: page,
+      total: filtered.length,
+      hasMore: nextOffset < filtered.length,
+      nextOffset: nextOffset < filtered.length ? nextOffset : null,
+    };
+  }
 
-  return withContacts.filter((c) => {
-    const phone = c.contact?.phoneNumber?.toLowerCase() ?? "";
-    const name = [
-      c.contact?.displayName,
-      c.contact?.firstName,
-      c.contact?.lastName,
-      c.contact?.whatsappName,
-      c.lastMessagePreview,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return phone.includes(search) || name.includes(search);
-  });
+  const total = items.length;
+  const page = items.slice(offset, offset + pageSize);
+  const hydrated = await withContacts(page);
+  const nextOffset = offset + hydrated.length;
+  return {
+    items: hydrated,
+    total,
+    hasMore: nextOffset < total,
+    nextOffset: nextOffset < total ? nextOffset : null,
+  };
 }
 
 export async function markConversationRead(id: string): Promise<WaConversation | null> {
@@ -249,6 +304,25 @@ export async function setConversationAssignee(
   };
   await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
   return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+export async function listConversationIdsAssignedToUser(userId: string): Promise<string[]> {
+  const id = userId.trim();
+  if (!id) return [];
+  const q = query(collection(firestore, CONVERSATIONS), where("assigneeUserId", "==", id));
+  const snap = await getDocs(q);
+  return snap.docs.map((item) => item.id);
+}
+
+export async function reassignConversationsFromUser(
+  fromUserId: string,
+  input: { kind: "none" | "bot" | "user"; userId?: string | null; name?: string | null },
+): Promise<number> {
+  const ids = await listConversationIdsAssignedToUser(fromUserId);
+  for (const id of ids) {
+    await setConversationAssignee(id, input);
+  }
+  return ids.length;
 }
 
 export async function setConversationTags(

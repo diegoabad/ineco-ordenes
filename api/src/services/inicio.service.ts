@@ -116,9 +116,8 @@ function buildParticipantIds(ownerId: string, sharedWith: InicioUserRef[]): stri
 async function resolveSharedWith(
   ownerId: string,
   sharedWithIds: string[] | undefined,
-  tipo: InicioItemTipo,
+  _tipo: InicioItemTipo,
 ): Promise<InicioUserRef[]> {
-  if (tipo === "recordatorio") return [];
   if (!sharedWithIds || sharedWithIds.length === 0) return [];
   const wanted = [
     ...new Set(
@@ -216,8 +215,7 @@ function normalizeInicioItem(id: string, raw: Record<string, unknown>): InicioIt
     intervaloDias = null;
   }
 
-  const sharedWith =
-    tipo === "recordatorio" ? [] : parseSharedWithRaw(raw.sharedWith).filter((u) => u.id !== userId);
+  const sharedWith = parseSharedWithRaw(raw.sharedWith).filter((u) => u.id !== userId);
   const participantIdsRaw = Array.isArray(raw.participantIds)
     ? raw.participantIds.map((v) => String(v ?? "").trim()).filter(Boolean)
     : [];
@@ -225,6 +223,9 @@ function normalizeInicioItem(id: string, raw: Record<string, unknown>): InicioIt
     participantIdsRaw.length > 0
       ? [...new Set([userId, ...participantIdsRaw].filter(Boolean))]
       : buildParticipantIds(userId, sharedWith);
+
+  const mostrarEnInicio =
+    raw.mostrarEnInicio === undefined ? true : Boolean(raw.mostrarEnInicio);
 
   return {
     id,
@@ -244,6 +245,9 @@ function normalizeInicioItem(id: string, raw: Record<string, unknown>): InicioIt
     origenTareaId: String(raw.origenTareaId ?? "").trim() || null,
     participantIds,
     sharedWith,
+    mostrarEnInicio,
+    whatsappContactId: String(raw.whatsappContactId ?? "").trim() || null,
+    whatsappContactLabel: String(raw.whatsappContactLabel ?? "").trim() || null,
     ownerNombre: String(raw.ownerNombre ?? "").trim(),
     userId,
     creadoAt,
@@ -280,12 +284,23 @@ async function nextOrden(userId: string, tipo: InicioItemTipo): Promise<number> 
   return Math.max(...owned.map((it) => it.orden)) + 1;
 }
 
+export type ListInicioItemsOptions = {
+  tipo?: InicioItemTipo;
+  /** Si viene, incluye ítems ocultos de Inicio vinculados a ese contacto. */
+  whatsappContactId?: string;
+};
+
 export async function listInicioItems(
   userId: string,
-  tipo?: InicioItemTipo,
+  tipoOrOptions?: InicioItemTipo | ListInicioItemsOptions,
 ): Promise<InicioItem[]> {
   const uid = userId.trim();
   if (!uid) throw new Error("Usuario inválido");
+
+  const options: ListInicioItemsOptions =
+    typeof tipoOrOptions === "string" || tipoOrOptions === undefined
+      ? { tipo: tipoOrOptions }
+      : tipoOrOptions;
 
   const [ownedSnap, sharedSnap] = await Promise.all([
     getDocs(query(collection(firestore, INICIO_ITEMS), where("userId", "==", uid))),
@@ -305,7 +320,13 @@ export async function listInicioItems(
   }
 
   let items = [...byId.values()].filter((item) => canAccessItem(item, uid));
-  if (tipo) items = items.filter((item) => item.tipo === tipo);
+  if (options.tipo) items = items.filter((item) => item.tipo === options.tipo);
+  const contactId = String(options.whatsappContactId ?? "").trim();
+  if (contactId) {
+    items = items.filter((item) => item.whatsappContactId === contactId);
+  } else {
+    items = items.filter((item) => item.mostrarEnInicio !== false);
+  }
   return sortItems(items);
 }
 
@@ -371,6 +392,11 @@ export async function createInicioItem(
       ? String(input.origenTareaId ?? "").trim() || null
       : null;
 
+  const mostrarEnInicio =
+    input.mostrarEnInicio === undefined ? true : Boolean(input.mostrarEnInicio);
+  const whatsappContactId = String(input.whatsappContactId ?? "").trim() || null;
+  const whatsappContactLabel = String(input.whatsappContactLabel ?? "").trim() || null;
+
   const item: InicioItem = {
     id: randomUUID(),
     tipo: input.tipo,
@@ -389,6 +415,9 @@ export async function createInicioItem(
     origenTareaId,
     participantIds,
     sharedWith,
+    mostrarEnInicio,
+    whatsappContactId,
+    whatsappContactLabel,
     ownerNombre: resolvedOwnerNombre,
     userId: uid,
     creadoAt: now,
@@ -479,9 +508,6 @@ export async function updateInicioItem(
     if (!isOwner) {
       throw new Error("Solo el dueño puede asignar o compartir");
     }
-    if (current.tipo === "recordatorio") {
-      throw new Error("Los recordatorios no se pueden compartir");
-    }
     next.sharedWith = await resolveSharedWith(current.userId, input.sharedWithIds, current.tipo);
     next.participantIds = buildParticipantIds(current.userId, next.sharedWith);
   }
@@ -507,7 +533,7 @@ export async function aceptarInicioRecordatorio(
   if (!existing.exists()) throw new Error("Ítem no encontrado");
 
   const current = normalizeInicioItem(id, existing.data() as Record<string, unknown>);
-  if (current.userId !== uid) throw new Error("No tenés permiso para este ítem");
+  if (!canAccessItem(current, uid)) throw new Error("No tenés permiso para este ítem");
   if (current.tipo !== "recordatorio") throw new Error("No es un recordatorio");
 
   if (current.recurrencia === "none") {

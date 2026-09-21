@@ -481,8 +481,14 @@ export async function deletePedidoSistema(id: string): Promise<void> {
   await apiFetch(`/api/pedidos-sistema/${id}`, { method: "DELETE" });
 }
 
-export async function fetchInicioItems(tipo?: InicioItemTipo): Promise<InicioItem[]> {
-  const qs = tipo ? `?tipo=${encodeURIComponent(tipo)}` : "";
+export async function fetchInicioItems(
+  tipo?: InicioItemTipo,
+  opts?: { whatsappContactId?: string },
+): Promise<InicioItem[]> {
+  const params = new URLSearchParams();
+  if (tipo) params.set("tipo", tipo);
+  if (opts?.whatsappContactId) params.set("whatsappContactId", opts.whatsappContactId);
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const res = await apiFetch<{ ok: boolean; data: InicioItem[] }>(`/api/inicio${qs}`);
   return res.data;
 }

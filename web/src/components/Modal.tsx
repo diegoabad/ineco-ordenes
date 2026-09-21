@@ -12,15 +12,26 @@ type ModalProps = {
   alert?: boolean;
   /** Si false, oculta el botón X (útil para avisos bloqueantes). */
   hideClose?: boolean;
+  className?: string;
 };
 
-export function Modal({ open, title, onClose, children, footer, wide, alert, hideClose }: ModalProps) {
+export function Modal({
+  open,
+  title,
+  onClose,
+  children,
+  footer,
+  wide,
+  alert,
+  hideClose,
+  className,
+}: ModalProps) {
   if (!open) return null;
 
   return (
     <div className="fl-modal-backdrop" role="presentation">
       <div
-        className={`fl-modal${wide ? " fl-modal--wide" : ""}${alert ? " fl-modal--alert" : ""}`}
+        className={`fl-modal${wide ? " fl-modal--wide" : ""}${alert ? " fl-modal--alert" : ""}${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"

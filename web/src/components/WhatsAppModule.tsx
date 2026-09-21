@@ -7,7 +7,7 @@ import {
 } from "./WhatsAppConversationsPanel";
 import { WhatsAppOperatorsPanel } from "./WhatsAppOperatorsPanel";
 import { WhatsAppQuickRepliesPanel } from "./WhatsAppQuickRepliesPanel";
-import { WhatsAppTagsPanel } from "./WhatsAppTagsPanel";
+import { WhatsAppTagsPanel, type TagsPanelTab } from "./WhatsAppTagsPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -21,8 +21,12 @@ export function WhatsAppModule({ section }: Props) {
     connecting: false,
     label: "Desconectado",
   });
+  const [tagsTab, setTagsTab] = useState<TagsPanelTab>("etiquetas");
   const onConnectionChange = useCallback((status: WaConnectionBanner) => {
     setConnection(status);
+  }, []);
+  const onTagsTabChange = useCallback((tab: TagsPanelTab) => {
+    setTagsTab(tab);
   }, []);
   const connectRef = useRef<(() => void) | null>(null);
   const createReplyRef = useRef<(() => void) | null>(null);
@@ -43,7 +47,11 @@ export function WhatsAppModule({ section }: Props) {
             ) : section === "respuestas-rapidas" ? (
               <p>Atajos con disparadores tipo /saludo y variables como {"{{nombre}}"}</p>
             ) : section === "etiquetas" ? (
-              <p>Grupos y etiquetas para clasificar las conversaciones</p>
+              <p>
+                {tagsTab === "grupos"
+                  ? "Grupos para organizar y colorear las etiquetas"
+                  : "Etiquetas para clasificar las conversaciones"}
+              </p>
             ) : null}
           </div>
         </div>
@@ -81,22 +89,25 @@ export function WhatsAppModule({ section }: Props) {
           </div>
         ) : section === "etiquetas" ? (
           <div className="app-header__actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => createGroupRef.current?.()}
-            >
-              <IconPlus size={16} />
-              Crear grupo
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => createTagRef.current?.()}
-            >
-              <IconPlus size={16} />
-              Nueva etiqueta
-            </button>
+            {tagsTab === "grupos" ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => createGroupRef.current?.()}
+              >
+                <IconPlus size={16} />
+                Crear grupo
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => createTagRef.current?.()}
+              >
+                <IconPlus size={16} />
+                Nueva etiqueta
+              </button>
+            )}
           </div>
         ) : section === "respuestas-rapidas" ? (
           <div className="app-header__actions">
@@ -121,7 +132,11 @@ export function WhatsAppModule({ section }: Props) {
       ) : section === "respuestas-rapidas" ? (
         <WhatsAppQuickRepliesPanel createRef={createReplyRef} />
       ) : section === "etiquetas" ? (
-        <WhatsAppTagsPanel createRef={createTagRef} createGroupRef={createGroupRef} />
+        <WhatsAppTagsPanel
+          createRef={createTagRef}
+          createGroupRef={createGroupRef}
+          onTabChange={onTagsTabChange}
+        />
       ) : (
         <div className="fl-table-empty fl-table-empty--fill">
           <p className="fl-table-empty__title">Próximamente</p>

@@ -18,6 +18,7 @@ import {
 } from "./components/Icons";
 import { LoadingBlock } from "./components/InecoMark";
 import { InicioPanel } from "./components/InicioPanel";
+import { InicioRecordatorioWatcher } from "./components/InicioRecordatorioWatcher";
 import {
   EnvioResultadoModal,
   type EnvioResultadoItem,
@@ -909,6 +910,7 @@ export default function App() {
     return (
       <div className="app-layout">
         {sidebar}
+        <InicioRecordatorioWatcher />
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
@@ -924,6 +926,7 @@ export default function App() {
     return (
       <div className="app-layout">
         {sidebar}
+        <InicioRecordatorioWatcher />
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
@@ -942,6 +945,7 @@ export default function App() {
   return (
     <div className="app-layout">
       {sidebar}
+      <InicioRecordatorioWatcher />
       <div className="app-main">
         {module === "inicio" ? (
           <InicioPanel userName={formatNombrePersona(user?.nombre ?? "") || undefined} />

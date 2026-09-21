@@ -1,6 +1,6 @@
 import type { QuickReply } from "../lib/quickReplies";
 import { apiFetch, getApiUrl } from "../config/api";
-import type { WaConnectionStatus, WaConversation, WaMessage, WaOperator, WaTag, WaTagCatalog, WaTagGroup } from "../types/whatsappCrm";
+import type { WaConnectionStatus, WaContact, WaConversation, WaMessage, WaOperator, WaTag, WaTagCatalog, WaTagGroup } from "../types/whatsappCrm";
 
 export async function fetchWhatsappCrmHealth(): Promise<{
   configured: boolean;
@@ -94,18 +94,24 @@ export async function fetchWaTagCatalog(): Promise<WaTagCatalog> {
   };
 }
 
-export async function createWaTagGroup(name: string): Promise<WaTagGroup> {
+export async function createWaTagGroup(input: {
+  name: string;
+  color: string;
+}): Promise<WaTagGroup> {
   const res = await apiFetch<{ ok: boolean; data: WaTagGroup }>("/api/whatsapp-crm/tag-groups", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(input),
   });
   return res.data;
 }
 
-export async function updateWaTagGroup(id: string, name: string): Promise<WaTagGroup> {
+export async function updateWaTagGroup(
+  id: string,
+  input: { name?: string; color?: string },
+): Promise<WaTagGroup> {
   const res = await apiFetch<{ ok: boolean; data: WaTagGroup }>(
     `/api/whatsapp-crm/tag-groups/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: JSON.stringify({ name }) },
+    { method: "PATCH", body: JSON.stringify(input) },
   );
   return res.data;
 }
@@ -118,7 +124,6 @@ export async function deleteWaTagGroup(id: string): Promise<void> {
 
 export async function createWaTag(input: {
   name: string;
-  color: string;
   groupId: string;
 }): Promise<WaTag> {
   const res = await apiFetch<{ ok: boolean; data: WaTag }>("/api/whatsapp-crm/tags", {
@@ -130,7 +135,7 @@ export async function createWaTag(input: {
 
 export async function updateWaTag(
   id: string,
-  input: { name?: string; color?: string; groupId?: string },
+  input: { name?: string; groupId?: string },
 ): Promise<WaTag> {
   const res = await apiFetch<{ ok: boolean; data: WaTag }>(
     `/api/whatsapp-crm/tags/${encodeURIComponent(id)}`,
@@ -153,6 +158,17 @@ export async function setWaConversationTags(id: string, tagIds: string[]): Promi
   return res.data;
 }
 
+export async function updateWaContact(
+  id: string,
+  input: { displayName: string },
+): Promise<WaContact> {
+  const res = await apiFetch<{ ok: boolean; data: WaContact }>(
+    `/api/whatsapp-crm/contacts/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
 export async function fetchWaOperators(): Promise<WaOperator[]> {
   const res = await apiFetch<{ ok: boolean; data: WaOperator[] }>(
     "/api/whatsapp-crm/operators",
@@ -168,26 +184,60 @@ export async function addWaOperator(userId: string, color: string): Promise<WaOp
   return Array.isArray(res.data) ? res.data : [];
 }
 
-export async function removeWaOperator(userId: string): Promise<WaOperator[]> {
+export async function fetchWaOperatorAssignments(userId: string): Promise<number> {
+  const res = await apiFetch<{ ok: boolean; data: { count: number } }>(
+    `/api/whatsapp-crm/operators/${encodeURIComponent(userId)}/assignments`,
+  );
+  return Number(res.data?.count ?? 0);
+}
+
+export async function removeWaOperator(
+  userId: string,
+  reassign?: { kind: "none" | "bot" | "user"; userId?: string } | null,
+): Promise<WaOperator[]> {
   const res = await apiFetch<{ ok: boolean; data: WaOperator[] }>(
     `/api/whatsapp-crm/operators/${encodeURIComponent(userId)}`,
-    { method: "DELETE" },
+    {
+      method: "DELETE",
+      body: JSON.stringify(reassign ? { reassign } : {}),
+    },
   );
   return Array.isArray(res.data) ? res.data : [];
 }
 
+export type WaConversationListPage = {
+  items: WaConversation[];
+  total: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+};
+
 export async function fetchWaConversations(params?: {
   search?: string;
   status?: string;
-}): Promise<WaConversation[]> {
+  limit?: number;
+  offset?: number;
+}): Promise<WaConversationListPage> {
   const q = new URLSearchParams();
   if (params?.search?.trim()) q.set("search", params.search.trim());
   if (params?.status) q.set("status", params.status);
+  if (params?.limit != null) q.set("limit", String(params.limit));
+  if (params?.offset != null) q.set("offset", String(params.offset));
   const qs = q.toString();
-  const res = await apiFetch<{ ok: boolean; data: WaConversation[] }>(
-    `/api/whatsapp-crm/conversations${qs ? `?${qs}` : ""}`,
-  );
-  return Array.isArray(res.data) ? res.data : [];
+  const res = await apiFetch<{
+    ok: boolean;
+    data: WaConversation[];
+    total?: number;
+    hasMore?: boolean;
+    nextOffset?: number | null;
+  }>(`/api/whatsapp-crm/conversations${qs ? `?${qs}` : ""}`);
+  const items = Array.isArray(res.data) ? res.data : [];
+  return {
+    items,
+    total: Number(res.total ?? items.length),
+    hasMore: res.hasMore === true,
+    nextOffset: res.nextOffset ?? null,
+  };
 }
 
 export async function fetchWaConversation(id: string): Promise<WaConversation> {

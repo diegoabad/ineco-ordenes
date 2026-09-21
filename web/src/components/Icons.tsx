@@ -23,6 +23,17 @@ export function IconPlus(p: IconProps) {
   );
 }
 
+export function IconMoreVertical(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <circle cx="12" cy="5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconPencil(p: IconProps) {
   const s = base(p);
   return (
@@ -175,6 +186,30 @@ export function IconCheck(p: IconProps) {
   return (
     <svg viewBox="0 0 24 24" {...s}>
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+/** Tarea / checklist. */
+export function IconCheckSquare(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <polyline points="9 12 11 14 15 10" />
+    </svg>
+  );
+}
+
+/** Nota / sticky. */
+export function IconNote(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="13" y2="17" />
     </svg>
   );
 }

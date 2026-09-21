@@ -15,7 +15,7 @@ service cloud.firestore {
     // ordenes_config/whatsapp_quick_replies:
     //   items[] de respuestas rápidas (trigger, body, isActive)
     // ordenes_config/whatsapp_tags:
-    //   groups[] (name) e items[] de etiquetas (name, color, groupId)
+    //   groups[] (name, color) e items[] de etiquetas (name, groupId)
     // ordenes_config/busca_turno:
     //   config compartida del módulo Busca turno
     // ordenes_pedidos_sistema/{id}:

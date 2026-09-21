@@ -44,12 +44,12 @@ export type WaOperator = {
 export type WaTagGroup = {
   id: string;
   name: string;
+  color: string;
 };
 
 export type WaTag = {
   id: string;
   name: string;
-  color: string;
   groupId: string;
 };
 

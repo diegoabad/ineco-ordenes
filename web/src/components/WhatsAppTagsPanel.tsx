@@ -1,4 +1,10 @@
-import { FormEvent, useEffect, useState, type CSSProperties, type MutableRefObject } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type MutableRefObject,
+} from "react";
 import { toast } from "react-toastify";
 import {
   createWaTag,
@@ -31,25 +37,29 @@ const TAG_COLORS = [
 type TagDraft = {
   id: string | null;
   name: string;
-  color: string;
   groupId: string;
 };
 
 type GroupDraft = {
   id: string | null;
   name: string;
+  color: string;
 };
+
+export type TagsPanelTab = "etiquetas" | "grupos";
 
 type Props = {
   createRef?: MutableRefObject<(() => void) | null>;
   createGroupRef?: MutableRefObject<(() => void) | null>;
+  onTabChange?: (tab: TagsPanelTab) => void;
 };
 
 function byName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name, "es");
 }
 
-export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
+export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Props) {
+  const [tab, setTab] = useState<TagsPanelTab>("etiquetas");
   const [groups, setGroups] = useState<WaTagGroup[]>([]);
   const [items, setItems] = useState<WaTag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,11 +90,28 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    onTabChange?.(tab);
+  }, [onTabChange, tab]);
+
   const removing = items.find((item) => item.id === removeId) ?? null;
   const removingGroup = groups.find((group) => group.id === removeGroupId) ?? null;
+  const sortedGroups = [...groups].sort(byName);
+
+  function groupOf(groupId: string): WaTagGroup | undefined {
+    return groups.find((group) => group.id === groupId);
+  }
 
   function groupName(groupId: string): string {
-    return groups.find((group) => group.id === groupId)?.name ?? "Sin grupo";
+    return groupOf(groupId)?.name ?? "Sin grupo";
+  }
+
+  function groupColor(groupId: string): string {
+    return groupOf(groupId)?.color ?? TAG_COLORS[0]!;
+  }
+
+  function tagsInGroup(groupId: string): number {
+    return items.filter((item) => item.groupId === groupId).length;
   }
 
   const sortedItems = [...items].sort((a, b) => {
@@ -95,19 +122,21 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
   function openCreate() {
     if (groups.length === 0) {
       toast.error("Primero creá un grupo");
-      setGroupDraft({ id: null, name: "" });
+      setTab("grupos");
+      setGroupDraft({ id: null, name: "", color: TAG_COLORS[0]! });
       return;
     }
+    setTab("etiquetas");
     setDraft({
       id: null,
       name: "",
-      color: TAG_COLORS[0]!,
       groupId: groups[0]!.id,
     });
   }
 
   function openCreateGroup() {
-    setGroupDraft({ id: null, name: "" });
+    setTab("grupos");
+    setGroupDraft({ id: null, name: "", color: TAG_COLORS[0]! });
   }
 
   if (createRef) createRef.current = openCreate;
@@ -117,9 +146,12 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
     setDraft({
       id: tag.id,
       name: tag.name,
-      color: tag.color,
       groupId: tag.groupId || groups[0]?.id || "",
     });
+  }
+
+  function openEditGroup(group: WaTagGroup) {
+    setGroupDraft({ id: group.id, name: group.name, color: group.color });
   }
 
   async function onSave(event: FormEvent) {
@@ -136,7 +168,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
     }
     setSaving(true);
     try {
-      const payload = { name, color: draft.color, groupId: draft.groupId };
+      const payload = { name, groupId: draft.groupId };
       if (draft.id) {
         const updated = await updateWaTag(draft.id, payload);
         setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
@@ -164,16 +196,17 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
     }
     setSaving(true);
     try {
+      const payload = { name, color: groupDraft.color };
       if (groupDraft.id) {
-        const updated = await updateWaTagGroup(groupDraft.id, name);
+        const updated = await updateWaTagGroup(groupDraft.id, payload);
         setGroups((prev) => prev.map((group) => (group.id === updated.id ? updated : group)).sort(byName));
         toast.success("Grupo actualizado");
       } else {
-        const created = await createWaTagGroup(name);
+        const created = await createWaTagGroup(payload);
         setGroups((prev) => [...prev, created].sort(byName));
         toast.success("Grupo creado");
       }
-      setGroupDraft({ id: null, name: "" });
+      setGroupDraft(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo guardar el grupo");
     } finally {
@@ -201,7 +234,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
     try {
       await deleteWaTagGroup(removeGroupId);
       setGroups((prev) => prev.filter((group) => group.id !== removeGroupId));
-      setGroupDraft((current) => (current?.id === removeGroupId ? { id: null, name: "" } : current));
+      setGroupDraft((current) => (current?.id === removeGroupId ? null : current));
       setRemoveGroupId(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo eliminar el grupo");
@@ -212,75 +245,189 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
 
   return (
     <>
-      <section className="fl-table-card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Etiqueta</th>
-                <th>Grupo</th>
-                <th className="fl-col-actions fl-col-actions--2">Acciones</th>
-              </tr>
-            </thead>
-            {!loading && sortedItems.length > 0 ? (
-              <tbody>
-                {sortedItems.map((tag) => (
-                  <tr key={tag.id}>
-                    <td>
-                      <span className="wa-tag" style={{ "--tag": tag.color } as CSSProperties}>
-                        {tag.name}
-                      </span>
-                    </td>
-                    <td>{groupName(tag.groupId)}</td>
-                    <td className="fl-col-actions fl-col-actions--2">
-                      <div className="fl-table-actions fl-table-actions--2">
-                        <button
-                          type="button"
-                          className="fl-icon-btn"
-                          title="Editar"
-                          onClick={() => openEdit(tag)}
+      <div className="app-tabs app-tabs--full wa-tags-panel__tabs" role="tablist" aria-label="Etiquetas y grupos">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "etiquetas"}
+          className={`app-tabs__btn${tab === "etiquetas" ? " is-active" : ""}`}
+          onClick={() => setTab("etiquetas")}
+        >
+          Etiquetas
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "grupos"}
+          className={`app-tabs__btn${tab === "grupos" ? " is-active" : ""}`}
+          onClick={() => setTab("grupos")}
+        >
+          Grupos
+        </button>
+      </div>
+
+      {tab === "etiquetas" ? (
+        <section className="fl-table-card" role="tabpanel">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Etiqueta</th>
+                  <th>Grupo</th>
+                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                </tr>
+              </thead>
+              {!loading && sortedItems.length > 0 ? (
+                <tbody>
+                  {sortedItems.map((tag) => (
+                    <tr key={tag.id}>
+                      <td>
+                        <span
+                          className="wa-tag"
+                          style={{ "--tag": groupColor(tag.groupId) } as CSSProperties}
                         >
-                          <IconPencil size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="fl-icon-btn fl-icon-btn--danger"
-                          title="Eliminar"
-                          onClick={() => setRemoveId(tag.id)}
-                        >
-                          <IconTrash size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            ) : null}
-          </table>
-          {loading ? (
-            <div className="fl-table-empty fl-table-empty--fill">
-              <LoadingBlock label="Cargando etiquetas…" />
-            </div>
-          ) : sortedItems.length === 0 ? (
-            <div className="fl-table-empty fl-table-empty--fill">
-              <div className="fl-table-empty__art">
-                <IconFile size={32} />
+                          {tag.name}
+                        </span>
+                      </td>
+                      <td>{groupName(tag.groupId)}</td>
+                      <td className="fl-col-actions fl-col-actions--2">
+                        <div className="fl-table-actions fl-table-actions--2">
+                          <button
+                            type="button"
+                            className="fl-icon-btn"
+                            title="Editar"
+                            onClick={() => openEdit(tag)}
+                          >
+                            <IconPencil size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--danger"
+                            title="Eliminar"
+                            onClick={() => setRemoveId(tag.id)}
+                          >
+                            <IconTrash size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ) : null}
+            </table>
+            {loading ? (
+              <div className="fl-table-empty fl-table-empty--fill">
+                <LoadingBlock label="Cargando etiquetas…" />
               </div>
-              <p className="fl-table-empty__title">Todavía no hay etiquetas</p>
-              <p className="fl-table-empty__hint">
-                Creá un grupo, por ejemplo Sedes o Profesional, y después las etiquetas.
-              </p>
-              <button type="button" className="btn btn-primary" onClick={openCreateGroup}>
-                Crear grupo
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </section>
+            ) : sortedItems.length === 0 ? (
+              <div className="fl-table-empty fl-table-empty--fill">
+                <div className="fl-table-empty__art">
+                  <IconFile size={32} />
+                </div>
+                <p className="fl-table-empty__title">Todavía no hay etiquetas</p>
+                <p className="fl-table-empty__hint">
+                  {groups.length === 0
+                    ? "Primero creá un grupo y después las etiquetas."
+                    : "Creá la primera etiqueta para clasificar las conversaciones."}
+                </p>
+                {groups.length === 0 ? (
+                  <button type="button" className="btn btn-primary" onClick={openCreateGroup}>
+                    Crear grupo
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-primary" onClick={openCreate}>
+                    Nueva etiqueta
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : (
+        <section className="fl-table-card" role="tabpanel">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th>Color</th>
+                  <th>Etiquetas</th>
+                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                </tr>
+              </thead>
+              {!loading && sortedGroups.length > 0 ? (
+                <tbody>
+                  {sortedGroups.map((group) => (
+                    <tr key={group.id}>
+                      <td>
+                        <span className="wa-tag" style={{ "--tag": group.color } as CSSProperties}>
+                          {group.name}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className="wa-tag-swatch wa-tag-swatch--static"
+                          style={{ background: group.color }}
+                          title={group.color}
+                        />
+                      </td>
+                      <td>{tagsInGroup(group.id)}</td>
+                      <td className="fl-col-actions fl-col-actions--2">
+                        <div className="fl-table-actions fl-table-actions--2">
+                          <button
+                            type="button"
+                            className="fl-icon-btn"
+                            title="Editar"
+                            onClick={() => openEditGroup(group)}
+                          >
+                            <IconPencil size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--danger"
+                            title="Eliminar"
+                            onClick={() => {
+                              if (tagsInGroup(group.id) > 0) {
+                                toast.error("Hay etiquetas en ese grupo");
+                                return;
+                              }
+                              setRemoveGroupId(group.id);
+                            }}
+                          >
+                            <IconTrash size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ) : null}
+            </table>
+            {loading ? (
+              <div className="fl-table-empty fl-table-empty--fill">
+                <LoadingBlock label="Cargando grupos…" />
+              </div>
+            ) : sortedGroups.length === 0 ? (
+              <div className="fl-table-empty fl-table-empty--fill">
+                <div className="fl-table-empty__art">
+                  <IconFile size={32} />
+                </div>
+                <p className="fl-table-empty__title">Todavía no hay grupos</p>
+                <p className="fl-table-empty__hint">
+                  Creá grupos como Sedes, Profesional o Tratamiento para organizar las etiquetas.
+                </p>
+                <button type="button" className="btn btn-primary" onClick={openCreateGroup}>
+                  Crear grupo
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      )}
 
       <Modal
         open={groupDraft !== null}
-        title="Grupos"
+        title={groupDraft?.id ? "Editar grupo" : "Nuevo grupo"}
         onClose={() => {
           if (!saving) setGroupDraft(null);
         }}
@@ -292,59 +439,71 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
               disabled={saving}
               onClick={() => setGroupDraft(null)}
             >
-              Cerrar
+              Cancelar
             </button>
             <button type="submit" form="wa-tag-group-form" className="btn btn-primary" disabled={saving}>
-              {saving ? "Guardando…" : groupDraft?.id ? "Guardar grupo" : "Crear grupo"}
+              {saving ? "Guardando…" : groupDraft?.id ? "Guardar cambios" : "Crear grupo"}
             </button>
           </>
         }
       >
         {groupDraft ? (
-          <>
-            <form id="wa-tag-group-form" onSubmit={(event) => void onSaveGroup(event)}>
-              <label className="form-group">
-                <span>Nombre</span>
-                <input
-                  value={groupDraft.name}
-                  onChange={(event) =>
-                    setGroupDraft((current) =>
-                      current ? { ...current, name: event.target.value } : current,
-                    )
-                  }
-                  placeholder="Sedes"
-                  required
-                />
-              </label>
-            </form>
-            {groups.length > 0 ? (
-              <ul className="wa-group-list">
-                {groups.map((group) => (
-                  <li key={group.id}>
-                    <span>{group.name}</span>
-                    <button
-                      type="button"
-                      className="fl-icon-btn"
-                      title="Editar"
-                      onClick={() => setGroupDraft({ id: group.id, name: group.name })}
-                    >
-                      <IconPencil size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      className="fl-icon-btn fl-icon-btn--danger"
-                      title="Eliminar"
-                      onClick={() => setRemoveGroupId(group.id)}
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </li>
+          <form id="wa-tag-group-form" onSubmit={(event) => void onSaveGroup(event)}>
+            <label className="form-group">
+              <span>Nombre</span>
+              <input
+                value={groupDraft.name}
+                onChange={(event) =>
+                  setGroupDraft((current) =>
+                    current ? { ...current, name: event.target.value } : current,
+                  )
+                }
+                placeholder="Sedes"
+                required
+                autoFocus
+              />
+            </label>
+            <div className="form-group">
+              <label>Color</label>
+              <div className="wa-tag-colors">
+                {TAG_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`wa-tag-swatch${groupDraft.color === color ? " is-active" : ""}`}
+                    style={{ background: color }}
+                    aria-label={color}
+                    onClick={() =>
+                      setGroupDraft((current) => (current ? { ...current, color } : current))
+                    }
+                  />
                 ))}
-              </ul>
-            ) : (
-              <p className="form-hint">Por ejemplo: Sedes, Profesional o Tratamiento.</p>
-            )}
-          </>
+                <label
+                  className={`wa-tag-swatch wa-tag-swatch--custom${
+                    !TAG_COLORS.includes(groupDraft.color.toLowerCase()) ? " is-active" : ""
+                  }`}
+                  title="Elegir color"
+                >
+                  <input
+                    type="color"
+                    value={groupDraft.color}
+                    onChange={(event) =>
+                      setGroupDraft((current) =>
+                        current ? { ...current, color: event.target.value } : current,
+                      )
+                    }
+                    aria-label="Elegir color personalizado"
+                  />
+                </label>
+              </div>
+            </div>
+            <span className="wa-tag" style={{ "--tag": groupDraft.color } as CSSProperties}>
+              {groupDraft.name.trim() || "Grupo"}
+            </span>
+            <p className="form-hint">
+              Todas las etiquetas de este grupo van a usar este color.
+            </p>
+          </form>
         ) : null}
       </Modal>
 
@@ -381,6 +540,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
                 }
                 placeholder="Caballito"
                 required
+                autoFocus
               />
             </label>
             <label className="form-group">
@@ -402,24 +562,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef }: Props) {
                 ))}
               </select>
             </label>
-            <div className="form-group">
-              <label>Color</label>
-              <div className="wa-tag-colors">
-                {TAG_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    className={`wa-tag-swatch${draft.color === color ? " is-active" : ""}`}
-                    style={{ background: color }}
-                    aria-label={color}
-                    onClick={() =>
-                      setDraft((current) => (current ? { ...current, color } : current))
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-            <span className="wa-tag" style={{ "--tag": draft.color } as CSSProperties}>
+            <span className="wa-tag" style={{ "--tag": groupColor(draft.groupId) } as CSSProperties}>
               {draft.name.trim() || "Etiqueta"}
             </span>
           </form>
