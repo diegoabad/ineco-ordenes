@@ -9,7 +9,7 @@ import { updateWaContact } from "../services/whatsappCrmService";
 import { notifyInicioItemsChanged } from "../lib/inicioEvents";
 import type { InicioRecurrencia, UserDirectoryEntry } from "../types";
 import type { WaContact } from "../types/whatsappCrm";
-import { waContactLabel } from "../types/whatsappCrm";
+import { waContactDetailLabel, waContactLabel } from "../types/whatsappCrm";
 import { DateTimePicker } from "./DateTimePicker";
 import {
   loadUserDirectoryCached,
@@ -110,6 +110,7 @@ export function WhatsAppContactFollowUpModal({
 
   const contactId = contact?.id?.trim() || "";
   const contactLabel = contact ? waContactLabel(contact) : "";
+  const contactDetailLabel = contact ? waContactDetailLabel(contact) : "";
   const needsAssignees = kind === "tarea" || kind === "recordatorio";
   const modalTitle =
     kind === "agendar"
@@ -179,7 +180,7 @@ export function WhatsAppContactFollowUpModal({
         sharedWithIds: assigneeIds,
         mostrarEnInicio: true,
         whatsappContactId: contactId,
-        whatsappContactLabel: contactLabel || null,
+        whatsappContactLabel: contactDetailLabel || null,
       });
       toast.success("Tarea creada en Inicio");
       onClose();
@@ -235,7 +236,7 @@ export function WhatsAppContactFollowUpModal({
         sharedWithIds: assigneeIds,
         mostrarEnInicio: true,
         whatsappContactId: contactId,
-        whatsappContactLabel: contactLabel || null,
+        whatsappContactLabel: contactDetailLabel || null,
       });
       toast.success("Recordatorio creado en Inicio");
       notifyInicioItemsChanged();
@@ -264,7 +265,7 @@ export function WhatsAppContactFollowUpModal({
         detalle: d,
         mostrarEnInicio: false,
         whatsappContactId: contactId,
-        whatsappContactLabel: contactLabel || null,
+        whatsappContactLabel: contactDetailLabel || null,
       });
       toast.success("Nota guardada en el contacto");
       onClose();

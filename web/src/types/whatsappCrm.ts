@@ -99,3 +99,12 @@ export function waContactLabel(contact?: WaContact | null): string {
   if (contact.whatsappName?.trim()) return contact.whatsappName.trim();
   return contact.phoneNumber || "Contacto";
 }
+
+/** Nombre y teléfono para tooltips / etiquetas de Inicio. */
+export function waContactDetailLabel(contact?: WaContact | null): string {
+  if (!contact) return "WhatsApp";
+  const name = waContactLabel(contact);
+  const phone = String(contact.phoneNumber ?? "").trim();
+  if (phone && name !== phone) return `${name} · ${phone}`;
+  return name || phone || "WhatsApp";
+}

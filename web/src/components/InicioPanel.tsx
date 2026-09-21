@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
 import { fechaHoyIso, parseYmd, toYmd } from "../lib/fechas";
@@ -86,6 +87,12 @@ function detalleSinContextoWa(detalle: string): string {
     .filter((line) => line && !/^WhatsApp:\s*/i.test(line))
     .join("\n")
     .trim();
+}
+
+function waBadgeTooltip(item: {
+  whatsappContactLabel?: string | null;
+}): string {
+  return String(item.whatsappContactLabel ?? "").trim() || "WhatsApp";
 }
 
 function cleanMonth(s: string): string {
@@ -239,6 +246,28 @@ export function InicioPanel({ userName }: Props) {
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [shareTarget, setShareTarget] = useState<InicioItem | null>(null);
   const [actionsMenuId, setActionsMenuId] = useState<string | null>(null);
+  const [actionsMenuPos, setActionsMenuPos] = useState<{
+    bottom: number;
+    right: number;
+  } | null>(null);
+
+  function closeActionsMenu() {
+    setActionsMenuId(null);
+    setActionsMenuPos(null);
+  }
+
+  function toggleActionsMenu(id: string, anchor: HTMLElement) {
+    if (actionsMenuId === id) {
+      closeActionsMenu();
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    setActionsMenuPos({
+      bottom: Math.max(8, window.innerHeight - rect.top + 6),
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+    setActionsMenuId(id);
+  }
   const pendingCreatesRef = useRef(new Map<string, Promise<InicioItem>>());
   const savingRecRef = useRef(false);
   const addingTareaRef = useRef(false);
@@ -269,10 +298,20 @@ export function InicioPanel({ userName }: Props) {
     function onDoc(e: MouseEvent) {
       const t = e.target as HTMLElement | null;
       if (t?.closest?.(`[data-inicio-actions="${actionsMenuId}"]`)) return;
-      setActionsMenuId(null);
+      if (t?.closest?.("[data-inicio-actions-menu]")) return;
+      closeActionsMenu();
+    }
+    function onDismiss() {
+      closeActionsMenu();
     }
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    window.addEventListener("scroll", onDismiss, true);
+    window.addEventListener("resize", onDismiss);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onDismiss, true);
+      window.removeEventListener("resize", onDismiss);
+    };
   }, [actionsMenuId]);
 
   useEffect(() => {
@@ -870,7 +909,7 @@ export function InicioPanel({ userName }: Props) {
     setViewNota(item);
   }
 
-  async function closeNotaModal() {
+  async function closeNotaModal(opts?: { commit?: boolean }) {
     if (!viewNota) return;
     const draft = viewNota;
     const titulo = editTitulo.trim();
@@ -881,6 +920,14 @@ export function InicioPanel({ userName }: Props) {
     const hadContent =
       draft.titulo.trim().length > 0 || draft.detalle.trim().length > 0;
     const hasContent = titulo.length > 0 || detalle.length > 0;
+    const commit = opts?.commit === true;
+
+    // Borrador nuevo: solo se persiste con el botón Crear.
+    if (isDraft && !commit) {
+      setViewNota(null);
+      pendingCreatesRef.current.delete(closingId);
+      return;
+    }
 
     setViewNota(null);
 
@@ -1185,7 +1232,7 @@ export function InicioPanel({ userName }: Props) {
                   return (
                   <li
                     key={item.id}
-                    className={`inicio-list__item inicio-list__item--tarea${item.hecha ? " is-done" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}${!isOwner ? " is-shared" : ""}`}
+                    className={`inicio-list__item inicio-list__item--tarea${item.hecha ? " is-done" : ""}${isDragging ? " is-dragging" : ""}${dropEdge === "before" ? " is-drop-before" : ""}${dropEdge === "after" ? " is-drop-after" : ""}${!isOwner ? " is-shared" : ""}${actionsMenuId === item.id ? " is-actions-open" : ""}${item.whatsappContactId || item.whatsappContactLabel ? " is-wa" : ""}`}
                     draggable={!reordering && isOwner}
                     onDragStart={(e) => {
                       if (!dragTareaAllowedRef.current || !isOwner) {
@@ -1272,7 +1319,11 @@ export function InicioPanel({ userName }: Props) {
                         )}
                       </span>
                       {item.whatsappContactId || item.whatsappContactLabel ? (
-                        <span className="inicio-list__wa" title="WhatsApp">
+                        <span
+                          className="inicio-list__wa"
+                          data-tooltip={waBadgeTooltip(item)}
+                          title={waBadgeTooltip(item)}
+                        >
                           WA
                         </span>
                       ) : null}
@@ -1304,72 +1355,79 @@ export function InicioPanel({ userName }: Props) {
                             aria-label="Más acciones"
                             aria-expanded={actionsMenuId === item.id}
                             disabled={busyId === item.id || reordering}
-                            onClick={() =>
-                              setActionsMenuId((prev) =>
-                                prev === item.id ? null : item.id,
-                              )
-                            }
+                            onClick={(e) => toggleActionsMenu(item.id, e.currentTarget)}
                           >
                             <IconMoreVertical size={15} />
                           </button>
-                          {actionsMenuId === item.id ? (
-                            <div className="inicio-list__more-menu" role="menu">
-                              <button
-                                type="button"
-                                className="fl-icon-btn fl-icon-btn--edit"
-                                role="menuitem"
-                                aria-label="Editar"
-                                title="Editar"
-                                disabled={busyId === item.id || reordering}
-                                onClick={() => {
-                                  setActionsMenuId(null);
-                                  openTareaModal(item);
-                                }}
-                              >
-                                <IconPencil size={15} />
-                              </button>
-                              <button
-                                type="button"
-                                className={`fl-icon-btn${
-                                  yaConvertida
-                                    ? " fl-icon-btn--muted"
-                                    : " fl-icon-btn--success"
-                                }`}
-                                role="menuitem"
-                                aria-label={
-                                  yaConvertida
-                                    ? "Ya tiene recordatorio (crear otro)"
-                                    : "Convertir a recordatorio"
-                                }
-                                title={
-                                  yaConvertida
-                                    ? "Ya tiene recordatorio"
-                                    : "Convertir a recordatorio"
-                                }
-                                disabled={busyId === item.id || reordering}
-                                onClick={() => {
-                                  setActionsMenuId(null);
-                                  openRecordatorioModal(item);
-                                }}
-                              >
-                                <IconClock size={15} />
-                              </button>
-                              <button
-                                type="button"
-                                className="fl-icon-btn fl-icon-btn--danger"
-                                role="menuitem"
-                                aria-label="Eliminar"
-                                title="Eliminar"
-                                disabled={busyId === item.id || reordering}
-                                onClick={() => {
-                                  setActionsMenuId(null);
-                                  setDeleteId(item.id);
-                                }}
-                              >
-                                <IconTrash size={15} />
-                              </button>
-                            </div>
-                          ) : null}
+                          {actionsMenuId === item.id && actionsMenuPos
+                            ? createPortal(
+                                <div
+                                  className="inicio-list__more-menu"
+                                  role="menu"
+                                  data-inicio-actions-menu=""
+                                  style={{
+                                    bottom: actionsMenuPos.bottom,
+                                    right: actionsMenuPos.right,
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="fl-icon-btn fl-icon-btn--edit"
+                                    role="menuitem"
+                                    aria-label="Editar"
+                                    title="Editar"
+                                    disabled={busyId === item.id || reordering}
+                                    onClick={() => {
+                                      closeActionsMenu();
+                                      openTareaModal(item);
+                                    }}
+                                  >
+                                    <IconPencil size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`fl-icon-btn${
+                                      yaConvertida
+                                        ? " fl-icon-btn--muted"
+                                        : " fl-icon-btn--success"
+                                    }`}
+                                    role="menuitem"
+                                    aria-label={
+                                      yaConvertida
+                                        ? "Ya tiene recordatorio (crear otro)"
+                                        : "Convertir a recordatorio"
+                                    }
+                                    title={
+                                      yaConvertida
+                                        ? "Ya tiene recordatorio"
+                                        : "Convertir a recordatorio"
+                                    }
+                                    disabled={busyId === item.id || reordering}
+                                    onClick={() => {
+                                      closeActionsMenu();
+                                      openRecordatorioModal(item);
+                                    }}
+                                  >
+                                    <IconClock size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="fl-icon-btn fl-icon-btn--danger"
+                                    role="menuitem"
+                                    aria-label="Eliminar"
+                                    title="Eliminar"
+                                    disabled={busyId === item.id || reordering}
+                                    onClick={() => {
+                                      closeActionsMenu();
+                                      setDeleteId(item.id);
+                                    }}
+                                  >
+                                    <IconTrash size={15} />
+                                  </button>
+                                </div>,
+                                document.body,
+                              )
+                            : null}
                         </div>
                       ) : null}
                     </div>
@@ -1411,7 +1469,7 @@ export function InicioPanel({ userName }: Props) {
                   return (
                     <li
                       key={item.id}
-                      className={`inicio-list__item inicio-list__item--rec${due ? " is-due" : ""}`}
+                      className={`inicio-list__item inicio-list__item--rec${due ? " is-due" : ""}${actionsMenuId === item.id ? " is-actions-open" : ""}${item.whatsappContactId || item.whatsappContactLabel ? " is-wa" : ""}`}
                     >
                       {fechaLabel ? (
                         <span className="inicio-list__meta inicio-list__meta--inline">
@@ -1438,7 +1496,11 @@ export function InicioPanel({ userName }: Props) {
                           )}
                         </span>
                         {item.whatsappContactId || item.whatsappContactLabel ? (
-                          <span className="inicio-list__wa" title="WhatsApp">
+                          <span
+                            className="inicio-list__wa"
+                            data-tooltip={waBadgeTooltip(item)}
+                            title={waBadgeTooltip(item)}
+                          >
                             WA
                           </span>
                         ) : null}
@@ -1472,46 +1534,53 @@ export function InicioPanel({ userName }: Props) {
                               aria-label="Más acciones"
                               aria-expanded={actionsMenuId === item.id}
                               disabled={busyId === item.id}
-                              onClick={() =>
-                                setActionsMenuId((prev) =>
-                                  prev === item.id ? null : item.id,
-                                )
-                              }
+                              onClick={(e) => toggleActionsMenu(item.id, e.currentTarget)}
                             >
                               <IconMoreVertical size={15} />
                             </button>
-                            {actionsMenuId === item.id ? (
-                              <div className="inicio-list__more-menu" role="menu">
-                                <button
-                                  type="button"
-                                  className="fl-icon-btn fl-icon-btn--edit"
-                                  role="menuitem"
-                                  aria-label="Editar"
-                                  title="Editar"
-                                  disabled={busyId === item.id}
-                                  onClick={() => {
-                                    setActionsMenuId(null);
-                                    openRecordatorioModal(item);
-                                  }}
-                                >
-                                  <IconPencil size={15} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="fl-icon-btn fl-icon-btn--danger"
-                                  role="menuitem"
-                                  aria-label="Eliminar"
-                                  title="Eliminar"
-                                  disabled={busyId === item.id}
-                                  onClick={() => {
-                                    setActionsMenuId(null);
-                                    setDeleteId(item.id);
-                                  }}
-                                >
-                                  <IconTrash size={15} />
-                                </button>
-                              </div>
-                            ) : null}
+                            {actionsMenuId === item.id && actionsMenuPos
+                              ? createPortal(
+                                  <div
+                                    className="inicio-list__more-menu"
+                                    role="menu"
+                                    data-inicio-actions-menu=""
+                                    style={{
+                                      bottom: actionsMenuPos.bottom,
+                                      right: actionsMenuPos.right,
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="fl-icon-btn fl-icon-btn--edit"
+                                      role="menuitem"
+                                      aria-label="Editar"
+                                      title="Editar"
+                                      disabled={busyId === item.id}
+                                      onClick={() => {
+                                        closeActionsMenu();
+                                        openRecordatorioModal(item);
+                                      }}
+                                    >
+                                      <IconPencil size={15} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="fl-icon-btn fl-icon-btn--danger"
+                                      role="menuitem"
+                                      aria-label="Eliminar"
+                                      title="Eliminar"
+                                      disabled={busyId === item.id}
+                                      onClick={() => {
+                                        closeActionsMenu();
+                                        setDeleteId(item.id);
+                                      }}
+                                    >
+                                      <IconTrash size={15} />
+                                    </button>
+                                  </div>,
+                                  document.body,
+                                )
+                              : null}
                           </div>
                         ) : null}
                       </div>
@@ -1781,7 +1850,7 @@ export function InicioPanel({ userName }: Props) {
                 disabled={
                   !(editTitulo.trim() || editDetalle.trim()) || busyId === viewNota.id
                 }
-                onClick={() => void closeNotaModal()}
+                onClick={() => void closeNotaModal({ commit: true })}
               >
                 {isLocalInicioId(viewNota.id) ? "Crear" : "Guardar"}
               </button>
@@ -1819,14 +1888,26 @@ export function InicioPanel({ userName }: Props) {
         {viewTarea ? (
           <div className="inicio-item-view">
             <h3 className="inicio-item-view__title">{viewTarea.titulo}</h3>
-            {detalleSinContextoWa(viewTarea.detalle) ? (
-              <p className="inicio-item-view__detalle">{detalleSinContextoWa(viewTarea.detalle)}</p>
-            ) : (
-              <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">Sin detalle</p>
-            )}
             {viewTarea.whatsappContactId || viewTarea.whatsappContactLabel ? (
-              <p className="inicio-item-view__meta">WhatsApp</p>
+              <div className="inicio-item-view__wa">
+                <span className="inicio-list__wa">WA</span>
+                <span className="inicio-item-view__wa-contact">
+                  {waBadgeTooltip(viewTarea)}
+                </span>
+              </div>
             ) : null}
+            <div className="inicio-item-view__detalle-box">
+              <span className="inicio-item-view__detalle-label">Detalle</span>
+              {detalleSinContextoWa(viewTarea.detalle) ? (
+                <p className="inicio-item-view__detalle">
+                  {detalleSinContextoWa(viewTarea.detalle)}
+                </p>
+              ) : (
+                <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">
+                  Sin detalle
+                </p>
+              )}
+            </div>
           </div>
         ) : null}
       </Modal>
@@ -1860,11 +1941,26 @@ export function InicioPanel({ userName }: Props) {
         {viewRec ? (
           <div className="inicio-item-view">
             <h3 className="inicio-item-view__title">{viewRec.titulo}</h3>
-            {detalleSinContextoWa(viewRec.detalle) ? (
-              <p className="inicio-item-view__detalle">{detalleSinContextoWa(viewRec.detalle)}</p>
-            ) : (
-              <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">Sin detalle</p>
-            )}
+            {viewRec.whatsappContactId || viewRec.whatsappContactLabel ? (
+              <div className="inicio-item-view__wa">
+                <span className="inicio-list__wa">WA</span>
+                <span className="inicio-item-view__wa-contact">
+                  {waBadgeTooltip(viewRec)}
+                </span>
+              </div>
+            ) : null}
+            <div className="inicio-item-view__detalle-box">
+              <span className="inicio-item-view__detalle-label">Detalle</span>
+              {detalleSinContextoWa(viewRec.detalle) ? (
+                <p className="inicio-item-view__detalle">
+                  {detalleSinContextoWa(viewRec.detalle)}
+                </p>
+              ) : (
+                <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">
+                  Sin detalle
+                </p>
+              )}
+            </div>
             <dl className="inicio-item-view__facts">
               {formatItemFecha(viewRec.fechaHora) ? (
                 <div>
@@ -1876,12 +1972,6 @@ export function InicioPanel({ userName }: Props) {
                 <div>
                   <dt>Repite</dt>
                   <dd>{formatRecurrenciaLabel(viewRec)}</dd>
-                </div>
-              ) : null}
-              {viewRec.whatsappContactId || viewRec.whatsappContactLabel ? (
-                <div>
-                  <dt>Origen</dt>
-                  <dd>WhatsApp</dd>
                 </div>
               ) : null}
             </dl>
@@ -2117,13 +2207,6 @@ export function InicioPanel({ userName }: Props) {
             : shareTarget?.tipo === "recordatorio"
               ? "Asignar recordatorio"
               : "Compartir nota"
-        }
-        subtitle={
-          shareTarget?.tipo === "tarea"
-            ? "Elegí uno o más usuarios. Ellos van a ver la tarea en su Inicio."
-            : shareTarget?.tipo === "recordatorio"
-              ? "Elegí operadoras o administrativos. Van a ver el recordatorio en su Inicio."
-              : "Elegí con quién compartir. Pueden ver y editar la nota."
         }
         selectedIds={
           shareTarget ? assigneeIdsFromItem(shareTarget, myUserId) : []

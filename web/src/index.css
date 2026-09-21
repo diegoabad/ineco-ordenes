@@ -932,29 +932,36 @@ label {
   flex-shrink: 0;
 }
 
+.inicio-list__item.is-actions-open {
+  position: relative;
+  z-index: 40;
+}
+
 .inicio-list__more {
   position: relative;
+  z-index: 1;
 }
 
 .inicio-list__more-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 0.2rem);
-  right: 0;
+  position: fixed;
+  z-index: 1400;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.15rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
   margin: 0;
-  padding: 0.3rem;
+  padding: 0.4rem;
   border: 1px solid var(--border);
-  border-radius: 0.55rem;
+  border-radius: 0.65rem;
   background: var(--surface, #fff);
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
 }
 
 .inicio-list__more-menu .fl-icon-btn {
-  width: 100%;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  padding: 0.4rem;
   justify-content: center;
 }
 
@@ -1004,6 +1011,21 @@ label {
   background: color-mix(in srgb, #25d366 22%, transparent);
 }
 
+.inicio-list__item.is-wa {
+  background: color-mix(in srgb, #25d366 12%, white);
+  border-color: color-mix(in srgb, #25d366 28%, var(--border));
+}
+
+.inicio-list__item.is-wa:hover {
+  background: color-mix(in srgb, #25d366 18%, white);
+  border-color: color-mix(in srgb, #25d366 38%, var(--border));
+}
+
+.inicio-list__item.is-wa.is-due {
+  background: color-mix(in srgb, #25d366 16%, white);
+  border-color: color-mix(in srgb, #25d366 42%, var(--border));
+}
+
 .inicio-list__owner {
   display: block;
   width: 100%;
@@ -1038,6 +1060,44 @@ label {
   font-weight: 750;
   line-height: 1.35;
   color: var(--text);
+}
+
+.inicio-item-view__wa {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.55rem;
+  border: 1px solid color-mix(in srgb, #25d366 32%, var(--border));
+  background: color-mix(in srgb, #25d366 12%, white);
+}
+
+.inicio-item-view__wa-contact {
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #0b6b4f;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.inicio-item-view__detalle-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--bg-subtle, #f8fafc);
+}
+
+.inicio-item-view__detalle-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .inicio-item-view__detalle {
