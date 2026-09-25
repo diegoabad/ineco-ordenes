@@ -1,4 +1,5 @@
 import { Router } from "express";
+import path from "node:path";
 import { requireAuth, requireModule } from "../middleware/auth.middleware.js";
 import {
   getDb,
@@ -6,10 +7,12 @@ import {
   getPresupuestoEmailConfig,
   listEmailEnvios,
   deleteEmailEnvio,
+  restoreEnvioPdf,
   saveEmailConfig,
   savePresupuestoEmailConfig,
   setMedicoSeleccionadoId,
 } from "../services/db.service.js";
+import { resolveEnvioPdfPath } from "../services/envio-pdf.service.js";
 import { EMAIL_TEMPLATE_VARS, type EmailConfig } from "../services/email-templates.js";
 import {
   EMAIL_TEMPLATE_VARS_BY_KIND,
@@ -161,6 +164,43 @@ router.delete("/email-envios/:id", requireAuth, requireModule("ordenes"), async 
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo eliminar el registro";
     const status = message.includes("no encontrado") ? 404 : 500;
+    res.status(status).json({ ok: false, message });
+  }
+});
+
+router.get("/email-envios/:id/pdf", requireAuth, requireModule("ordenes"), async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const filePath = await resolveEnvioPdfPath(id);
+    if (!filePath) {
+      res.status(404).json({
+        ok: false,
+        code: "PDF_MISSING",
+        message: "El PDF no está en el servidor. Se puede regenerar desde el historial.",
+      });
+      return;
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Disposition", `inline; filename="orden-${id}.pdf"`);
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al leer el PDF",
+    });
+  }
+});
+
+router.put("/email-envios/:id/pdf", requireAuth, requireModule("ordenes"), async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const pdfBase64 = String((req.body as { pdfBase64?: unknown })?.pdfBase64 ?? "").trim();
+    const data = await restoreEnvioPdf(id, pdfBase64);
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error al restaurar el PDF";
+    const status = message.includes("no encontrado") ? 404 : 400;
     res.status(status).json({ ok: false, message });
   }
 });

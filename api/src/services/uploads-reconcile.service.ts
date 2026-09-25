@@ -1,4 +1,5 @@
-import { listMedicos, listPresupuestos, setMedicoFirmaUrl } from "./db.service.js";
+import { listEmailEnvios, listMedicos, listPresupuestos, setMedicoFirmaUrl } from "./db.service.js";
+import { resolveEnvioPdfPath } from "./envio-pdf.service.js";
 import { firmaPublicUrl, resolveFirmaPath } from "./image.service.js";
 import { resolvePresupuestoPdfPath } from "./presupuesto-pdf.service.js";
 
@@ -8,6 +9,8 @@ export type UploadsReconcileReport = {
   firmasFaltantes: number;
   presupuestosOk: number;
   presupuestosFaltantes: number;
+  enviosOk: number;
+  enviosFaltantes: number;
 };
 
 /**
@@ -21,6 +24,8 @@ export async function reconcileUploadsOnStartup(): Promise<UploadsReconcileRepor
     firmasFaltantes: 0,
     presupuestosOk: 0,
     presupuestosFaltantes: 0,
+    enviosOk: 0,
+    enviosFaltantes: 0,
   };
 
   try {
@@ -73,9 +78,33 @@ export async function reconcileUploadsOnStartup(): Promise<UploadsReconcileRepor
     console.error("[uploads-reconcile] Error reconciliando PDFs de presupuestos", error);
   }
 
+  try {
+    // Acotamos a los últimos ~500 para no demorar el boot.
+    const first = await listEmailEnvios({ page: 1, pageSize: 100 });
+    const pages = Math.min(5, Math.max(1, Math.ceil(first.total / 100) || 1));
+    const seen = new Set<string>();
+    for (let page = 1; page <= pages; page += 1) {
+      const batch =
+        page === 1 ? first : await listEmailEnvios({ page, pageSize: 100 });
+      for (const envio of batch.data) {
+        if (!envio.pdfUrl?.trim() || seen.has(envio.id)) continue;
+        seen.add(envio.id);
+        const resolved = await resolveEnvioPdfPath(envio.id);
+        if (!resolved) {
+          report.enviosFaltantes += 1;
+          continue;
+        }
+        report.enviosOk += 1;
+      }
+    }
+  } catch (error) {
+    console.error("[uploads-reconcile] Error reconciliando PDFs de envíos", error);
+  }
+
   console.log(
     `[uploads-reconcile] firmas ok=${report.firmasOk} recuperadas=${report.firmasRecuperadas} faltantes=${report.firmasFaltantes} | ` +
-      `presupuestos ok=${report.presupuestosOk} faltantes=${report.presupuestosFaltantes}`,
+      `presupuestos ok=${report.presupuestosOk} faltantes=${report.presupuestosFaltantes} | ` +
+      `envios ok=${report.enviosOk} faltantes=${report.enviosFaltantes}`,
   );
 
   return report;

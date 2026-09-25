@@ -581,13 +581,7 @@ export default function App() {
     abrirPdfEnPestana(pdfBlobFromDoc(doc));
   }
 
-  async function prepararOrdenEmailDraft(
-    paciente: Paciente,
-    fecha: string,
-  ): Promise<OrdenEmailDraft> {
-    if (!paciente.email?.trim()) {
-      throw new Error("Este paciente no tiene email cargado");
-    }
+  async function generarOrdenPdfBase64(paciente: Paciente, fecha: string): Promise<string> {
     if (!fecha) {
       throw new Error("Indicá la fecha de la orden.");
     }
@@ -602,7 +596,7 @@ export default function App() {
     const firmaDataUrl = await firmaToDataUrlForPdf(medico.firmaUrl);
     if (medico.firmaUrl && !firmaDataUrl) {
       toast.warning(
-        `No se encontró la firma de ${formatNombrePersona(medico.nombre)}. El PDF se enviará sin firma.`,
+        `No se encontró la firma de ${formatNombrePersona(medico.nombre)}. El PDF se generará sin firma.`,
       );
     }
 
@@ -610,8 +604,25 @@ export default function App() {
       [{ paciente, medico: toConfigMedico(medico, firmaDataUrl) }],
       fecha,
     );
-    const blob = pdfBlobFromDoc(doc);
-    const pdfBase64 = await blobToBase64(blob);
+    return blobToBase64(pdfBlobFromDoc(doc));
+  }
+
+  async function prepararOrdenEmailDraft(
+    paciente: Paciente,
+    fecha: string,
+  ): Promise<OrdenEmailDraft> {
+    if (!paciente.email?.trim()) {
+      throw new Error("Este paciente no tiene email cargado");
+    }
+
+    const medico = medicoParaPaciente(paciente);
+    if (!medico) {
+      throw new Error(
+        `No hay profesional para "${formatNombrePersona(paciente.paciente)}". Asignale uno o elegí un profesional por defecto.`,
+      );
+    }
+
+    const pdfBase64 = await generarOrdenPdfBase64(paciente, fecha);
     const filename = `orden-${paciente.paciente.replace(/\s+/g, "-") || "paciente"}-${fecha}.pdf`;
 
     return {
@@ -1227,6 +1238,17 @@ export default function App() {
               return;
             }
             solicitarEnviar([paciente]);
+          }}
+          onRegeneratePdfBase64={async (envio) => {
+            const paciente = pacientes.find((p) => p.id === envio.pacienteId);
+            if (!paciente) {
+              throw new Error("Ese paciente ya no existe. No se puede regenerar el PDF.");
+            }
+            const fecha = envio.fechaOrden?.trim();
+            if (!fecha) {
+              throw new Error("El envío no tiene fecha de orden para regenerar el PDF.");
+            }
+            return generarOrdenPdfBase64(paciente, fecha);
           }}
         />
       ) : ordenesSection === "config" ? (

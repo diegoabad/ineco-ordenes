@@ -63,6 +63,18 @@ export function legacyPresupuestoPdfDirs(): string[] {
   ];
 }
 
+/** Rutas históricas donde a veces quedaron PDFs de envíos de órdenes. */
+export function legacyEnvioPdfDirs(): string[] {
+  const root = uploadsRootDir();
+  return [
+    path.join(uploadsFirmasDir(), "envios"),
+    path.join(API_ROOT, "envios"),
+    path.join(API_ROOT, "uploads", "envios"),
+    path.join(path.dirname(API_ROOT), "uploads", "envios"),
+    path.join(path.dirname(root), "envios"),
+  ];
+}
+
 /** Rutas históricas donde a veces quedaron firmas (fuera de uploads/firmas). */
 export function legacyFirmaDirs(): string[] {
   const root = uploadsRootDir();
