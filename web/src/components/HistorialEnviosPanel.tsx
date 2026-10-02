@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
-import { resolveAssetUrl } from "../config/api";
 import { formatFechaYmd } from "../lib/fechas";
 import { formatNombrePersona } from "../lib/nombrePersona";
-import { deleteEmailEnvio, fetchEmailEnvios } from "../services/dataService";
+import {
+  deleteEmailEnvio,
+  fetchEmailEnvioPdfBlob,
+  fetchEmailEnvios,
+  restoreEnvioPdf,
+} from "../services/dataService";
 import type { EmailEnvio, Paciente } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ViewDetailModal } from "./ViewDetailModal";
@@ -15,6 +19,8 @@ type Props = {
   pacientes: Paciente[];
   refreshKey: number;
   onRetry: (paciente: Paciente) => void;
+  /** Regenera el PDF de la orden (base64) a partir del paciente y la fecha del envío. */
+  onRegeneratePdfBase64: (envio: EmailEnvio) => Promise<string>;
 };
 
 const PAGE_SIZE = TABLE_PAGE_SIZE;
@@ -80,7 +86,12 @@ function formatFechaOrden(ymd: string): string {
   return formatFechaYmd(t);
 }
 
-export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) {
+export function HistorialEnviosPanel({
+  pacientes,
+  refreshKey,
+  onRetry,
+  onRegeneratePdfBase64,
+}: Props) {
   const mesOptions = useMemo(() => buildMesOptions(), []);
   const defaultMes = useMemo(() => {
     const actual = mesActualYm();
@@ -96,6 +107,7 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
   const [mes, setMes] = useState(defaultMes);
   const [errorDetalle, setErrorDetalle] = useState<EmailEnvio | null>(null);
   const [envioABorrar, setEnvioABorrar] = useState<EmailEnvio | null>(null);
+  const [viendoPdfId, setViendoPdfId] = useState<string | null>(null);
   const primeraCarga = useRef(true);
 
   useEffect(() => {
@@ -150,13 +162,44 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
     onRetry(paciente);
   }
 
-  function handleVerPdf(envio: EmailEnvio) {
-    const url = resolveAssetUrl(envio.pdfUrl);
-    if (!url) {
+  function openPdfBlob(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function regenerarYRestaurarPdf(envio: EmailEnvio): Promise<Blob> {
+    const pdfBase64 = await onRegeneratePdfBase64(envio);
+    const updated = await restoreEnvioPdf(envio.id, pdfBase64);
+    setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    return fetchEmailEnvioPdfBlob(envio.id);
+  }
+
+  async function handleVerPdf(envio: EmailEnvio) {
+    if (!envio.pdfUrl) {
       toast.warning("Este envío no tiene PDF guardado");
       return;
     }
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (viendoPdfId) return;
+    setViendoPdfId(envio.id);
+    try {
+      try {
+        openPdfBlob(await fetchEmailEnvioPdfBlob(envio.id));
+        return;
+      } catch (error) {
+        const status = (error as Error & { status?: number; code?: string }).status;
+        const code = (error as Error & { code?: string }).code;
+        if (status !== 404 && code !== "PDF_MISSING") throw error;
+      }
+
+      toast.info("El PDF no estaba en el servidor; regenerándolo…");
+      openPdfBlob(await regenerarYRestaurarPdf(envio));
+      toast.success("PDF restaurado en el servidor");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo abrir el PDF");
+    } finally {
+      setViendoPdfId(null);
+    }
   }
 
   async function confirmarBorrar() {
@@ -277,10 +320,16 @@ export function HistorialEnviosPanel({ pacientes, refreshKey, onRetry }: Props) 
                           <button
                             type="button"
                             className="fl-icon-btn fl-icon-btn--print"
-                            title={tienePdf ? "Ver PDF adjunto" : "Sin PDF guardado"}
+                            title={
+                              viendoPdfId === envio.id
+                                ? "Abriendo PDF…"
+                                : tienePdf
+                                  ? "Ver PDF adjunto"
+                                  : "Sin PDF guardado"
+                            }
                             aria-label="Ver PDF adjunto"
-                            disabled={!tienePdf}
-                            onClick={() => handleVerPdf(envio)}
+                            disabled={!tienePdf || viendoPdfId === envio.id}
+                            onClick={() => void handleVerPdf(envio)}
                           >
                             <IconPdf size={16} />
                           </button>

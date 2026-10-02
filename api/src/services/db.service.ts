@@ -47,7 +47,7 @@ import {
   presupuestoPlantillaConfigWithDefaults,
   type PresupuestoPlantillaConfig,
 } from "./presupuesto-plantilla-templates.js";
-import { deleteEnvioPdfFile } from "./envio-pdf.service.js";
+import { deleteEnvioPdfFile, saveEnvioPdf } from "./envio-pdf.service.js";
 import { deletePresupuestoPdfFile, readPresupuestoPdfBase64, savePresupuestoPdf } from "./presupuesto-pdf.service.js";
 import { sendLinkPagoEmail, sendPresupuestoEmail } from "./email.service.js";
 
@@ -652,6 +652,25 @@ export async function deleteEmailEnvio(id: string): Promise<void> {
   if (!snap.exists()) throw new Error("Registro de envío no encontrado");
   await deleteDoc(ref);
   await deleteEnvioPdfFile(id);
+}
+
+export async function getEmailEnvio(id: string): Promise<EmailEnvio | null> {
+  const snap = await getDoc(doc(firestore, EMAIL_ENVIOS, id));
+  if (!snap.exists()) return null;
+  return normalizeEmailEnvio(snap.id, snap.data() as Record<string, unknown>);
+}
+
+/** Reemplaza el PDF en disco y actualiza pdfUrl (sirve para recuperar archivos perdidos). */
+export async function restoreEnvioPdf(id: string, pdfBase64: string): Promise<EmailEnvio> {
+  const existingSnap = await getDoc(doc(firestore, EMAIL_ENVIOS, id));
+  if (!existingSnap.exists()) throw new Error("Registro de envío no encontrado");
+  if (!pdfBase64.trim()) throw new Error("Falta el PDF");
+
+  const current = normalizeEmailEnvio(id, existingSnap.data() as Record<string, unknown>);
+  const saved = await saveEnvioPdf(id, pdfBase64);
+  const envio: EmailEnvio = { ...current, pdfUrl: saved.publicUrl };
+  await setDoc(doc(firestore, EMAIL_ENVIOS, id), emailEnvioPayload(envio));
+  return envio;
 }
 
 export async function getEmailConfig(): Promise<EmailConfig> {

@@ -179,6 +179,38 @@ export async function deleteEmailEnvio(id: string): Promise<void> {
   await apiFetch(`/api/email-envios/${id}`, { method: "DELETE" });
 }
 
+export async function fetchEmailEnvioPdfBlob(id: string): Promise<Blob> {
+  const response = await fetch(`${getApiUrl()}/api/email-envios/${id}/pdf`, {
+    credentials: "include",
+  });
+  if (response.ok) {
+    return response.blob();
+  }
+
+  let message = `Error del servidor (${response.status})`;
+  let code: string | undefined;
+  try {
+    const raw = await response.text();
+    if (raw.trim()) {
+      const data = JSON.parse(raw) as { message?: string; code?: string };
+      if (data.message) message = data.message;
+      if (data.code) code = data.code;
+    }
+  } catch {
+    // ignore
+  }
+
+  throw Object.assign(new Error(message), { status: response.status, code });
+}
+
+export async function restoreEnvioPdf(id: string, pdfBase64: string): Promise<EmailEnvio> {
+  const res = await apiFetch<{ ok: boolean; data: EmailEnvio }>(`/api/email-envios/${id}/pdf`, {
+    method: "PUT",
+    body: JSON.stringify({ pdfBase64 }),
+  });
+  return res.data;
+}
+
 export async function createPaciente(data: PacienteFormData): Promise<Paciente> {
   const res = await apiFetch<{ ok: boolean; data: Paciente }>("/api/pacientes", {
     method: "POST",
