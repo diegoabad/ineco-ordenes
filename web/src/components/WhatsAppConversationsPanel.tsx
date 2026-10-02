@@ -493,16 +493,10 @@ export function WhatsAppConversationsPanel({
     return quickReplyVars(selected?.contact, operadora);
   }
 
-  function applyQuickReply(item: QuickReply) {
-    setDraft(resolveQuickReply(item.body, replyVars()));
-  }
-
-  function outgoingText(raw: string): string {
+  function matchQuickReply(raw: string): QuickReply | null {
     const query = extractSlashQuery(raw.trim());
-    if (!query) return raw.trim();
-    const match = quickReplies.find((item) => item.isActive && item.trigger === query);
-    if (!match) return raw.trim();
-    return resolveQuickReply(match.body, replyVars());
+    if (!query) return null;
+    return quickReplies.find((item) => item.isActive && item.trigger === query) ?? null;
   }
 
   async function applyTags(tagIds: string[]) {
@@ -537,6 +531,20 @@ export function WhatsAppConversationsPanel({
       savingTags.current = false;
       if (pendingTags.current) void applyTags(pendingTags.current);
     }
+  }
+
+  function applyQuickReplyTags(item: QuickReply) {
+    const toAdd = Array.isArray(item.tagIds) ? item.tagIds.filter(Boolean) : [];
+    if (toAdd.length === 0) return;
+    const current = pendingTags.current ?? selected?.tagIds ?? [];
+    const missing = toAdd.filter((id) => !current.includes(id));
+    if (missing.length === 0) return;
+    void applyTags([...current, ...missing]);
+  }
+
+  function applyQuickReply(item: QuickReply) {
+    setDraft(resolveQuickReply(item.body, replyVars()));
+    applyQuickReplyTags(item);
   }
 
   function toggleConversationTag(tagId: string) {
@@ -587,10 +595,14 @@ export function WhatsAppConversationsPanel({
     e.preventDefault();
     if (!selectedId || sending) return;
     if (!draft.trim() && !attachment) return;
-    const text = outgoingText(draft);
+    const matchedReply = matchQuickReply(draft);
+    const text = matchedReply
+      ? resolveQuickReply(matchedReply.body, replyVars())
+      : draft.trim();
     const file = attachment;
     setSending(true);
     try {
+      if (matchedReply) applyQuickReplyTags(matchedReply);
       if (file) {
         await sendWaMedia(selectedId, file, text || undefined);
         setAttachment(null);
@@ -689,16 +701,26 @@ export function WhatsAppConversationsPanel({
                     onClick={() => selectConversation(c)}
                   >
                     <div className="wa-inbox__item-top">
-                      <strong className="wa-inbox__item-name">{label}</strong>
+                      <strong className="wa-inbox__item-name" data-tooltip={label}>
+                        {label}
+                      </strong>
                       <span className="wa-inbox__item-time">
                         {formatPreviewTime(c.lastMessageAt)}
                       </span>
                     </div>
                     <div className="wa-inbox__item-bottom">
-                      <span className="wa-inbox__item-preview">
+                      <span
+                        className="wa-inbox__item-preview"
+                        data-tooltip={c.lastMessagePreview || "Sin mensajes"}
+                      >
                         {c.lastMessagePreview || "Sin mensajes"}
                       </span>
-                      <span className="wa-inbox__assignee">{waAssigneeLabel(c)}</span>
+                      <span
+                        className="wa-inbox__assignee"
+                        data-tooltip={waAssigneeLabel(c)}
+                      >
+                        {waAssigneeLabel(c)}
+                      </span>
                       {c.unreadCount > 0 ? (
                         <span className="wa-inbox__badge">{c.unreadCount}</span>
                       ) : null}

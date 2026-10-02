@@ -16,6 +16,8 @@ export type WhatsappSection =
   | "operadoras"
   | "etiquetas"
   | "respuestas-rapidas"
+  | "flujos"
+  | "perfil"
   | "config";
 
 export type AccordionModuleId =
@@ -72,6 +74,8 @@ export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "operadoras", label: "Operadoras" },
   { id: "etiquetas", label: "Etiquetas" },
   { id: "respuestas-rapidas", label: "Respuestas rápidas" },
+  { id: "flujos", label: "Flujos" },
+  { id: "perfil", label: "Perfil bot" },
   { id: "config", label: "Configuración" },
 ];
 

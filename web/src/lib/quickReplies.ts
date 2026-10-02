@@ -6,6 +6,7 @@ export type QuickReply = {
   trigger: string;
   title: string | null;
   body: string;
+  tagIds: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -42,8 +43,12 @@ export function normalizeTrigger(value: string): string {
   return value
     .trim()
     .replace(/^\/+/, "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "");
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
 }
 
 export function formatTrigger(value: string): string {

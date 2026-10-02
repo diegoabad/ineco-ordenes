@@ -1,12 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+
+type Placement = "top" | "bottom";
 
 type TipState = {
   text: string;
   x: number;
   y: number;
-  placement: "top" | "bottom";
+  placement: Placement;
+  wrap: boolean;
 };
+
+const VIEW_PAD = 10;
+const GAP = 8;
+
+function shouldWrapTip(text: string): boolean {
+  return text.length > 72 || text.includes("\n");
+}
 
 function readTipText(el: Element): string | null {
   if (!(el instanceof HTMLElement)) return null;
@@ -28,19 +38,20 @@ function isModalOverlayLayer(node: HTMLElement): boolean {
   );
 }
 
-function findTipElement(clientX: number, clientY: number, fallbackTarget: EventTarget | null): HTMLElement | null {
+function findTipElement(
+  clientX: number,
+  clientY: number,
+  fallbackTarget: EventTarget | null,
+): HTMLElement | null {
   const stack = document.elementsFromPoint(clientX, clientY);
   for (const node of stack) {
     if (!(node instanceof Element)) continue;
     if (node.closest(".app-tooltip")) continue;
-    // Incluye hijos SVG: sube al botón/[data-tooltip] más cercano
     const tipHost = node.closest("[data-tooltip], [title]");
     if (tipHost instanceof HTMLElement && readTipText(tipHost)) return tipHost;
-    // No atravesar el modal: debajo suele haber la tabla con title/data-tooltip
     if (node instanceof HTMLElement && isModalOverlayLayer(node)) return null;
   }
   if (fallbackTarget instanceof Element) {
-    // Si hay un modal abierto, el fallback solo vale dentro del overlay
     const openBackdrop = document.querySelector(".fl-modal-backdrop");
     if (openBackdrop && !(fallbackTarget as Element).closest(".fl-modal-backdrop")) {
       return null;
@@ -51,9 +62,22 @@ function findTipElement(clientX: number, clientY: number, fallbackTarget: EventT
   return null;
 }
 
+function pickPlacement(rect: DOMRect, wrap: boolean): Placement {
+  const spaceAbove = rect.top - VIEW_PAD;
+  const spaceBelow = window.innerHeight - rect.bottom - VIEW_PAD;
+  // Textos largos: preferir abajo para no salir por arriba
+  if (wrap) {
+    return spaceBelow >= 80 || spaceBelow >= spaceAbove ? "bottom" : "top";
+  }
+  if (spaceAbove < 44) return "bottom";
+  if (spaceBelow < 44) return "top";
+  return spaceBelow >= spaceAbove ? "bottom" : "top";
+}
+
 /**
  * Tooltip global: convierte `title` / `data-tooltip` en un tip visual.
  * Incluye botones disabled (via elementsFromPoint).
+ * Se reposiciona para no salirse del viewport (desktop y mobile).
  */
 export function AppTooltipHost() {
   const [tip, setTip] = useState<TipState | null>(null);
@@ -83,12 +107,12 @@ export function AppTooltipHost() {
     function place(el: HTMLElement, text: string) {
       clearHide();
       const rect = el.getBoundingClientRect();
-      const gap = 8;
-      const placement: "top" | "bottom" = rect.top < 40 ? "bottom" : "top";
+      const wrap = shouldWrapTip(text);
+      const placement = pickPlacement(rect, wrap);
       const x = rect.left + rect.width / 2;
-      const y = placement === "top" ? rect.top - gap : rect.bottom + gap;
+      const y = placement === "top" ? rect.top - GAP : rect.bottom + GAP;
       activeRef.current = el;
-      setTip({ text, x, y, placement });
+      setTip({ text, x, y, placement, wrap });
     }
 
     function showFromPoint(clientX: number, clientY: number, fallbackTarget: EventTarget | null) {
@@ -147,15 +171,53 @@ export function AppTooltipHost() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!tip || !tipRef.current) return;
+  useLayoutEffect(() => {
+    if (!tip || !tipRef.current || !activeRef.current) return;
     const node = tipRef.current;
-    const r = node.getBoundingClientRect();
-    const pad = 10;
+    const host = activeRef.current;
+    const hostRect = host.getBoundingClientRect();
+
+    // Ancho usable: en wrap ocupar casi todo el viewport para que el texto baje de renglón
+    if (tip.wrap) {
+      node.style.maxWidth = `${Math.max(160, window.innerWidth - VIEW_PAD * 2)}px`;
+    }
+
+    let r = node.getBoundingClientRect();
     let left = tip.x;
     const half = r.width / 2;
-    left = Math.max(pad + half, Math.min(left, window.innerWidth - pad - half));
+    left = Math.max(VIEW_PAD + half, Math.min(left, window.innerWidth - VIEW_PAD - half));
+
+    let placement = tip.placement;
+    let top = tip.y;
+
+    const spaceBelow = window.innerHeight - hostRect.bottom - GAP - VIEW_PAD;
+    const spaceAbove = hostRect.top - GAP - VIEW_PAD;
+    const need = r.height;
+
+    if (placement === "top" && need > spaceAbove && spaceBelow >= spaceAbove) {
+      placement = "bottom";
+      top = hostRect.bottom + GAP;
+    } else if (placement === "bottom" && need > spaceBelow && spaceAbove > spaceBelow) {
+      placement = "top";
+      top = hostRect.top - GAP;
+    }
+
+    // Mantener el tip completo visible (sin scroll ni recorte)
+    if (placement === "top") {
+      const tipTop = top - need;
+      if (tipTop < VIEW_PAD) top = VIEW_PAD + need;
+      if (top > window.innerHeight - VIEW_PAD) top = window.innerHeight - VIEW_PAD;
+    } else {
+      if (top + need > window.innerHeight - VIEW_PAD) {
+        top = Math.max(VIEW_PAD, window.innerHeight - VIEW_PAD - need);
+      }
+      if (top < VIEW_PAD) top = VIEW_PAD;
+    }
+
     node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+    node.classList.toggle("app-tooltip--bottom", placement === "bottom");
+    node.classList.toggle("app-tooltip--top", placement === "top");
   }, [tip]);
 
   if (!tip) return null;
@@ -163,7 +225,7 @@ export function AppTooltipHost() {
   return createPortal(
     <div
       ref={tipRef}
-      className={`app-tooltip app-tooltip--${tip.placement}`}
+      className={`app-tooltip app-tooltip--${tip.placement}${tip.wrap ? " app-tooltip--wrap" : ""}`}
       style={{ left: tip.x, top: tip.y }}
       role="tooltip"
     >

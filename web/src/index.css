@@ -8302,15 +8302,31 @@ tbody tr.is-inactive td {
   line-height: 1.3;
   letter-spacing: 0.01em;
   white-space: nowrap;
+  overflow: visible;
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04),
     0 6px 16px rgba(15, 23, 42, 0.08);
   animation: app-tooltip-in 0.12s ease-out both;
 }
 
+.app-tooltip--top {
+  transform: translate(-50%, -100%);
+}
+
 .app-tooltip--bottom {
   transform: translate(-50%, 0);
   animation-name: app-tooltip-in-bottom;
+}
+
+.app-tooltip--wrap {
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.5rem 0.7rem;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .app-tooltip::after {
@@ -8997,16 +9013,151 @@ tbody tr.is-inactive td {
   border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
 }
 
-.wa-quick-off {
-  margin-left: 0.4rem;
-  font-size: 0.72rem;
+.wa-profile-form__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.85rem;
+}
+
+.wa-profile-form__grid .form-group {
+  min-width: 0;
+}
+
+.wa-profile-form__full {
+  grid-column: 1 / -1;
+}
+
+.wa-profile-form__check-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.wa-profile-form__check-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
+.wa-profile-form .usuarios-modules-check {
+  margin: 0;
+  min-height: 2.4rem;
+}
+
+.wa-profile-scope {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.wa-profile-scope--contact {
+  background: color-mix(in srgb, #0d9488 14%, #fff);
+  color: #0f766e;
+}
+
+.wa-profile-scope--case {
+  background: color-mix(in srgb, #a61948 12%, #fff);
+  color: #a61948;
+}
+
+@media (max-width: 640px) {
+  .wa-profile-form__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wa-quick-table th:nth-child(1),
+.wa-quick-table td:nth-child(1) {
+  width: 8.5rem;
+}
+
+.wa-quick-trigger-cell {
+  max-width: 8.5rem;
+  overflow: hidden;
+}
+
+.wa-quick-trigger-cell .wa-quick-trigger {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.wa-quick-table th:nth-child(3),
+.wa-quick-table td:nth-child(3) {
+  width: 12rem;
+}
+
+.wa-quick-table th:nth-child(4),
+.wa-quick-table td:nth-child(4) {
+  width: 6.5rem;
+}
+
 .wa-quick-body {
-  max-width: 28rem;
-  white-space: pre-wrap;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.wa-quick-body__text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
+}
+
+.wa-quick-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.wa-quick-tags--chips {
+  min-height: 2.25rem;
+  margin-top: 0.55rem;
+  align-content: flex-start;
+}
+
+.wa-quick-tags-empty {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.wa-quick-tag-field {
+  position: relative;
+}
+
+.wa-quick-combo {
+  position: relative;
+  z-index: 8;
+}
+
+.wa-quick-combo__list {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 11000;
+  max-height: 11rem;
+}
+
+.wa-quick-combo__group + .wa-quick-combo__group {
+  border-top: 1px solid var(--border);
+}
+
+.wa-quick-combo__group .wa-tag-picker__group {
+  padding: 0.4rem 0.75rem 0.15rem;
+}
+
+.wa-quick-combo__list .prof-combobox__option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .wa-quick-form__grid {
@@ -9026,6 +9177,149 @@ tbody tr.is-inactive td {
   resize: none;
   overflow-y: auto;
   line-height: 1.45;
+}
+
+.wa-flow-desc {
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.wa-flow-triggers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.wa-flow-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.wa-flow-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.wa-flow-form__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.85rem;
+}
+
+.wa-flow-form__full {
+  grid-column: 1 / -1;
+}
+
+.wa-flow-required-order {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.wa-flow-required-order__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.wa-flow-required-order__row .wa-flow-step__actions {
+  margin-left: auto;
+}
+
+.wa-flow-form .wa-flow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+@media (max-width: 640px) {
+  .wa-flow-form__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wa-flow-step {
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 92%, #f3f4f6);
+}
+
+.wa-flow-step__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.wa-flow-step__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--primary-muted);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.wa-flow-step__head .ui-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.wa-flow-step__actions {
+  display: inline-flex;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.wa-flow-step textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.5rem;
+  line-height: 1.4;
+}
+
+.wa-flow-step__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.wa-flow-add-step {
+  margin-top: 0.65rem;
+}
+
+.wa-flow-step .wa-tag {
+  opacity: 0.55;
+}
+
+.wa-flow-step .wa-tag.is-selected {
+  opacity: 1;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tag, var(--primary)) 55%, transparent);
+}
+
+.fl-modal--wa-flow {
+  width: min(100%, 720px);
 }
 
 @media (max-width: 720px) {

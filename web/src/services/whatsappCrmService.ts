@@ -1,4 +1,6 @@
 import type { QuickReply } from "../lib/quickReplies";
+import type { WaFlow, WaFlowStep } from "../lib/waFlows";
+import type { WaProfileField } from "../lib/waProfileSchema";
 import { apiFetch, getApiUrl } from "../config/api";
 import type { WaConnectionStatus, WaContact, WaConversation, WaMessage, WaOperator, WaTag, WaTagCatalog, WaTagGroup } from "../types/whatsappCrm";
 
@@ -47,13 +49,18 @@ export async function fetchQuickReplies(): Promise<QuickReply[]> {
   const res = await apiFetch<{ ok: boolean; data: QuickReply[] }>(
     "/api/whatsapp-crm/quick-replies",
   );
-  return Array.isArray(res.data) ? res.data : [];
+  if (!Array.isArray(res.data)) return [];
+  return res.data.map((item) => ({
+    ...item,
+    tagIds: Array.isArray(item.tagIds) ? item.tagIds.filter(Boolean) : [],
+  }));
 }
 
 export async function createQuickReply(input: {
   trigger: string;
   title?: string | null;
   body: string;
+  tagIds?: string[];
   isActive?: boolean;
 }): Promise<QuickReply> {
   const res = await apiFetch<{ ok: boolean; data: QuickReply }>(
@@ -69,6 +76,7 @@ export async function updateQuickReply(
     trigger?: string;
     title?: string | null;
     body?: string;
+    tagIds?: string[];
     isActive?: boolean;
   },
 ): Promise<QuickReply> {
@@ -82,6 +90,124 @@ export async function updateQuickReply(
 export async function deleteQuickReply(id: string): Promise<void> {
   await apiFetch<{ ok: boolean }>(
     `/api/whatsapp-crm/quick-replies/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function fetchWaFlows(): Promise<WaFlow[]> {
+  const res = await apiFetch<{ ok: boolean; data: WaFlow[] }>("/api/whatsapp-crm/flows");
+  if (!Array.isArray(res.data)) return [];
+  return res.data.map((item) => ({
+    ...item,
+    objective: item.objective ?? null,
+    triggers: Array.isArray(item.triggers) ? item.triggers : [],
+    requiredFieldKeys: Array.isArray(item.requiredFieldKeys) ? item.requiredFieldKeys : [],
+    childFlowIds: Array.isArray(item.childFlowIds) ? item.childFlowIds : [],
+    steps: Array.isArray(item.steps)
+      ? item.steps.map((step) => ({
+          ...step,
+          tagIds: Array.isArray(step.tagIds) ? step.tagIds : [],
+          fieldKey: step.fieldKey ?? null,
+          flowId: step.flowId ?? null,
+        }))
+      : [],
+  }));
+}
+
+export async function createWaFlow(input: {
+  name: string;
+  objective?: string | null;
+  description?: string | null;
+  triggers?: string[];
+  requiredFieldKeys?: string[];
+  childFlowIds?: string[];
+  steps: WaFlowStep[];
+  isActive?: boolean;
+}): Promise<WaFlow> {
+  const res = await apiFetch<{ ok: boolean; data: WaFlow }>("/api/whatsapp-crm/flows", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function updateWaFlow(
+  id: string,
+  input: {
+    name?: string;
+    objective?: string | null;
+    description?: string | null;
+    triggers?: string[];
+    requiredFieldKeys?: string[];
+    childFlowIds?: string[];
+    steps?: WaFlowStep[];
+    isActive?: boolean;
+  },
+): Promise<WaFlow> {
+  const res = await apiFetch<{ ok: boolean; data: WaFlow }>(
+    `/api/whatsapp-crm/flows/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+export async function deleteWaFlow(id: string): Promise<void> {
+  await apiFetch<{ ok: boolean }>(`/api/whatsapp-crm/flows/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchWaProfileFields(): Promise<WaProfileField[]> {
+  const res = await apiFetch<{ ok: boolean; data: WaProfileField[] }>(
+    "/api/whatsapp-crm/profile-fields",
+  );
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function createWaProfileField(input: {
+  key: string;
+  label: string;
+  description?: string | null;
+  type: string;
+  scope?: string;
+  options?: string[];
+  group?: string;
+  askPrompt?: string | null;
+  confirmPrompt?: string | null;
+  isActive?: boolean;
+}): Promise<WaProfileField> {
+  const res = await apiFetch<{ ok: boolean; data: WaProfileField }>(
+    "/api/whatsapp-crm/profile-fields",
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+export async function updateWaProfileField(
+  id: string,
+  input: {
+    key?: string;
+    label?: string;
+    description?: string | null;
+    type?: string;
+    scope?: string;
+    options?: string[];
+    group?: string;
+    askPrompt?: string | null;
+    confirmPrompt?: string | null;
+    isActive?: boolean;
+  },
+): Promise<WaProfileField> {
+  const res = await apiFetch<{ ok: boolean; data: WaProfileField }>(
+    `/api/whatsapp-crm/profile-fields/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+export async function deleteWaProfileField(id: string): Promise<void> {
+  await apiFetch<{ ok: boolean }>(
+    `/api/whatsapp-crm/profile-fields/${encodeURIComponent(id)}`,
     { method: "DELETE" },
   );
 }

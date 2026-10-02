@@ -1,11 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { WHATSAPP_SECTIONS, type WhatsappSection } from "../lib/appNav";
 import { IconPlus } from "./Icons";
-import {
-  WhatsAppConversationsPanel,
-  type WaConnectionBanner,
-} from "./WhatsAppConversationsPanel";
+import { WhatsAppConversationsPanel, type WaConnectionBanner } from "./WhatsAppConversationsPanel";
+import { WhatsAppFlowsPanel } from "./WhatsAppFlowsPanel";
 import { WhatsAppOperatorsPanel } from "./WhatsAppOperatorsPanel";
+import { WhatsAppProfileSchemaPanel } from "./WhatsAppProfileSchemaPanel";
 import { WhatsAppQuickRepliesPanel } from "./WhatsAppQuickRepliesPanel";
 import { WhatsAppTagsPanel, type TagsPanelTab } from "./WhatsAppTagsPanel";
 
@@ -30,6 +29,8 @@ export function WhatsAppModule({ section }: Props) {
   }, []);
   const connectRef = useRef<(() => void) | null>(null);
   const createReplyRef = useRef<(() => void) | null>(null);
+  const createFlowRef = useRef<(() => void) | null>(null);
+  const createProfileFieldRef = useRef<(() => void) | null>(null);
   const createTagRef = useRef<(() => void) | null>(null);
   const createGroupRef = useRef<(() => void) | null>(null);
   const addOperatorRef = useRef<(() => void) | null>(null);
@@ -46,6 +47,12 @@ export function WhatsAppModule({ section }: Props) {
               <p>Usuarios a los que se pueden derivar las conversaciones</p>
             ) : section === "respuestas-rapidas" ? (
               <p>Atajos con disparadores tipo /saludo y variables como {"{{nombre}}"}</p>
+            ) : section === "flujos" ? (
+              <p>Objetivo, campos del perfil y subflujos que usa cada conversación guiada</p>
+            ) : section === "perfil" ? (
+              <p>
+                Variables del objeto del bot. El orden de preguntas lo definen los flujos.
+              </p>
             ) : section === "etiquetas" ? (
               <p>
                 {tagsTab === "grupos"
@@ -120,6 +127,28 @@ export function WhatsAppModule({ section }: Props) {
               Nueva respuesta
             </button>
           </div>
+        ) : section === "flujos" ? (
+          <div className="app-header__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => createFlowRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Nuevo flujo
+            </button>
+          </div>
+        ) : section === "perfil" ? (
+          <div className="app-header__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => createProfileFieldRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Nuevo campo
+            </button>
+          </div>
         ) : null}
       </header>
       {section === "conversaciones" ? (
@@ -131,6 +160,10 @@ export function WhatsAppModule({ section }: Props) {
         <WhatsAppOperatorsPanel addRef={addOperatorRef} />
       ) : section === "respuestas-rapidas" ? (
         <WhatsAppQuickRepliesPanel createRef={createReplyRef} />
+      ) : section === "flujos" ? (
+        <WhatsAppFlowsPanel createRef={createFlowRef} />
+      ) : section === "perfil" ? (
+        <WhatsAppProfileSchemaPanel createRef={createProfileFieldRef} />
       ) : section === "etiquetas" ? (
         <WhatsAppTagsPanel
           createRef={createTagRef}

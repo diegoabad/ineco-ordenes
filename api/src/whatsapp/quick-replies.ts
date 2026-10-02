@@ -7,6 +7,7 @@ export type QuickReply = {
   trigger: string;
   title: string | null;
   body: string;
+  tagIds: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -18,8 +19,17 @@ export function normalizeTrigger(value: string): string {
   return value
     .trim()
     .replace(/^\/+/, "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "");
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+}
+
+function normalizeTagIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
 }
 
 function normalizeItem(raw: unknown): QuickReply | null {
@@ -35,6 +45,7 @@ function normalizeItem(raw: unknown): QuickReply | null {
     trigger,
     title: title || null,
     body,
+    tagIds: normalizeTagIds(row.tagIds),
     isActive: row.isActive !== false,
     createdAt: String(row.createdAt ?? ""),
     updatedAt: String(row.updatedAt ?? ""),
@@ -63,6 +74,7 @@ export async function createQuickReply(input: {
   trigger: string;
   title?: string | null;
   body: string;
+  tagIds?: string[];
   isActive?: boolean;
 }): Promise<QuickReply> {
   const trigger = normalizeTrigger(input.trigger);
@@ -79,6 +91,7 @@ export async function createQuickReply(input: {
     trigger,
     title: input.title?.trim() || null,
     body,
+    tagIds: normalizeTagIds(input.tagIds),
     isActive: input.isActive !== false,
     createdAt: now,
     updatedAt: now,
@@ -93,6 +106,7 @@ export async function updateQuickReply(
     trigger?: string;
     title?: string | null;
     body?: string;
+    tagIds?: string[];
     isActive?: boolean;
   },
 ): Promise<QuickReply> {
@@ -113,6 +127,7 @@ export async function updateQuickReply(
     trigger,
     title: input.title !== undefined ? input.title?.trim() || null : current.title,
     body,
+    tagIds: input.tagIds !== undefined ? normalizeTagIds(input.tagIds) : current.tagIds,
     isActive: input.isActive !== undefined ? Boolean(input.isActive) : current.isActive,
     updatedAt: new Date().toISOString(),
   };
