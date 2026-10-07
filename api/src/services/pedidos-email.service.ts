@@ -5,7 +5,16 @@ import { env } from "../config/env.js";
 import { uploadsPedidosDir } from "../config/paths.js";
 import type { PedidoSistema } from "../types.js";
 
-const PEDIDOS_TO = ["dabad@ineco.ar", "diegoabad.2289@gmail.com"];
+const PEDIDOS_TO = [
+  "dabad@ineco.ar",
+  "diegoabad.2289@gmail.com",
+  "desarrollo@ineco.org.ar",
+];
+
+const PEDIDOS_FROM = {
+  email: "sistemas@ineco.ar",
+  name: "Ticket sistemas",
+};
 
 function ensureSendGrid(): void {
   if (!env.sendgrid.apiKey) {
@@ -79,48 +88,43 @@ const PRIORIDAD_LABEL: Record<PedidoSistema["prioridad"], string> = {
   alta: "Alta",
 };
 
+function seccionAfectada(pedido: PedidoSistema): string {
+  if (pedido.seccion === "nueva" && pedido.seccionNueva.trim()) {
+    return pedido.seccionNueva.trim();
+  }
+  return SECCION_LABEL[pedido.seccion];
+}
+
+function solicitadoPorLinea(pedido: PedidoSistema): string {
+  const nombre = pedido.solicitadoPor.trim();
+  const email = pedido.creadoPorEmail?.trim() || "";
+  if (nombre && email && nombre.toLowerCase() !== email.toLowerCase()) {
+    return `${nombre} (${email})`;
+  }
+  return nombre || email || "—";
+}
+
 export async function sendPedidoSistemaEmail(pedido: PedidoSistema): Promise<void> {
   ensureSendGrid();
 
-  const seccion = SECCION_LABEL[pedido.seccion];
-  const subject = "Ticket sistema";
+  const seccion = seccionAfectada(pedido);
+  const prioridad = PRIORIDAD_LABEL[pedido.prioridad];
+  const solicitadoPor = solicitadoPorLinea(pedido);
+  const detalle = pedido.detalle.trim() || "—";
+  const subject = pedido.titulo.trim() || "Ticket sistema";
   const text = [
-    "Nuevo ticket al sistema",
+    `Detalle: ${detalle}`,
     "",
-    `Título: ${pedido.titulo}`,
-    `Sección: ${seccion}`,
-    ...(pedido.seccion === "nueva" && pedido.seccionNueva
-      ? [`Nueva sección: ${pedido.seccionNueva}`]
-      : []),
-    `Solicitado por: ${pedido.solicitadoPor}`,
-    `Prioridad: ${PRIORIDAD_LABEL[pedido.prioridad]}`,
-    `Adjuntos: ${pedido.fotos.length}`,
-    "",
-    "Detalle:",
-    pedido.detalle || "—",
+    `Sección afectada: ${seccion}`,
+    `Prioridad: ${prioridad}`,
+    `Solicitado por: ${solicitadoPor}`,
   ].join("\n");
 
-  const adjuntosHtml =
-    pedido.fotos.length === 0
-      ? "<p>Sin adjuntos.</p>"
-      : `<ul>${pedido.fotos.map((f) => `<li>${escapeHtml(f.nombre)}</li>`).join("")}</ul>`;
-
-  const nuevaHtml =
-    pedido.seccion === "nueva" && pedido.seccionNueva
-      ? `<p><strong>Nueva sección:</strong> ${escapeHtml(pedido.seccionNueva)}</p>`
-      : "";
-
   const html = `
-    <h2>Nuevo ticket al sistema</h2>
-    <p><strong>Título:</strong> ${escapeHtml(pedido.titulo)}</p>
-    <p><strong>Sección:</strong> ${escapeHtml(seccion)}</p>
-    ${nuevaHtml}
-    <p><strong>Solicitado por:</strong> ${escapeHtml(pedido.solicitadoPor)}</p>
-    <p><strong>Prioridad:</strong> ${escapeHtml(PRIORIDAD_LABEL[pedido.prioridad])}</p>
-    <p><strong>Detalle:</strong></p>
-    <p style="white-space:pre-wrap">${escapeHtml(pedido.detalle || "—")}</p>
-    <p><strong>Adjuntos:</strong></p>
-    ${adjuntosHtml}
+    <p style="white-space:pre-wrap"><strong>Detalle:</strong> ${escapeHtml(detalle)}</p>
+    <p><strong>Sección afectada:</strong> ${escapeHtml(seccion)}</p>
+    <p><strong>Prioridad:</strong> ${escapeHtml(prioridad)}</p>
+    <p><strong>Solicitado por:</strong> ${escapeHtml(solicitadoPor)}</p>
   `;
 
   const attachments: {
@@ -149,10 +153,43 @@ export async function sendPedidoSistemaEmail(pedido: PedidoSistema): Promise<voi
 
   await sgMail.send({
     to: PEDIDOS_TO,
-    from: { email: env.sendgrid.fromEmail, name: env.sendgrid.fromName },
+    from: PEDIDOS_FROM,
     subject,
     text,
     html,
     ...(attachments.length > 0 ? { attachments } : {}),
+  });
+}
+
+export async function sendPedidoCompletadoEmail(
+  pedido: PedidoSistema,
+  mensaje: string,
+): Promise<void> {
+  const to = pedido.creadoPorEmail?.trim();
+  if (!to) throw new Error("Quien creó el pedido no tiene un email cargado");
+
+  ensureSendGrid();
+
+  const titulo = pedido.titulo.trim() || "tu pedido";
+  const nota = mensaje.trim();
+  const saludoNombre = pedido.solicitadoPor.trim();
+  const saludo = saludoNombre ? `Hola ${saludoNombre},` : "Hola,";
+  const cierre = `Finalizamos la tarea "${titulo}".`;
+  const text = [saludo, "", cierre, ...(nota ? ["", nota] : [])].join("\n");
+  const notaHtml = nota
+    ? `<p style="white-space:pre-wrap">${escapeHtml(nota)}</p>`
+    : "";
+  const html = `
+    <p>${escapeHtml(saludo)}</p>
+    <p>${escapeHtml(cierre)}</p>
+    ${notaHtml}
+  `;
+
+  await sgMail.send({
+    to,
+    from: PEDIDOS_FROM,
+    subject: `Finalizamos: ${titulo}`,
+    text,
+    html,
   });
 }
