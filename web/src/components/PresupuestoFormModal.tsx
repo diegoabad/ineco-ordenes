@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { toast } from "react-toastify";
 import { blobToBase64 } from "../lib/blob";
+import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
 import { fechaHoyIso } from "../lib/fechas";
 import { formatNombrePersona, normalizeNombrePersona } from "../lib/nombrePersona";
 import {
@@ -32,6 +33,7 @@ import type {
 import type { PresupuestoPlantillaVar } from "../types/presupuestoPlantilla";
 import { PRESUPUESTO_PLANTILLA_VAR_LABELS } from "../types/presupuestoPlantilla";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
+import { EmailChipsInput } from "./EmailChipsInput";
 import { IconGrip, IconSearch, IconX } from "./Icons";
 import { PdfViewerModal } from "./PdfViewerModal";
 import { ProfesionalPresupuestoField } from "./ProfesionalPresupuestoField";
@@ -243,7 +245,7 @@ export function PresupuestoFormModal({
 
   const puedeGuardar = useMemo(() => {
     if (!form.nombrePaciente.trim()) return false;
-    if (!form.email.trim()) return false;
+    if (!parseEmailList(form.email).some(isEmailAddress)) return false;
     if (!form.profesional.trim()) return false;
     if (!form.modalidadId.trim()) return false;
     if (form.prestacionIds.length === 0) return false;
@@ -316,8 +318,8 @@ export function PresupuestoFormModal({
       toast.warning("Ingresá el nombre del paciente");
       return;
     }
-    if (!form.email.trim()) {
-      toast.warning("Ingresá el email del paciente");
+    if (!parseEmailList(form.email).some(isEmailAddress)) {
+      toast.warning("Ingresá al menos un email válido");
       return;
     }
     if (!form.profesional.trim()) {
@@ -356,7 +358,7 @@ export function PresupuestoFormModal({
       const items = seleccionadas.map(prestacionToItem);
       const plantillaCtx = {
         nombrePaciente: normalizeNombrePersona(form.nombrePaciente),
-        email: form.email.trim(),
+        email: joinEmails(parseEmailList(form.email).filter(isEmailAddress)),
         nombreProfesional: normalizeNombrePersona(form.profesional),
         modalidadTitulo: modalidadSeleccionada.titulo,
         lugarEvaluacion: modalidadSeleccionada.textoPdf,
@@ -477,7 +479,7 @@ export function PresupuestoFormModal({
         nombrePaciente: normalizeNombrePersona(form.nombrePaciente),
         profesional: normalizeNombrePersona(form.profesional),
         modalidadId: form.modalidadId,
-        email: form.email.trim(),
+        email: joinEmails(parseEmailList(form.email).filter(isEmailAddress)),
         pacienteExterno: form.pacienteExterno,
         prestacionIds: form.prestacionIds,
         pdfBase64,
@@ -586,13 +588,12 @@ export function PresupuestoFormModal({
               />
             </div>
             <div className="form-group">
-              <label htmlFor="presup-email">Email *</label>
-              <input
+              <label htmlFor="presup-email">Emails *</label>
+              <EmailChipsInput
                 id="presup-email"
-                type="email"
                 value={form.email}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                required
+                disabled={disabled}
+                onChange={(email) => setForm((f) => ({ ...f, email }))}
               />
             </div>
           </div>

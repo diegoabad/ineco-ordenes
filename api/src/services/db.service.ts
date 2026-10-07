@@ -16,6 +16,7 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails.js";
 import { normalizeNombrePersona } from "../lib/nombrePersona.js";
 import {
   calcPresupuestoTotales,
@@ -115,19 +116,37 @@ function normalizePresupuestoItem(raw: unknown): PresupuestoItem | null {
   };
 }
 
+function parsePresupuestoEstado(value: unknown): PresupuestoEstado | null {
+  const estadoRaw = String(value ?? "").trim();
+  if (
+    estadoRaw === "pendiente" ||
+    estadoRaw === "enviado" ||
+    estadoRaw === "aceptado" ||
+    estadoRaw === "rechazado" ||
+    estadoRaw === "fallido"
+  ) {
+    return estadoRaw;
+  }
+  return null;
+}
+
+function estadoAnteriorGuardado(
+  raw: Record<string, unknown>,
+  estado: PresupuestoEstado,
+  ultimoEnvioAt: string | null,
+): PresupuestoEstado | null {
+  if (estado !== "aceptado") return null;
+  const stored = parsePresupuestoEstado(raw.estadoAnterior);
+  if (stored && stored !== "aceptado") return stored;
+  return ultimoEnvioAt ? "enviado" : "pendiente";
+}
+
 function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupuesto {
   const itemsRaw = Array.isArray(raw.items) ? raw.items : [];
   const items = itemsRaw
     .map((item) => normalizePresupuestoItem(item))
     .filter((item): item is PresupuestoItem => item !== null);
-  const estadoRaw = String(raw.estado ?? "pendiente").trim();
-  const estado =
-    estadoRaw === "enviado" ||
-    estadoRaw === "aceptado" ||
-    estadoRaw === "rechazado" ||
-    estadoRaw === "fallido"
-      ? estadoRaw
-      : "pendiente";
+  const estado = parsePresupuestoEstado(raw.estado) ?? "pendiente";
   const pdfUrl =
     typeof raw.pdfUrl === "string" && raw.pdfUrl.trim() ? raw.pdfUrl.trim() : null;
   const ultimoEnvioAt =
@@ -164,6 +183,7 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     totalEfectivo: toMoney(raw.totalEfectivo ?? raw.total),
     total3Cuotas: toMoney(raw.total3Cuotas),
     estado,
+    estadoAnterior: estadoAnteriorGuardado(raw, estado, ultimoEnvioAt),
     pdfUrl,
     motivoRechazo: estado === "rechazado" ? motivoRechazo : null,
     ultimoEnvioAt,
@@ -188,6 +208,7 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     totalEfectivo: p.totalEfectivo,
     total3Cuotas: p.total3Cuotas,
     estado: p.estado,
+    estadoAnterior: p.estado === "aceptado" ? p.estadoAnterior : null,
     pdfUrl: p.pdfUrl,
     motivoRechazo: p.estado === "rechazado" ? p.motivoRechazo : null,
     ultimoEnvioAt: p.ultimoEnvioAt,
@@ -1115,6 +1136,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     totalEfectivo: totales.totalEfectivo,
     total3Cuotas: totales.total3Cuotas,
     estado: "pendiente",
+    estadoAnterior: null,
     pdfUrl,
     motivoRechazo: null,
     ultimoEnvioAt: null,
@@ -1198,6 +1220,7 @@ export async function updatePresupuesto(
     totalEfectivo: totales.totalEfectivo,
     total3Cuotas: totales.total3Cuotas,
     estado: "pendiente",
+    estadoAnterior: null,
     pdfUrl,
     motivoRechazo: null,
   };
@@ -1234,7 +1257,7 @@ export async function updatePresupuesto(
 
 export async function enviarPresupuesto(
   id: string,
-  overrides?: { subject?: string; body?: string },
+  overrides?: { subject?: string; body?: string; email?: string },
 ): Promise<Presupuesto> {
   const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
   if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
@@ -1243,7 +1266,10 @@ export async function enviarPresupuesto(
   if (!presupuestoPermiteEnvio(current.estado)) {
     throw new Error("Este presupuesto no se puede enviar en su estado actual");
   }
-  if (!current.email.trim()) {
+  const email = joinEmails(
+    parseEmailList(overrides?.email ?? current.email).filter(isEmailAddress),
+  );
+  if (!email) {
     throw new Error("El presupuesto no tiene email cargado");
   }
   if (!current.pdfUrl) {
@@ -1260,7 +1286,7 @@ export async function enviarPresupuesto(
 
   try {
     await sendPresupuestoEmail({
-      toEmail: current.email.trim(),
+      toEmail: email,
       nombrePaciente: current.nombrePaciente,
       profesional: current.profesional,
       pdfBase64,
@@ -1279,7 +1305,12 @@ export async function enviarPresupuesto(
     return await marcarPresupuestoEnvioFallido(current);
   }
 
-  const presupuesto: Presupuesto = { ...current, estado: "enviado", ultimoEnvioAt: nowIso() };
+  const presupuesto: Presupuesto = {
+    ...current,
+    email,
+    estado: "enviado",
+    ultimoEnvioAt: nowIso(),
+  };
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
   return presupuesto;
 }
@@ -1311,6 +1342,12 @@ export async function updatePresupuestoEstado(
   const presupuesto: Presupuesto = {
     ...current,
     estado,
+    estadoAnterior:
+      estado === "aceptado"
+        ? current.estado === "aceptado"
+          ? current.estadoAnterior
+          : current.estado
+        : null,
     motivoRechazo: motivo,
   };
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
@@ -1350,7 +1387,10 @@ export async function ensurePresupuestoLinkPago(id: string): Promise<Presupuesto
         },
       ],
       external_reference: `ineco-presupuesto-${id}`,
-      payer: current.email ? { email: current.email } : undefined,
+      payer: (() => {
+        const payerEmail = parseEmailList(current.email).find(isEmailAddress);
+        return payerEmail ? { email: payerEmail } : undefined;
+      })(),
       payment_methods: {
         installments: 3,
         default_installments: 3,
@@ -1408,6 +1448,7 @@ export async function aceptarPresupuesto(
   if (current.estado !== "aceptado") {
     current = {
       ...current,
+      estadoAnterior: current.estado,
       estado: "aceptado",
       motivoRechazo: null,
     };
@@ -1449,6 +1490,26 @@ export async function aceptarPresupuesto(
       error instanceof Error ? error.message : "No se pudo enviar el mail con el link de pago";
     return { presupuesto: current, emailError };
   }
+}
+
+export async function revertirPresupuestoAceptado(id: string): Promise<Presupuesto> {
+  const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
+  if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
+
+  const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
+  if (current.estado !== "aceptado") {
+    throw new Error("Solo se puede volver atrás desde un presupuesto aceptado");
+  }
+
+  const anterior = current.estadoAnterior ?? (current.ultimoEnvioAt ? "enviado" : "pendiente");
+  const presupuesto: Presupuesto = {
+    ...current,
+    estado: anterior,
+    estadoAnterior: null,
+    motivoRechazo: anterior === "rechazado" ? current.motivoRechazo : null,
+  };
+  await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
+  return presupuesto;
 }
 
 export async function deletePresupuesto(id: string): Promise<void> {

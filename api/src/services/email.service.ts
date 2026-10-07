@@ -7,6 +7,7 @@ import { applyEmailTemplate } from "./email-templates.js";
 import {
   applyPresupuestoEmailTemplate,
 } from "./presupuesto-email-templates.js";
+import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails.js";
 import { emailBodyToHtml, emailBodyToPlainText } from "../lib/richText.js";
 import type { PresupuestoItem } from "../types.js";
 import {
@@ -264,8 +265,11 @@ function formatPresupuestoMoney(value: number | undefined): string {
 export async function sendPresupuestoEmail(
   input: SendPresupuestoEmailInput,
 ): Promise<{ to: string }> {
-  const to = input.toEmail.trim();
-  if (!to) throw new Error("El email es obligatorio para enviar el presupuesto");
+  const recipients = parseEmailList(input.toEmail).filter(isEmailAddress);
+  if (recipients.length === 0) {
+    throw new Error("El email es obligatorio para enviar el presupuesto");
+  }
+  const to = joinEmails(recipients);
 
   const nombrePaciente = formatNombrePersona(input.nombrePaciente) || "paciente";
   const config = await getPresupuestoEmailConfig();
@@ -308,7 +312,7 @@ export async function sendPresupuestoEmail(
   try {
     ensureSendGrid();
     await sgMail.send({
-      to,
+      to: recipients,
       from: {
         email: config.fromEmail,
         name: config.fromName,
@@ -349,8 +353,11 @@ export type SendLinkPagoEmailInput = {
 export async function sendLinkPagoEmail(
   input: SendLinkPagoEmailInput,
 ): Promise<{ to: string }> {
-  const to = input.toEmail.trim();
-  if (!to) throw new Error("El email es obligatorio para enviar el link de pago");
+  const recipients = parseEmailList(input.toEmail).filter(isEmailAddress);
+  if (recipients.length === 0) {
+    throw new Error("El email es obligatorio para enviar el link de pago");
+  }
+  const to = joinEmails(recipients);
   if (!input.linkPago.trim()) throw new Error("Falta el link de pago");
 
   const nombrePaciente = formatNombrePersona(input.nombrePaciente) || "paciente";
@@ -389,7 +396,7 @@ export async function sendLinkPagoEmail(
   try {
     ensureSendGrid();
     await sgMail.send({
-      to,
+      to: recipients,
       from: {
         email: config.fromEmail,
         name: config.fromName,

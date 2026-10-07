@@ -11,6 +11,7 @@ import {
 } from "../services/dataService";
 import type { Presupuesto } from "../types";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
+import { EmailChipsInput } from "./EmailChipsInput";
 import { Modal } from "./Modal";
 
 type Props = {
@@ -163,13 +164,7 @@ export function PresupuestoLinkPagoEmailModal({
         <div className="form-stack">
           <div className="form-group">
             <label htmlFor="presup-link-pago-to">Para</label>
-            <input
-              id="presup-link-pago-to"
-              type="email"
-              value={email}
-              readOnly
-              disabled
-            />
+            <EmailChipsInput id="presup-link-pago-to" value={email} readOnly />
           </div>
 
           <div className="form-group">

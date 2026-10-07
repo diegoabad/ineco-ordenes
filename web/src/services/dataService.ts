@@ -341,7 +341,7 @@ export async function createPresupuesto(
 
 export async function enviarPresupuesto(
   id: string,
-  overrides?: { subject?: string; body?: string },
+  overrides?: { subject?: string; body?: string; email?: string },
 ): Promise<Presupuesto> {
   const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/enviar`, {
     method: "POST",
@@ -358,6 +358,14 @@ export async function updatePresupuesto(
     method: "PUT",
     body: JSON.stringify(data),
   });
+  return res.data;
+}
+
+export async function revertirPresupuestoEstado(id: string): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(
+    `/api/presupuestos/${id}/revertir-estado`,
+    { method: "POST", body: "{}" },
+  );
   return res.data;
 }
 
