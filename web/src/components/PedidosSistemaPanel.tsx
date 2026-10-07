@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
+import { useAuth } from "../auth/AuthContext";
+import { usePedidosPendientes } from "../auth/PedidosPendientesContext";
 import { resolveAssetUrl } from "../config/api";
 import {
   completarPedidoSistema,
@@ -75,6 +77,10 @@ function isImageAdjunto(nombre: string, url: string): boolean {
 }
 
 export function PedidosSistemaPanel() {
+  const { user } = useAuth();
+  const dueno = user?.sistemas === true;
+  const { pedidosPendientesCount } = usePedidosPendientes();
+  const prevPendientes = useRef<number | null>(null);
   const [items, setItems] = useState<PedidoSistema[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
@@ -87,20 +93,29 @@ export function PedidosSistemaPanel() {
   const [mensajeCompletar, setMensajeCompletar] = useState("");
   const [completando, setCompletando] = useState(false);
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
+  const cargar = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) setLoading(true);
     try {
       setItems(await fetchPedidosSistema());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudieron cargar los pedidos");
     } finally {
-      setLoading(false);
+      if (!opts?.quiet) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void cargar();
   }, [cargar]);
+
+  useEffect(() => {
+    if (!dueno) return;
+    if (prevPendientes.current === pedidosPendientesCount) return;
+    const first = prevPendientes.current === null;
+    prevPendientes.current = pedidosPendientesCount;
+    if (first) return;
+    void cargar({ quiet: true });
+  }, [dueno, pedidosPendientesCount, cargar]);
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -242,68 +257,74 @@ export function PedidosSistemaPanel() {
                     className="pedidos-row"
                     onClick={() => setViewing(p)}
                   >
-                    <td
-                      className="pedidos-col-fecha"
-                      title={formatDateTime(p.creadoAt)}
-                    >
-                      {formatDateOnly(p.creadoAt)}
+                    <td className="pedidos-col-fecha">
+                      <span className="pedidos-cell-text" title={formatDateTime(p.creadoAt)}>
+                        {formatDateOnly(p.creadoAt)}
+                      </span>
                     </td>
-                    <td
-                      className="pedidos-col-usuario"
-                      title={formatNombrePersona(p.solicitadoPor)}
-                    >
-                      {formatNombrePersona(p.solicitadoPor)}
+                    <td className="pedidos-col-usuario">
+                      <span
+                        className="pedidos-cell-text"
+                        title={formatNombrePersona(p.solicitadoPor)}
+                      >
+                        {formatNombrePersona(p.solicitadoPor)}
+                      </span>
                     </td>
-                    <td className="pedidos-col-titulo" title={p.titulo}>
-                      {p.titulo}
+                    <td className="pedidos-col-titulo">
+                      <span className="pedidos-cell-text" title={p.titulo}>
+                        {p.titulo}
+                      </span>
                     </td>
-                    <td
-                      className="pedidos-col-select"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <PedidosColorSelect
-                        value={p.prioridad}
-                        options={PRIORIDAD_OPTIONS}
-                        disabled={updatingId === p.id}
-                        ariaLabel="Prioridad"
-                        onChange={(prioridad) => void patchPedido(p.id, { prioridad })}
-                      />
+                    <td className="pedidos-col-select">
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <PedidosColorSelect
+                          value={p.prioridad}
+                          options={PRIORIDAD_OPTIONS}
+                          disabled={updatingId === p.id}
+                          ariaLabel="Prioridad"
+                          onChange={(prioridad) => void patchPedido(p.id, { prioridad })}
+                        />
+                      </div>
                     </td>
-                    <td
-                      className="pedidos-col-select"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <td className="pedidos-col-select">
+                      <div onClick={(e) => e.stopPropagation()}>
                       <PedidosColorSelect
                         value={p.estado}
                         options={ESTADO_OPTIONS}
-                        disabled={updatingId === p.id}
+                        disabled={!dueno || updatingId === p.id}
                         ariaLabel="Estado"
                         onChange={(estado) => void patchPedido(p.id, { estado })}
                       />
+                      </div>
                     </td>
-                    <td
-                      className="fl-col-actions pedidos-col-actions"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <td className="fl-col-actions pedidos-col-actions">
                       <div className="fl-table-actions fl-table-actions--2">
-                        <button
-                          type="button"
-                          className="fl-icon-btn fl-icon-btn--success"
-                          title={
-                            p.estado === "finalizado"
-                              ? "Ya está completado"
-                              : "Marcar como completado"
-                          }
-                          disabled={p.estado === "finalizado" || completando}
-                          onClick={() => abrirCompletar(p)}
-                        >
-                          <IconCheck size={16} />
-                        </button>
+                        {dueno ? (
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--success"
+                            title={
+                              p.estado === "finalizado"
+                                ? "Ya está completado"
+                                : "Marcar como completado"
+                            }
+                            disabled={p.estado === "finalizado" || completando}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              abrirCompletar(p);
+                            }}
+                          >
+                            <IconCheck size={16} />
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--danger"
                           title="Eliminar"
-                          onClick={() => setABorrar(p)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setABorrar(p);
+                          }}
                         >
                           <IconTrash size={16} />
                         </button>
@@ -361,6 +382,7 @@ export function PedidosSistemaPanel() {
       <Modal
         open={aCompletar !== null}
         title="Marcar como completado"
+        className="fl-modal--pedido-completar"
         onClose={() => {
           if (completando) return;
           setACompletar(null);
@@ -386,23 +408,15 @@ export function PedidosSistemaPanel() {
           </>
         }
       >
-        {aCompletar ? (
-          <>
-            <p className="modal-hint">
-              Vas a marcar «{aCompletar.titulo}» como completado.
-            </p>
-            <label className="form-group pedido-completar__mensaje">
-              <span>Mensaje para quien lo pidió (opcional)</span>
-              <textarea
-                rows={4}
-                value={mensajeCompletar}
-                onChange={(e) => setMensajeCompletar(e.target.value)}
-                placeholder="Si lo completás, se incluye en el mail. Si lo dejás vacío, solo avisamos que finalizamos la tarea."
-                disabled={completando}
-              />
-            </label>
-          </>
-        ) : null}
+        <textarea
+          className="pedido-completar__mensaje"
+          rows={6}
+          value={mensajeCompletar}
+          onChange={(e) => setMensajeCompletar(e.target.value)}
+          placeholder="Mensaje opcional"
+          aria-label="Mensaje opcional"
+          disabled={completando}
+        />
       </Modal>
 
       <ConfirmDialog
@@ -455,7 +469,7 @@ export function PedidosSistemaPanel() {
                   <PedidosColorSelect
                     value={viewing.estado}
                     options={ESTADO_OPTIONS}
-                    disabled={updatingId === viewing.id}
+                    disabled={!dueno || updatingId === viewing.id}
                     ariaLabel="Estado"
                     onChange={(estado) => void patchPedido(viewing.id, { estado })}
                   />

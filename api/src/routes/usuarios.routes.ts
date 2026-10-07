@@ -60,7 +60,7 @@ function parseApproveBody(body: unknown): ApproveUserInput {
           m === "usuarios",
       ) as AppModuleId[])
     : [];
-  return { role, modules };
+  return { role, modules, sistemas: raw.sistemas === true };
 }
 
 router.get("/config/dominios", async (_req, res) => {

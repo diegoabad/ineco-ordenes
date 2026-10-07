@@ -8423,6 +8423,10 @@ tbody tr.is-inactive td {
   color: var(--text);
 }
 
+.usuarios-sistemas-check {
+  margin-top: 0.85rem;
+}
+
 .usuarios-modules-hint {
   color: var(--text-muted, #6b7280);
   font-size: 0.85em;
@@ -8591,12 +8595,27 @@ tbody tr.is-inactive td {
   height: 72px;
 }
 
-.pedidos-row {
+.pedidos-row td {
   cursor: pointer;
 }
 
+.pedidos-cell-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.fl-modal--pedido-completar {
+  width: min(100%, 560px);
+}
+
 .pedido-completar__mensaje {
-  margin-bottom: 0;
+  display: block;
+  min-height: 9rem;
+  margin: 0;
+  resize: vertical;
 }
 
 .pedidos-col-fecha {

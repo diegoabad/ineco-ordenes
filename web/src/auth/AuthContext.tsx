@@ -35,6 +35,8 @@ export type AuthUser = {
   nombre: string;
   role: UserRole;
   modules: AppModuleId[];
+  /** Dueño de pedidos sistema. No abre una pantalla. */
+  sistemas: boolean;
   status: UserStatus;
   creadoAt: string;
   actualizadoAt: string;
@@ -53,8 +55,8 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function modulesSignature(user: Pick<AuthUser, "role" | "modules">): string {
-  return `${user.role}|${[...user.modules].sort().join(",")}`;
+function modulesSignature(user: Pick<AuthUser, "role" | "modules" | "sistemas">): string {
+  return `${user.role}|${user.sistemas ? 1 : 0}|${[...user.modules].sort().join(",")}`;
 }
 
 function normalizeClientModules(
@@ -216,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               nombre: next.nombre || prev.nombre,
               role: next.role,
               modules,
+              sistemas: next.sistemas === true,
               status: next.status,
             };
             if (

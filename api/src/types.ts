@@ -447,6 +447,8 @@ export type AppUser = {
   passwordHash: string;
   role: UserRole;
   modules: AppModuleId[];
+  /** Dueño de pedidos sistema. No abre una pantalla. */
+  sistemas: boolean;
   status: UserStatus;
   creadoAt: string;
   actualizadoAt: string;
@@ -467,6 +469,7 @@ export type UserDirectoryEntry = {
 export type ApproveUserInput = {
   role: UserRole;
   modules: AppModuleId[];
+  sistemas?: boolean;
 };
 
 /** Catálogo + flags del módulo Busca turno (compartido en Firestore). */

@@ -8,13 +8,13 @@ type ModalProps = {
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  className?: string;
   /** Modal de aviso grande (recordatorio de app). */
   alert?: boolean;
   /** Si false, oculta el botón X (útil para avisos bloqueantes). */
   hideClose?: boolean;
   /** Contenido a la derecha del título (antes del botón cerrar). */
   headerAside?: ReactNode;
-  className?: string;
 };
 
 export function Modal({
@@ -24,10 +24,10 @@ export function Modal({
   children,
   footer,
   wide,
+  className,
   alert,
   hideClose,
   headerAside,
-  className,
 }: ModalProps) {
   if (!open) return null;
 

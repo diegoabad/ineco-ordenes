@@ -40,6 +40,7 @@ type AccessDraft = {
   email: string;
   role: UserRole;
   modules: AppModuleId[];
+  sistemas: boolean;
   mode: "approve" | "edit";
 };
 
@@ -137,6 +138,7 @@ export function UsuariosPanel() {
       email: user.email,
       role: "user",
       modules: withFixedModules([], "user"),
+      sistemas: false,
       mode: "approve",
     });
   }
@@ -148,6 +150,7 @@ export function UsuariosPanel() {
       email: user.email,
       role: user.role,
       modules: withFixedModules(user.modules, user.role),
+      sistemas: user.sistemas === true,
       mode: "edit",
     });
   }
@@ -198,7 +201,11 @@ export function UsuariosPanel() {
           data: { emailSent: boolean; emailError: string | null };
         }>(`/api/usuarios/${encodeURIComponent(draft.userId)}/approve`, {
           method: "POST",
-          body: JSON.stringify({ role: draft.role, modules: draft.modules }),
+          body: JSON.stringify({
+            role: draft.role,
+            modules: draft.modules,
+            sistemas: draft.sistemas,
+          }),
         });
         toast.success("Usuario aprobado");
         if (!res.data.emailSent) {
@@ -207,7 +214,11 @@ export function UsuariosPanel() {
       } else {
         await apiFetch(`/api/usuarios/${encodeURIComponent(draft.userId)}`, {
           method: "PUT",
-          body: JSON.stringify({ role: draft.role, modules: draft.modules }),
+          body: JSON.stringify({
+            role: draft.role,
+            modules: draft.modules,
+            sistemas: draft.sistemas,
+          }),
         });
         toast.success("Acceso actualizado");
       }
@@ -596,6 +607,20 @@ export function UsuariosPanel() {
                   ))}
                 </fieldset>
               )}
+              <label className="usuarios-modules-check usuarios-sistemas-check">
+                <input
+                  type="checkbox"
+                  checked={draft.sistemas}
+                  onChange={() =>
+                    setDraft((prev) => (prev ? { ...prev, sistemas: !prev.sistemas } : prev))
+                  }
+                />
+                Sistemas
+              </label>
+              <p className="usuarios-modules-hint">
+                No abre una pantalla. Es el dueño de los pedidos: ve todos, cambia estados y el
+                número de pendientes.
+              </p>
             </div>
             <div className="fl-modal__footer">
               <button

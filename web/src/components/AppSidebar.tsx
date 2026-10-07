@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { LOGO_INECO_DATA_URL } from "../assets/logoIneco";
+import { useAuth } from "../auth/AuthContext";
+import { usePedidosPendientes } from "../auth/PedidosPendientesContext";
 import { usePendingUsers } from "../auth/PendingUsersContext";
 import type { AppModuleId } from "../auth/AuthContext";
 import {
@@ -145,7 +147,9 @@ export function AppSidebar({
   userName,
   onLogout,
 }: Props) {
+  const { user } = useAuth();
   const { pendingUsersCount } = usePendingUsers();
+  const { pedidosPendientesCount } = usePedidosPendientes();
   const showOrdenes = allowedModules.includes("ordenes");
   const showPresupuestos = allowedModules.includes("presupuestos");
   const showPami = allowedModules.includes("pami");
@@ -329,7 +333,10 @@ export function AppSidebar({
               items={config}
               module={module}
               onNavigate={navigateFlat}
-              badges={isAdmin ? { usuarios: pendingUsersCount } : undefined}
+              badges={{
+                ...(isAdmin ? { usuarios: pendingUsersCount } : {}),
+                ...(user?.sistemas ? { "pedidos-sistema": pedidosPendientesCount } : {}),
+              }}
             />
           </nav>
         ) : null}
