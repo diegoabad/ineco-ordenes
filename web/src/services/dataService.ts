@@ -361,6 +361,17 @@ export async function updatePresupuesto(
   return res.data;
 }
 
+export async function updatePresupuestoColorFila(
+  id: string,
+  colorFila: Presupuesto["colorFila"],
+): Promise<Presupuesto> {
+  const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(`/api/presupuestos/${id}/color`, {
+    method: "PATCH",
+    body: JSON.stringify({ colorFila }),
+  });
+  return res.data;
+}
+
 export async function revertirPresupuestoEstado(id: string): Promise<Presupuesto> {
   const res = await apiFetch<{ ok: boolean; data: Presupuesto }>(
     `/api/presupuestos/${id}/revertir-estado`,

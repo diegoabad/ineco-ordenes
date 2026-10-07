@@ -173,6 +173,9 @@ export const EMPTY_PRESTACION: PrestacionFormData = {
 
 export type PresupuestoEstado = "pendiente" | "enviado" | "aceptado" | "rechazado" | "fallido";
 
+/** Fondos claros para marcar un renglón sin perder contraste. */
+export type PresupuestoColorFila = "ambar" | "menta" | "cielo" | "rosa" | "lila" | "durazno";
+
 export type PresupuestoItem = {
   prestacionId: string;
   titulo: string;
@@ -201,6 +204,8 @@ export type Presupuesto = {
   estado: PresupuestoEstado;
   /** Estado previo al marcar como aceptado, para poder volver atrás. */
   estadoAnterior: PresupuestoEstado | null;
+  /** Fondo suave del renglón en el listado. */
+  colorFila: PresupuestoColorFila | null;
   pdfUrl: string | null;
   /** Motivo elegido o escrito al marcar como rechazado. */
   motivoRechazo: string | null;

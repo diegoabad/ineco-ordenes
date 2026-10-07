@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "react-toastify";
 import { blobToBase64 } from "../lib/blob";
 import { formatFechaHora, formatFechaYmd } from "../lib/fechas";
@@ -13,19 +14,21 @@ import {
   fetchPresupuestosConfig,
   restorePresupuestoPdf,
   revertirPresupuestoEstado,
+  updatePresupuestoColorFila,
   updatePresupuestoEstado,
 } from "../services/dataService";
 import type {
   ModalidadPresupuesto,
   MotivoRechazoPresupuesto,
   Presupuesto,
+  PresupuestoColorFila,
   PresupuestoEstado,
   ProfesionalPresupuesto,
 } from "../types";
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LoadingBlock } from "./InecoMark";
-import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconUndo, IconX } from "./Icons";
+import { IconCheck, IconMail, IconPalette, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconUndo, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
 import { PresupuestoRechazoDialog } from "./PresupuestoRechazoDialog";
@@ -48,7 +51,16 @@ function presupuestoEditTooltip(estado: PresupuestoEstado): string {
   return "No se puede editar en este estado";
 }
 
-const ACCIONES_PRESUPUESTO = 6;
+const ACCIONES_PRESUPUESTO = 7;
+
+const COLORES_FILA: { id: PresupuestoColorFila; label: string }[] = [
+  { id: "ambar", label: "Ámbar" },
+  { id: "menta", label: "Menta" },
+  { id: "cielo", label: "Cielo" },
+  { id: "rosa", label: "Rosa" },
+  { id: "lila", label: "Lila" },
+  { id: "durazno", label: "Durazno" },
+];
 
 function accionesClass(): string {
   return `fl-col-actions--${ACCIONES_PRESUPUESTO}`;
@@ -122,6 +134,13 @@ export function PresupuestosPanel({
   const [editando, setEditando] = useState<Presupuesto | null>(null);
   const [aBorrar, setABorrar] = useState<Presupuesto | null>(null);
   const [aRechazar, setARechazar] = useState<Presupuesto | null>(null);
+  const [colorMenu, setColorMenu] = useState<{
+    id: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [guardandoColor, setGuardandoColor] = useState(false);
+  const colorMenuRef = useRef<HTMLDivElement>(null);
   const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
   const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
@@ -246,6 +265,64 @@ export function PresupuestosPanel({
       toast.error(error instanceof Error ? error.message : "No se pudo volver al estado anterior");
     } finally {
       setGuardandoEstadoId(null);
+    }
+  }
+
+  const presupuestoColorMenu = colorMenu
+    ? (items.find((item) => item.id === colorMenu.id) ?? null)
+    : null;
+
+  useEffect(() => {
+    if (!colorMenu) return;
+    function onDoc(event: MouseEvent) {
+      const target = event.target as Node;
+      if (colorMenuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-presup-color-trigger]")) return;
+      setColorMenu(null);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setColorMenu(null);
+    }
+    function onScroll() {
+      setColorMenu(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [colorMenu]);
+
+  function abrirColorMenu(presupuestoId: string, anchor: HTMLButtonElement) {
+    if (colorMenu?.id === presupuestoId) {
+      setColorMenu(null);
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const estimatedHeight = 46;
+    const below = rect.bottom + 6;
+    const top =
+      below + estimatedHeight > window.innerHeight && rect.top > estimatedHeight + 8
+        ? rect.top - estimatedHeight - 6
+        : below;
+    const left = Math.min(rect.right, window.innerWidth - 8);
+    setColorMenu({ id: presupuestoId, top, left });
+  }
+
+  async function elegirColorFila(colorFila: PresupuestoColorFila | null) {
+    if (!colorMenu || guardandoColor) return;
+    setGuardandoColor(true);
+    try {
+      const updated = await updatePresupuestoColorFila(colorMenu.id, colorFila);
+      upsertPresupuesto(updated);
+      setColorMenu(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el color");
+    } finally {
+      setGuardandoColor(false);
     }
   }
 
@@ -425,7 +502,7 @@ export function PresupuestosPanel({
                   const puedeEditar = presupuestoEsEditable(p.estado);
                   const guardandoEstaFila = guardandoEstadoId === p.id;
                   return (
-                  <tr key={p.id}>
+                  <tr key={p.id} className={p.colorFila ? `presup-fila--${p.colorFila}` : undefined}>
                     <td className="fl-col-presup-fecha">{formatFechaYmd(p.fecha)}</td>
                     <td>
                       <span className="fl-texto-truncado" title={formatNombrePersona(p.nombrePaciente)}>
@@ -583,6 +660,17 @@ export function PresupuestosPanel({
                         </button>
                         <button
                           type="button"
+                          className="fl-icon-btn fl-icon-btn--default"
+                          data-presup-color-trigger
+                          title="Color del renglón"
+                          aria-label="Color del renglón"
+                          aria-expanded={colorMenu?.id === p.id}
+                          onClick={(event) => abrirColorMenu(p.id, event.currentTarget)}
+                        >
+                          <IconPalette size={16} />
+                        </button>
+                        <button
+                          type="button"
                           className="fl-icon-btn fl-icon-btn--danger"
                           title="Eliminar"
                           aria-label="Eliminar"
@@ -659,6 +747,43 @@ export function PresupuestosPanel({
           return marcarEstado(aRechazar, "rechazado", motivo);
         }}
       />
+
+      {colorMenu && presupuestoColorMenu
+        ? createPortal(
+            <div
+              ref={colorMenuRef}
+              className="presup-color-menu"
+              role="menu"
+              aria-label="Color del renglón"
+              style={{ top: colorMenu.top, left: colorMenu.left }}
+            >
+              <button
+                type="button"
+                className={`presup-color-dot presup-color-dot--none${
+                  presupuestoColorMenu.colorFila ? "" : " is-selected"
+                }`}
+                title="Sin color"
+                aria-label="Sin color"
+                disabled={guardandoColor}
+                onClick={() => void elegirColorFila(null)}
+              />
+              {COLORES_FILA.map((color) => (
+                <button
+                  key={color.id}
+                  type="button"
+                  className={`presup-color-dot presup-color-dot--${color.id}${
+                    presupuestoColorMenu.colorFila === color.id ? " is-selected" : ""
+                  }`}
+                  title={color.label}
+                  aria-label={color.label}
+                  disabled={guardandoColor}
+                  onClick={() => void elegirColorFila(color.id)}
+                />
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <ConfirmDialog
         open={aBorrar !== null}
