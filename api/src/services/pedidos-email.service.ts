@@ -5,7 +5,7 @@ import { env } from "../config/env.js";
 import { uploadsPedidosDir } from "../config/paths.js";
 import type { PedidoSistema } from "../types.js";
 
-const PEDIDOS_TO = "tickets@ineco.ar";
+const PEDIDOS_TO = ["dabad@ineco.ar", "diegoabad.2289@gmail.com"];
 
 function ensureSendGrid(): void {
   if (!env.sendgrid.apiKey) {
