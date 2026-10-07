@@ -4,7 +4,9 @@ import {
   buildPresupuestoEmailVarsFromPresupuesto,
   renderPresupuestoEmailPreview,
 } from "../lib/presupuestoEmail";
+import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
 import { enviarPresupuesto, fetchPresupuestoEmailConfig } from "../services/dataService";
+import { EmailChipsInput } from "./EmailChipsInput";
 import type { Presupuesto } from "../types";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
 import { Modal } from "./Modal";
@@ -28,6 +30,7 @@ export function PresupuestoEmailPreviewModal({
   const [sending, setSending] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [toEmails, setToEmails] = useState("");
   const [editorKey, setEditorKey] = useState(0);
 
   useEffect(() => {
@@ -38,6 +41,7 @@ export function PresupuestoEmailPreviewModal({
     setLoading(true);
     setSubject("");
     setBody("");
+    setToEmails(current.email);
 
     void (async () => {
       try {
@@ -78,12 +82,18 @@ export function PresupuestoEmailPreviewModal({
       toast.warning("El cuerpo del email no puede estar vacío");
       return;
     }
+    const email = joinEmails(parseEmailList(toEmails).filter(isEmailAddress));
+    if (!email) {
+      toast.warning("Ingresá al menos un email válido");
+      return;
+    }
 
     setSending(true);
     try {
       const enviado = await enviarPresupuesto(presupuesto.id, {
         subject: subject.trim(),
         body,
+        email,
       });
       onSent(enviado);
       onClose();
@@ -105,6 +115,7 @@ export function PresupuestoEmailPreviewModal({
   if (!open || !presupuesto) return null;
 
   const disabled = loading || sending;
+  const emailListo = parseEmailList(toEmails).some(isEmailAddress);
 
   return (
     <Modal
@@ -128,7 +139,7 @@ export function PresupuestoEmailPreviewModal({
             type="button"
             className="btn btn-primary"
             onClick={() => void handleEnviar()}
-            disabled={disabled || !subject.trim() || !body.trim()}
+            disabled={disabled || !subject.trim() || !body.trim() || !emailListo}
           >
             {sending ? "Enviando…" : "Enviar presupuesto"}
           </button>
@@ -141,12 +152,11 @@ export function PresupuestoEmailPreviewModal({
         <div className="form-stack">
           <div className="form-group">
             <label htmlFor="presup-email-preview-to">Para</label>
-            <input
+            <EmailChipsInput
               id="presup-email-preview-to"
-              type="email"
-              value={presupuesto.email}
-              readOnly
-              disabled
+              value={toEmails}
+              disabled={disabled}
+              onChange={setToEmails}
             />
           </div>
 

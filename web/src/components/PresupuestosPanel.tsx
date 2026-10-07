@@ -12,6 +12,7 @@ import {
   fetchPresupuestos,
   fetchPresupuestosConfig,
   restorePresupuestoPdf,
+  revertirPresupuestoEstado,
   updatePresupuestoEstado,
 } from "../services/dataService";
 import type {
@@ -24,7 +25,7 @@ import type {
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LoadingBlock } from "./InecoMark";
-import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconX } from "./Icons";
+import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconUndo, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
 import { PresupuestoRechazoDialog } from "./PresupuestoRechazoDialog";
@@ -83,6 +84,11 @@ function formatMoney(value: number): string {
 function formatTotal(value: number): string {
   if (!value || value <= 0) return "—";
   return formatMoney(value);
+}
+
+function estadoAlVolver(p: Presupuesto): PresupuestoEstado {
+  if (p.estadoAnterior && p.estadoAnterior !== "aceptado") return p.estadoAnterior;
+  return p.ultimoEnvioAt ? "enviado" : "pendiente";
 }
 
 function estadoChipClass(estado: PresupuestoEstado): string {
@@ -222,6 +228,22 @@ export function PresupuestosPanel({
       if (estado === "rechazado") setARechazar(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado");
+    } finally {
+      setGuardandoEstadoId(null);
+    }
+  }
+
+  async function volverEstadoAnterior(p: Presupuesto) {
+    if (guardandoEstadoId || p.estado !== "aceptado") return;
+    setGuardandoEstadoId(p.id);
+    try {
+      const updated = await revertirPresupuestoEstado(p.id);
+      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(
+        `Presupuesto vuelto a ${PRESUPUESTO_ESTADO_LABEL[updated.estado].toLowerCase()}`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo volver al estado anterior");
     } finally {
       setGuardandoEstadoId(null);
     }
@@ -448,25 +470,37 @@ export function PresupuestosPanel({
                     </td>
                     <td className={`fl-col-actions ${accionesClass()}`}>
                       <div className={`fl-table-actions fl-table-actions--${maxAcciones}`}>
-                        <button
-                          type="button"
-                          className="fl-icon-btn fl-icon-btn--success"
-                          title={
-                            p.estado === "aceptado"
-                              ? "Ya está aceptado"
-                              : "Marcar como aceptado"
-                          }
-                          aria-label="Marcar como aceptado"
-                          disabled={
-                            emailPreview?.id === p.id ||
-                            guardandoEstaFila ||
-                            Boolean(guardandoEstadoId) ||
-                            p.estado === "aceptado"
-                          }
-                          onClick={() => void marcarEstado(p, "aceptado")}
-                        >
-                          <IconCheck size={16} />
-                        </button>
+                        {p.estado === "aceptado" ? (
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--default"
+                            title={`Volver a ${PRESUPUESTO_ESTADO_LABEL[estadoAlVolver(p)].toLowerCase()}`}
+                            aria-label={`Volver al estado anterior: ${PRESUPUESTO_ESTADO_LABEL[estadoAlVolver(p)]}`}
+                            disabled={
+                              emailPreview?.id === p.id ||
+                              guardandoEstaFila ||
+                              Boolean(guardandoEstadoId)
+                            }
+                            onClick={() => void volverEstadoAnterior(p)}
+                          >
+                            <IconUndo size={16} />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--success"
+                            title="Marcar como aceptado"
+                            aria-label="Marcar como aceptado"
+                            disabled={
+                              emailPreview?.id === p.id ||
+                              guardandoEstaFila ||
+                              Boolean(guardandoEstadoId)
+                            }
+                            onClick={() => void marcarEstado(p, "aceptado")}
+                          >
+                            <IconCheck size={16} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--danger"

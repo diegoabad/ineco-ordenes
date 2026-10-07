@@ -95,6 +95,16 @@ export function IconChevronDown(p: IconProps) {
   );
 }
 
+export function IconUndo(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H12" />
+    </svg>
+  );
+}
+
 export function IconChevronLeft(p: IconProps) {
   const s = base(p);
   return (

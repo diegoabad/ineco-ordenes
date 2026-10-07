@@ -199,6 +199,8 @@ export type Presupuesto = {
   totalEfectivo: number;
   total3Cuotas: number;
   estado: PresupuestoEstado;
+  /** Estado previo al marcar como aceptado, para poder volver atrás. */
+  estadoAnterior: PresupuestoEstado | null;
   pdfUrl: string | null;
   /** Motivo elegido o escrito al marcar como rechazado. */
   motivoRechazo: string | null;

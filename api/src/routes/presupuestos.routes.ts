@@ -13,6 +13,7 @@ import {
   listPresupuestos,
   PresupuestoEnvioError,
   restorePresupuestoPdf,
+  revertirPresupuestoAceptado,
   savePresupuestoPlantillaConfig,
   savePresupuestosConfig,
   updatePresupuesto,
@@ -286,14 +287,20 @@ function parsePresupuestoEstado(body: unknown): {
   };
 }
 
-function parsePresupuestoEnvioOverrides(body: unknown): { subject?: string; body?: string } {
+function parsePresupuestoEnvioOverrides(body: unknown): {
+  subject?: string;
+  body?: string;
+  email?: string;
+} {
   if (!body || typeof body !== "object") return {};
   const raw = body as Record<string, unknown>;
   const subject = String(raw.subject ?? "").trim();
   const emailBody = typeof raw.body === "string" ? raw.body : "";
+  const email = typeof raw.email === "string" ? raw.email.trim() : "";
   return {
     subject: subject || undefined,
     body: emailBody.trim() ? emailBody : undefined,
+    email: email || undefined,
   };
 }
 
@@ -388,6 +395,19 @@ router.post("/:id/aceptar", async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : "Error al aceptar el presupuesto",
+    });
+  }
+});
+
+router.post("/:id/revertir-estado", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const data = await revertirPresupuestoAceptado(id);
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al volver al estado anterior",
     });
   }
 });
