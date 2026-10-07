@@ -17,6 +17,7 @@ import {
   savePresupuestoPlantillaConfig,
   savePresupuestosConfig,
   updatePresupuesto,
+  updatePresupuestoColorFila,
   updatePresupuestoEstado,
 } from "../services/db.service.js";
 import { resolvePresupuestoPdfPath } from "../services/presupuesto-pdf.service.js";
@@ -29,6 +30,7 @@ import {
   type ModalidadPresupuesto,
   type MotivoRechazoPresupuesto,
   type PresupuestoCreateInput,
+  type PresupuestoColorFila,
   type PresupuestoEstado,
   type PresupuestosConfig,
   type ProfesionalPresupuesto,
@@ -395,6 +397,28 @@ router.post("/:id/aceptar", async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error instanceof Error ? error.message : "Error al aceptar el presupuesto",
+    });
+  }
+});
+
+router.patch("/:id/color", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id!;
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const color = raw.colorFila == null ? "" : String(raw.colorFila).trim();
+    const allowed: PresupuestoColorFila[] = ["ambar", "menta", "cielo", "rosa", "lila", "durazno"];
+    if (color && !allowed.includes(color as PresupuestoColorFila)) {
+      throw new Error("Elegí un color de la lista");
+    }
+    const data = await updatePresupuestoColorFila(
+      id,
+      color ? (color as PresupuestoColorFila) : null,
+    );
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al guardar el color",
     });
   }
 });

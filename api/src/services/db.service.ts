@@ -22,7 +22,7 @@ import {
   calcPresupuestoTotales,
   normalizeRecargoExternoPorcentaje,
 } from "../lib/presupuestoTotales.js";
-import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, MotivoRechazoPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
+import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, MotivoRechazoPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoColorFila, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
 import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
@@ -130,6 +130,21 @@ function parsePresupuestoEstado(value: unknown): PresupuestoEstado | null {
   return null;
 }
 
+function parseColorFila(value: unknown): PresupuestoColorFila | null {
+  const color = String(value ?? "").trim();
+  if (
+    color === "ambar" ||
+    color === "menta" ||
+    color === "cielo" ||
+    color === "rosa" ||
+    color === "lila" ||
+    color === "durazno"
+  ) {
+    return color;
+  }
+  return null;
+}
+
 function estadoAnteriorGuardado(
   raw: Record<string, unknown>,
   estado: PresupuestoEstado,
@@ -184,6 +199,7 @@ function normalizePresupuesto(id: string, raw: Record<string, unknown>): Presupu
     total3Cuotas: toMoney(raw.total3Cuotas),
     estado,
     estadoAnterior: estadoAnteriorGuardado(raw, estado, ultimoEnvioAt),
+    colorFila: parseColorFila(raw.colorFila),
     pdfUrl,
     motivoRechazo: estado === "rechazado" ? motivoRechazo : null,
     ultimoEnvioAt,
@@ -209,6 +225,7 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     total3Cuotas: p.total3Cuotas,
     estado: p.estado,
     estadoAnterior: p.estado === "aceptado" ? p.estadoAnterior : null,
+    colorFila: p.colorFila,
     pdfUrl: p.pdfUrl,
     motivoRechazo: p.estado === "rechazado" ? p.motivoRechazo : null,
     ultimoEnvioAt: p.ultimoEnvioAt,
@@ -1137,6 +1154,7 @@ export async function createPresupuesto(input: PresupuestoCreateInput): Promise<
     total3Cuotas: totales.total3Cuotas,
     estado: "pendiente",
     estadoAnterior: null,
+    colorFila: null,
     pdfUrl,
     motivoRechazo: null,
     ultimoEnvioAt: null,
@@ -1490,6 +1508,21 @@ export async function aceptarPresupuesto(
       error instanceof Error ? error.message : "No se pudo enviar el mail con el link de pago";
     return { presupuesto: current, emailError };
   }
+}
+
+export async function updatePresupuestoColorFila(
+  id: string,
+  colorFila: PresupuestoColorFila | null,
+): Promise<Presupuesto> {
+  const existingSnap = await getDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id));
+  if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
+
+  const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
+  if (current.colorFila === colorFila) return current;
+
+  const presupuesto: Presupuesto = { ...current, colorFila };
+  await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
+  return presupuesto;
 }
 
 export async function revertirPresupuestoAceptado(id: string): Promise<Presupuesto> {
