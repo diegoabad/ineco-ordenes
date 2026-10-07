@@ -8,19 +8,30 @@ type ModalProps = {
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  className?: string;
   /** Modal de aviso grande (recordatorio de app). */
   alert?: boolean;
   /** Si false, oculta el botón X (útil para avisos bloqueantes). */
   hideClose?: boolean;
 };
 
-export function Modal({ open, title, onClose, children, footer, wide, alert, hideClose }: ModalProps) {
+export function Modal({
+  open,
+  title,
+  onClose,
+  children,
+  footer,
+  wide,
+  className,
+  alert,
+  hideClose,
+}: ModalProps) {
   if (!open) return null;
 
   return (
     <div className="fl-modal-backdrop" role="presentation">
       <div
-        className={`fl-modal${wide ? " fl-modal--wide" : ""}${alert ? " fl-modal--alert" : ""}`}
+        className={`fl-modal${wide ? " fl-modal--wide" : ""}${alert ? " fl-modal--alert" : ""}${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"

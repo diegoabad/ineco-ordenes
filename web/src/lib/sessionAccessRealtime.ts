@@ -37,6 +37,7 @@ function mapUserDoc(id: string, raw: Record<string, unknown>): AuthUser | null {
     nombre: String(raw.nombre ?? "").trim(),
     role,
     modules,
+    sistemas: raw.sistemas === true,
     status: status as UserStatus,
     creadoAt: String(raw.creadoAt ?? ""),
     actualizadoAt: String(raw.actualizadoAt ?? ""),
@@ -51,6 +52,7 @@ function accessSignature(user: AuthUser): string {
     user.status,
     user.role,
     user.email,
+    user.sistemas ? "1" : "0",
     [...user.modules].sort().join(","),
   ].join("|");
 }

@@ -21,6 +21,7 @@ export const DEV_BYPASS_USER: AppUserPublic = {
   nombre: "Dev (auth off)",
   role: "admin",
   modules: [...ALL_APP_MODULES],
+  sistemas: true,
   status: "approved",
   creadoAt: new Date(0).toISOString(),
   actualizadoAt: new Date(0).toISOString(),

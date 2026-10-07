@@ -9,6 +9,8 @@ import {
   updatePedidoSistema,
 } from "../services/db.service.js";
 import type {
+  AppUserPublic,
+  PedidoSistema,
   PedidoSistemaCreateInput,
   PedidoSistemaEstado,
   PedidoSistemaFotoInput,
@@ -22,6 +24,26 @@ const router = Router();
 function paramId(req: { params: { id?: string | string[] } }): string {
   const id = req.params.id;
   return Array.isArray(id) ? id[0]! : id!;
+}
+
+function viewer(req: AuthedRequest): AppUserPublic {
+  if (!req.user) throw new Error("No autenticado");
+  return req.user;
+}
+
+function esDuenoPedidos(user: AppUserPublic): boolean {
+  return user.sistemas === true;
+}
+
+function esPedidoPropio(pedido: PedidoSistema, user: AppUserPublic): boolean {
+  if (pedido.creadoPorUserId && pedido.creadoPorUserId === user.id) return true;
+  const email = user.email.trim().toLowerCase();
+  return Boolean(email && pedido.creadoPorEmail?.trim().toLowerCase() === email);
+}
+
+function assertPuedeVer(pedido: PedidoSistema, user: AppUserPublic): void {
+  if (esDuenoPedidos(user) || esPedidoPropio(pedido, user)) return;
+  throw new Error("Pedido no encontrado");
 }
 
 function isSeccion(value: unknown): value is PedidoSistemaSeccion {
@@ -91,9 +113,11 @@ function parseUpdateInput(body: unknown): PedidoSistemaUpdateInput {
   return input;
 }
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const data = await listPedidosSistema();
+    const user = viewer(req as AuthedRequest);
+    const all = await listPedidosSistema();
+    const data = esDuenoPedidos(user) ? all : all.filter((p) => esPedidoPropio(p, user));
     res.json({ ok: true, data });
   } catch (error) {
     res.status(500).json({
@@ -103,9 +127,31 @@ router.get("/", async (_req, res) => {
   }
 });
 
+router.get("/pendientes-count", async (req, res) => {
+  try {
+    const user = viewer(req as AuthedRequest);
+    if (!esDuenoPedidos(user)) {
+      res.json({ ok: true, data: { count: 0 } });
+      return;
+    }
+    const all = await listPedidosSistema();
+    res.json({
+      ok: true,
+      data: { count: all.filter((p) => p.estado === "pendiente").length },
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Error al contar pendientes",
+    });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
+    const user = viewer(req as AuthedRequest);
     const data = await getPedidoSistema(paramId(req));
+    assertPuedeVer(data, user);
     res.json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al obtener pedido";
@@ -133,6 +179,11 @@ router.post("/", async (req, res) => {
 
 router.post("/:id/completar", async (req, res) => {
   try {
+    const user = viewer(req as AuthedRequest);
+    if (!esDuenoPedidos(user)) {
+      res.status(403).json({ ok: false, message: "No podés cambiar el estado del pedido" });
+      return;
+    }
     const mensaje = String((req.body as { mensaje?: unknown })?.mensaje ?? "");
     const result = await completarPedidoSistema(paramId(req), mensaje);
     res.json({
@@ -148,8 +199,16 @@ router.post("/:id/completar", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
+    const user = viewer(req as AuthedRequest);
+    const id = paramId(req);
+    const current = await getPedidoSistema(id);
+    assertPuedeVer(current, user);
     const input = parseUpdateInput(req.body);
-    const data = await updatePedidoSistema(paramId(req), input);
+    if (input.estado && input.estado !== current.estado && !esDuenoPedidos(user)) {
+      res.status(403).json({ ok: false, message: "No podés cambiar el estado del pedido" });
+      return;
+    }
+    const data = await updatePedidoSistema(id, input);
     res.json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al actualizar pedido";
@@ -159,7 +218,11 @@ router.patch("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    await deletePedidoSistema(paramId(req));
+    const user = viewer(req as AuthedRequest);
+    const id = paramId(req);
+    const current = await getPedidoSistema(id);
+    assertPuedeVer(current, user);
+    await deletePedidoSistema(id);
     res.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al eliminar pedido";

@@ -172,24 +172,55 @@ export async function sendPedidoCompletadoEmail(
 
   const titulo = pedido.titulo.trim() || "tu pedido";
   const nota = mensaje.trim();
+  const detalle = pedido.detalle.trim();
   const saludoNombre = pedido.solicitadoPor.trim();
   const saludo = saludoNombre ? `Hola ${saludoNombre},` : "Hola,";
-  const cierre = `Finalizamos la tarea "${titulo}".`;
-  const text = [saludo, "", cierre, ...(nota ? ["", nota] : [])].join("\n");
+  const cierre = `Finalizamos el ticket "${titulo}".`;
+  const fecha = formatPedidoFecha(pedido.creadoAt);
+  const text = [
+    saludo,
+    "",
+    cierre,
+    "",
+    "Nos dejaste:",
+    detalle || "—",
+    "",
+    `Fecha: ${fecha}`,
+    ...(nota ? ["", nota] : []),
+    "",
+    "Saludos,",
+    "Diego Abad",
+  ].join("\n");
   const notaHtml = nota
     ? `<p style="white-space:pre-wrap">${escapeHtml(nota)}</p>`
     : "";
   const html = `
     <p>${escapeHtml(saludo)}</p>
     <p>${escapeHtml(cierre)}</p>
+    <p><strong>Nos dejaste:</strong></p>
+    <p style="white-space:pre-wrap">${escapeHtml(detalle || "—")}</p>
+    <p><strong>Fecha:</strong> ${escapeHtml(fecha)}</p>
     ${notaHtml}
+    <p>Saludos,<br/>Diego Abad</p>
   `;
 
   await sgMail.send({
     to,
     from: PEDIDOS_FROM,
-    subject: `Finalizamos: ${titulo}`,
+    subject: `Finalizamos el ticket: ${titulo}`,
     text,
     html,
+  });
+}
+
+function formatPedidoFecha(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso || "—";
+  return d.toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }

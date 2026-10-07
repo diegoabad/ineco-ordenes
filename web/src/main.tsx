@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import { AuthProvider } from "./auth/AuthContext";
+import { PedidosPendientesProvider } from "./auth/PedidosPendientesContext";
 import { PendingUsersProvider } from "./auth/PendingUsersContext";
 import App from "./App";
 import { AppTooltipHost } from "./components/AppTooltip";
@@ -21,7 +22,9 @@ createRoot(document.getElementById("root")!).render(
           element={
             <AuthProvider>
               <PendingUsersProvider>
-                <App />
+                <PedidosPendientesProvider>
+                  <App />
+                </PedidosPendientesProvider>
               </PendingUsersProvider>
             </AuthProvider>
           }
