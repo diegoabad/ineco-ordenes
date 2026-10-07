@@ -6,6 +6,7 @@ export type QuickReply = {
   trigger: string;
   title: string | null;
   body: string;
+  /** Etiquetas opcionales a asignar al usar la respuesta. */
   tagIds: string[];
   isActive: boolean;
   createdAt: string;

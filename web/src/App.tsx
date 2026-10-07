@@ -959,7 +959,10 @@ export default function App() {
       <InicioRecordatorioWatcher />
       <div className="app-main">
         {module === "inicio" ? (
-          <InicioPanel userName={formatNombrePersona(user?.nombre ?? "") || undefined} />
+          <InicioPanel
+            userName={formatNombrePersona(user?.nombre ?? "") || undefined}
+            onNavigate={handleNavigate}
+          />
         ) : module === "presupuestos" ? (
           <PresupuestosModule
             section={presupuestosSection}

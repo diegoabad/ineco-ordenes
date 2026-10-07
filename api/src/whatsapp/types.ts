@@ -18,6 +18,9 @@ export type WaMessageType =
 export type WaMessageStatus = "RECEIVED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
 export type WaConversationStatus = "OPEN" | "ARCHIVED";
 
+export type WaContactGrupoEtario = "infanto" | "adulto";
+export type WaContactConsultaPara = "propio" | "tercero";
+
 export type WaContact = {
   id: string;
   phoneNumber: string;
@@ -25,6 +28,16 @@ export type WaContact = {
   lastName: string | null;
   displayName: string | null;
   whatsappName: string | null;
+  cobertura: string | null;
+  email: string | null;
+  grupoEtario: WaContactGrupoEtario | null;
+  consultaPara: WaContactConsultaPara | null;
+  /** Quien escribe por WhatsApp cuando no es el paciente. */
+  contactoNombre: string | null;
+  contactoApellido: string | null;
+  relacionFamiliar: string | null;
+  dni: string | null;
+  esPaciente: boolean | null;
   isBlocked: boolean;
   lastInteractionAt: string | null;
   createdAt: string;

@@ -12,6 +12,8 @@ type ModalProps = {
   alert?: boolean;
   /** Si false, oculta el botón X (útil para avisos bloqueantes). */
   hideClose?: boolean;
+  /** Contenido a la derecha del título (antes del botón cerrar). */
+  headerAside?: ReactNode;
   className?: string;
 };
 
@@ -24,6 +26,7 @@ export function Modal({
   wide,
   alert,
   hideClose,
+  headerAside,
   className,
 }: ModalProps) {
   if (!open) return null;
@@ -39,6 +42,7 @@ export function Modal({
       >
         <div className="fl-modal__header">
           <h2 id="modal-title">{title}</h2>
+          {headerAside ? <div className="fl-modal__header-aside">{headerAside}</div> : null}
           {hideClose ? null : (
             <button type="button" className="fl-icon-btn" onClick={onClose} aria-label="Cerrar">
               <IconX size={18} />

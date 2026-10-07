@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { API_ROOT } from "../config/paths.js";
 import { env } from "../config/env.js";
 import { BaileysProvider } from "./baileys.provider.js";
@@ -14,6 +15,7 @@ import {
   setConversationAssignee,
   setConversationTags,
   updateMessageStatusByExternalId,
+  findOpenConversationByContact,
 } from "./firestore-store.js";
 import { MediaStorage } from "./media-storage.js";
 import { mediaMetaFromRaw, normalizeIncomingMessage } from "./normalize.js";
@@ -165,8 +167,18 @@ export async function sendConversationText(
   if (conversation.contact.isBlocked) {
     throw new Error("El contacto está bloqueado");
   }
+
+  // Sin sesión WhatsApp: igual guardamos el mensaje en el CRM para probar UI/etiquetas.
   if (provider.getStatus() !== "CONNECTED") {
-    throw new Error("WhatsApp no está conectado. Escaneá el QR en Configuración.");
+    return createMessage({
+      conversationId: conversation.id,
+      contactId: conversation.contactId,
+      direction: "OUTBOUND",
+      type: "TEXT",
+      text,
+      externalMessageId: `local-${randomUUID()}`,
+      status: "SENT",
+    });
   }
 
   const externalId = await provider.sendTextMessage(conversation.contact.phoneNumber, text);
@@ -244,4 +256,5 @@ export {
   mediaStorage,
   setConversationAssignee,
   setConversationTags,
+  findOpenConversationByContact,
 };

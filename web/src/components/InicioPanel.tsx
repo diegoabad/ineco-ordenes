@@ -11,6 +11,8 @@ import {
   updateInicioItem,
 } from "../services/dataService";
 import { notifyInicioItemsChanged, subscribeInicioItemsChanged } from "../lib/inicioEvents";
+import { requestOpenWaContact } from "../lib/whatsappNav";
+import type { AppNavTarget } from "../lib/appNav";
 import type { InicioItem, InicioNotaColor, InicioRecurrencia, InicioUserRef, UserDirectoryEntry } from "../types";
 import {
   INICIO_NOTA_COLOR_LABEL,
@@ -22,14 +24,18 @@ import { DatePicker } from "./DatePicker";
 import { DateTimePicker } from "./DateTimePicker";
 import {
   IconCalendar,
+  IconCheck,
+  IconCheckSquare,
   IconClock,
   IconGrip,
   IconMoreVertical,
   IconPencil,
   IconPin,
   IconPlus,
+  IconRefresh,
   IconTrash,
   IconUsers,
+  IconWhatsapp,
   IconX,
 } from "./Icons";
 import {
@@ -37,6 +43,7 @@ import {
   loadUserDirectoryCached,
   peekUserDirectoryCache,
   UserAssigneeField,
+  UserAvatar,
   UserAvatarStack,
 } from "./InicioSharePicker";
 import { Modal } from "./Modal";
@@ -79,6 +86,47 @@ function assigneesForDisplay(item: {
   return (item.sharedWith ?? []).filter((u) => u.id && u.id !== ownerId);
 }
 
+/** En el detalle: todos los asociados (dueño + compartidos). */
+function assigneesForDetail(item: InicioItem): InicioUserRef[] {
+  const byId = new Map<string, InicioUserRef>();
+  for (const u of item.sharedWith ?? []) {
+    if (u?.id) byId.set(u.id, u);
+  }
+  const ownerId = String(item.userId ?? "").trim();
+  if (ownerId && !byId.has(ownerId)) {
+    byId.set(ownerId, {
+      id: ownerId,
+      nombre: String(item.ownerNombre ?? "").trim() || "Dueño",
+      email: "",
+    });
+  }
+  return [...byId.values()];
+}
+
+function assigneesNames(users: InicioUserRef[]): string {
+  const names = users
+    .map((u) => u.nombre.trim() || u.email.trim())
+    .filter(Boolean);
+  return names.length > 0 ? names.join(", ") : "Sin asignar";
+}
+
+function AssigneesRow({ users }: { users: InicioUserRef[] }) {
+  return (
+    <div className="inicio-rec-alert__assignees-row">
+      <span className="inicio-rec-alert__assignees-label">Asignado a</span>
+      {users.length === 0 ? (
+        <span className="inicio-rec-alert__assignees-empty">Sin asignar</span>
+      ) : (
+        <div className="inicio-rec-alert__assignees" aria-label={assigneesNames(users)}>
+          {users.map((user) => (
+            <UserAvatar key={user.id} user={user} size={26} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Quita líneas de contexto WhatsApp del detalle (para preview en cards). */
 function detalleSinContextoWa(detalle: string): string {
   return detalle
@@ -95,6 +143,26 @@ function waBadgeTooltip(item: {
   return String(item.whatsappContactLabel ?? "").trim() || "WhatsApp";
 }
 
+/** Nombre visible sin teléfono (el número va en tooltip). */
+function waDisplayName(label: string | null | undefined): string {
+  const raw = String(label ?? "").trim();
+  if (!raw) return "WhatsApp";
+  const parts = raw.split(/\s·\s/);
+  if (parts.length >= 2) {
+    const name = parts.slice(0, -1).join(" · ").trim();
+    const phone = parts[parts.length - 1]?.trim() ?? "";
+    if (!name || name === phone || looksLikePhone(name)) return "WhatsApp";
+    return name;
+  }
+  if (looksLikePhone(raw)) return "WhatsApp";
+  return raw;
+}
+
+function looksLikePhone(value: string): boolean {
+  const compact = value.replace(/[\s()-]/g, "");
+  return /^\+?\d{6,}$/.test(compact);
+}
+
 function cleanMonth(s: string): string {
   return capitalize(s.replace(/\.$/, ""));
 }
@@ -106,6 +174,31 @@ function formatItemFecha(iso: string | null): string | null {
   const date = `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
   const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return `${date} ${time}`;
+}
+
+function formatItemFechaAlert(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${yy}`;
+}
+
+function formatItemSoloHora(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function isFromWhatsApp(item: {
+  whatsappContactId?: string | null;
+  whatsappContactLabel?: string | null;
+}): boolean {
+  return Boolean(
+    String(item.whatsappContactId ?? "").trim() ||
+      String(item.whatsappContactLabel ?? "").trim(),
+  );
 }
 
 function pad2(n: number): string {
@@ -205,10 +298,11 @@ function NotaColorPicker({
 
 type Props = {
   userName?: string;
+  onNavigate?: (target: AppNavTarget) => void;
 };
 
 /** Pantalla de entrada: tareas, recordatorios y notas personales. */
-export function InicioPanel({ userName }: Props) {
+export function InicioPanel({ userName, onNavigate }: Props) {
   const { user } = useAuth();
   const myUserId = user?.id ?? "";
   const [now, setNow] = useState(() => new Date());
@@ -1861,8 +1955,8 @@ export function InicioPanel({ userName }: Props) {
 
       <Modal
         open={viewTarea != null}
-        wide
         title="Tarea"
+        alert
         onClose={() => setViewTarea(null)}
         footer={
           <>
@@ -1886,36 +1980,121 @@ export function InicioPanel({ userName }: Props) {
         }
       >
         {viewTarea ? (
-          <div className="inicio-item-view">
-            <h3 className="inicio-item-view__title">{viewTarea.titulo}</h3>
-            {viewTarea.whatsappContactId || viewTarea.whatsappContactLabel ? (
-              <div className="inicio-item-view__wa">
-                <span className="inicio-list__wa">WA</span>
-                <span className="inicio-item-view__wa-contact">
-                  {waBadgeTooltip(viewTarea)}
-                </span>
+          (() => {
+            const detalle = detalleSinContextoWa(viewTarea.detalle);
+            const recAsociado = items.find(
+              (it) => it.tipo === "recordatorio" && it.origenTareaId === viewTarea.id,
+            );
+            const asignados = assigneesForDetail(viewTarea);
+            return (
+              <div className="inicio-rec-alert inicio-rec-alert--view">
+                <div className="inicio-rec-alert__meta">
+                  <div className="inicio-rec-alert__meta-item">
+                    <span
+                      className={`inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--estado${
+                        viewTarea.hecha ? " is-done" : ""
+                      }`}
+                      aria-hidden="true"
+                    >
+                      <IconCheck size={15} />
+                    </span>
+                    <span className="inicio-rec-alert__meta-copy">
+                      <span className="inicio-rec-alert__meta-label">Estado</span>
+                      <span className="inicio-rec-alert__meta-value">
+                        {viewTarea.hecha ? "Hecha" : "Pendiente"}
+                      </span>
+                    </span>
+                  </div>
+                  {recAsociado ? (
+                    <button
+                      type="button"
+                      className="inicio-rec-alert__meta-item inicio-rec-alert__meta-item--action"
+                      onClick={() => {
+                        setViewTarea(null);
+                        openRecordatorioView(recAsociado);
+                      }}
+                    >
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--rec"
+                        aria-hidden="true"
+                      >
+                        <IconClock size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Recordatorio</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          {formatItemFecha(recAsociado.fechaHora) ?? "Asociado"}
+                        </span>
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="inicio-rec-alert__meta-item">
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--rec"
+                        aria-hidden="true"
+                      >
+                        <IconClock size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Recordatorio</span>
+                        <span className="inicio-rec-alert__meta-value">Sin asociar</span>
+                      </span>
+                    </div>
+                  )}
+                  {isFromWhatsApp(viewTarea) ? (
+                    <button
+                      type="button"
+                      className="inicio-rec-alert__meta-item inicio-rec-alert__meta-item--full inicio-rec-alert__meta-item--wa inicio-rec-alert__meta-item--action"
+                      title={waBadgeTooltip(viewTarea)}
+                      data-tooltip={waBadgeTooltip(viewTarea)}
+                      disabled={!String(viewTarea.whatsappContactId ?? "").trim()}
+                      onClick={() => {
+                        const contactId = String(viewTarea.whatsappContactId ?? "").trim();
+                        if (!contactId) {
+                          toast.info("No hay conversación vinculada");
+                          return;
+                        }
+                        setViewTarea(null);
+                        requestOpenWaContact(contactId);
+                        onNavigate?.({ module: "whatsapp", section: "conversaciones" });
+                      }}
+                    >
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--wa"
+                        aria-hidden="true"
+                      >
+                        <IconWhatsapp size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">WhatsApp</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          {waDisplayName(viewTarea.whatsappContactLabel)}
+                        </span>
+                      </span>
+                    </button>
+                  ) : null}
+                </div>
+                <div className="inicio-rec-alert__body">
+                  <p className="inicio-rec-alert__title">{viewTarea.titulo}</p>
+                  {detalle ? (
+                    <p className="inicio-rec-alert__detalle">{detalle}</p>
+                  ) : (
+                    <p className="inicio-rec-alert__detalle inicio-rec-alert__detalle--empty">
+                      Sin detalle
+                    </p>
+                  )}
+                  <AssigneesRow users={asignados} />
+                </div>
               </div>
-            ) : null}
-            <div className="inicio-item-view__detalle-box">
-              <span className="inicio-item-view__detalle-label">Detalle</span>
-              {detalleSinContextoWa(viewTarea.detalle) ? (
-                <p className="inicio-item-view__detalle">
-                  {detalleSinContextoWa(viewTarea.detalle)}
-                </p>
-              ) : (
-                <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">
-                  Sin detalle
-                </p>
-              )}
-            </div>
-          </div>
+            );
+          })()
         ) : null}
       </Modal>
 
       <Modal
         open={viewRec != null}
-        wide
         title="Recordatorio"
+        alert
         onClose={() => setViewRec(null)}
         footer={
           <>
@@ -1939,43 +2118,173 @@ export function InicioPanel({ userName }: Props) {
         }
       >
         {viewRec ? (
-          <div className="inicio-item-view">
-            <h3 className="inicio-item-view__title">{viewRec.titulo}</h3>
-            {viewRec.whatsappContactId || viewRec.whatsappContactLabel ? (
-              <div className="inicio-item-view__wa">
-                <span className="inicio-list__wa">WA</span>
-                <span className="inicio-item-view__wa-contact">
-                  {waBadgeTooltip(viewRec)}
-                </span>
+          (() => {
+            const origenTarea = viewRec.origenTareaId
+              ? items.find((it) => it.id === viewRec.origenTareaId) ?? null
+              : null;
+            const waSource =
+              isFromWhatsApp(viewRec)
+                ? viewRec
+                : origenTarea && isFromWhatsApp(origenTarea)
+                  ? origenTarea
+                  : null;
+            const detalle = detalleSinContextoWa(viewRec.detalle);
+            const asignados = assigneesForDetail(viewRec);
+            return (
+              <div className="inicio-rec-alert inicio-rec-alert--view">
+                <div className="inicio-rec-alert__meta">
+                  {formatItemFechaAlert(viewRec.fechaHora) ? (
+                    <div className="inicio-rec-alert__meta-item">
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--fecha"
+                        aria-hidden="true"
+                      >
+                        <IconCalendar size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Fecha</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          {formatItemFechaAlert(viewRec.fechaHora)}
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
+                  {formatItemSoloHora(viewRec.fechaHora) ? (
+                    <div className="inicio-rec-alert__meta-item">
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--hora"
+                        aria-hidden="true"
+                      >
+                        <IconClock size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Hora</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          {formatItemSoloHora(viewRec.fechaHora)} hs
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
+                  {formatRecurrenciaLabel(viewRec) ? (
+                    <div className="inicio-rec-alert__meta-item inicio-rec-alert__meta-item--full">
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--repite"
+                        aria-hidden="true"
+                      >
+                        <IconRefresh size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Repite</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          {formatRecurrenciaLabel(viewRec)}
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
+                  {origenTarea ? (
+                    <button
+                      type="button"
+                      className={`inicio-rec-alert__meta-item inicio-rec-alert__meta-item--action${
+                        waSource ? "" : " inicio-rec-alert__meta-item--full"
+                      }`}
+                      onClick={() => {
+                        setViewRec(null);
+                        openTareaView(origenTarea);
+                      }}
+                    >
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--tarea"
+                        aria-hidden="true"
+                      >
+                        <IconCheckSquare size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Desde tarea</span>
+                        <span className="inicio-rec-alert__meta-value inicio-rec-alert__meta-value--with-status">
+                          <span className="inicio-rec-alert__meta-value-text">
+                            {origenTarea.titulo}
+                          </span>
+                          <span
+                            className={`inicio-rec-alert__status${
+                              origenTarea.hecha ? " is-done" : " is-pending"
+                            }`}
+                          >
+                            {origenTarea.hecha ? "Hecha" : "Pendiente"}
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                  ) : viewRec.origenTareaId ? (
+                    <div
+                      className={`inicio-rec-alert__meta-item${
+                        waSource ? "" : " inicio-rec-alert__meta-item--full"
+                      }`}
+                    >
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--tarea"
+                        aria-hidden="true"
+                      >
+                        <IconCheckSquare size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">Desde tarea</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          La tarea ya no está disponible
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
+                  {waSource ? (
+                    <button
+                      type="button"
+                      className={`inicio-rec-alert__meta-item inicio-rec-alert__meta-item--wa inicio-rec-alert__meta-item--action${
+                        origenTarea || viewRec.origenTareaId
+                          ? ""
+                          : " inicio-rec-alert__meta-item--full"
+                      }`}
+                      title={waBadgeTooltip(waSource)}
+                      data-tooltip={waBadgeTooltip(waSource)}
+                      disabled={!String(waSource.whatsappContactId ?? "").trim()}
+                      onClick={() => {
+                        const contactId = String(waSource.whatsappContactId ?? "").trim();
+                        if (!contactId) {
+                          toast.info("No hay conversación vinculada");
+                          return;
+                        }
+                        setViewRec(null);
+                        requestOpenWaContact(contactId);
+                        onNavigate?.({ module: "whatsapp", section: "conversaciones" });
+                      }}
+                    >
+                      <span
+                        className="inicio-rec-alert__meta-icon inicio-rec-alert__meta-icon--wa"
+                        aria-hidden="true"
+                      >
+                        <IconWhatsapp size={15} />
+                      </span>
+                      <span className="inicio-rec-alert__meta-copy">
+                        <span className="inicio-rec-alert__meta-label">WhatsApp</span>
+                        <span className="inicio-rec-alert__meta-value">
+                          {waDisplayName(waSource.whatsappContactLabel)}
+                        </span>
+                      </span>
+                    </button>
+                  ) : null}
+                </div>
+                <div className="inicio-rec-alert__body">
+                  <p className="inicio-rec-alert__title">{viewRec.titulo}</p>
+                  {detalle ? (
+                    <p className="inicio-rec-alert__detalle">{detalle}</p>
+                  ) : (
+                    <p className="inicio-rec-alert__detalle inicio-rec-alert__detalle--empty">
+                      Sin detalle
+                    </p>
+                  )}
+                  <AssigneesRow users={asignados} />
+                </div>
               </div>
-            ) : null}
-            <div className="inicio-item-view__detalle-box">
-              <span className="inicio-item-view__detalle-label">Detalle</span>
-              {detalleSinContextoWa(viewRec.detalle) ? (
-                <p className="inicio-item-view__detalle">
-                  {detalleSinContextoWa(viewRec.detalle)}
-                </p>
-              ) : (
-                <p className="inicio-item-view__detalle inicio-item-view__detalle--empty">
-                  Sin detalle
-                </p>
-              )}
-            </div>
-            <dl className="inicio-item-view__facts">
-              {formatItemFecha(viewRec.fechaHora) ? (
-                <div>
-                  <dt>Cuándo</dt>
-                  <dd>{formatItemFecha(viewRec.fechaHora)}</dd>
-                </div>
-              ) : null}
-              {formatRecurrenciaLabel(viewRec) ? (
-                <div>
-                  <dt>Repite</dt>
-                  <dd>{formatRecurrenciaLabel(viewRec)}</dd>
-                </div>
-              ) : null}
-            </dl>
-          </div>
+            );
+          })()
         ) : null}
       </Modal>
 

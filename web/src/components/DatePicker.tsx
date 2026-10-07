@@ -72,6 +72,8 @@ export interface DatePickerProps {
   compact?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** Tooltip nativo con el formato. Por defecto true. */
+  formatHint?: boolean;
   className?: string;
   "aria-label"?: string;
 }
@@ -145,6 +147,7 @@ export function DatePicker({
   compact = false,
   disabled = false,
   placeholder = "dd/mm/aaaa",
+  formatHint = true,
   className,
   "aria-label": ariaLabel,
 }: DatePickerProps) {
@@ -445,7 +448,7 @@ export function DatePicker({
           placeholder={placeholder || "dd/mm/aaaa"}
           aria-label={ariaLabel ?? placeholder ?? "Fecha dd/mm/aaaa"}
           aria-invalid={inputInvalido}
-          title="Formato: dd/mm/aaaa"
+          title={formatHint ? "Formato: dd/mm/aaaa" : undefined}
           value={inputText}
           onChange={onInputChange}
           onFocus={onInputFocus}

@@ -10,6 +10,9 @@ export type WaMessageType =
 export type WaMessageStatus = "RECEIVED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
 export type WaConversationStatus = "OPEN" | "ARCHIVED";
 
+export type WaContactGrupoEtario = "infanto" | "adulto";
+export type WaContactConsultaPara = "propio" | "tercero";
+
 export type WaContact = {
   id: string;
   phoneNumber: string;
@@ -17,6 +20,16 @@ export type WaContact = {
   lastName: string | null;
   displayName: string | null;
   whatsappName: string | null;
+  cobertura: string | null;
+  email: string | null;
+  grupoEtario: WaContactGrupoEtario | null;
+  consultaPara: WaContactConsultaPara | null;
+  /** Quien escribe por WhatsApp cuando no es el paciente. */
+  contactoNombre: string | null;
+  contactoApellido: string | null;
+  relacionFamiliar: string | null;
+  dni: string | null;
+  esPaciente: boolean | null;
   isBlocked: boolean;
 };
 
@@ -56,6 +69,12 @@ export type WaTag = {
 export type WaTagCatalog = {
   groups: WaTagGroup[];
   items: WaTag[];
+};
+
+export type WaCobertura = {
+  id: string;
+  nombre: string;
+  gruposEtarios: WaContactGrupoEtario[];
 };
 
 export type WaMessage = {
@@ -100,11 +119,57 @@ export function waContactLabel(contact?: WaContact | null): string {
   return contact.phoneNumber || "Contacto";
 }
 
+/** Nombre del paciente (datos clínicos / agenda). */
+export function waPatientLabel(contact?: WaContact | null): string {
+  if (!contact) return "";
+  const full = [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim();
+  if (full) return full;
+  return contact.displayName?.trim() || "";
+}
+
+/**
+ * Header del chat:
+ * - Título: nombre del paciente (sin prefijo)
+ * - Si escribe un tercero: subtítulo chico en gris "Relación: Nombre del contacto"
+ */
+export function waContactThreadHeader(contact?: WaContact | null): {
+  title: string;
+  subtitle: string | null;
+  phone: string;
+} {
+  const phone = String(contact?.phoneNumber ?? "").trim();
+  if (!contact) {
+    return { title: "Contacto", subtitle: null, phone };
+  }
+
+  const patient = waPatientLabel(contact);
+  const contactoNombre = [contact.contactoNombre, contact.contactoApellido]
+    .map((p) => p?.trim())
+    .filter(Boolean)
+    .join(" ");
+  const relacion = contact.relacionFamiliar?.trim() || "";
+
+  if (contact.consultaPara === "tercero") {
+    const title = patient || waContactLabel(contact);
+    let subtitle: string | null = null;
+    if (relacion && contactoNombre) subtitle = `${relacion}: ${contactoNombre}`;
+    else if (relacion) subtitle = relacion;
+    else if (contactoNombre) subtitle = contactoNombre;
+    return { title, subtitle, phone };
+  }
+
+  return {
+    title: waContactLabel(contact),
+    subtitle: null,
+    phone,
+  };
+}
+
 /** Nombre y teléfono para tooltips / etiquetas de Inicio. */
 export function waContactDetailLabel(contact?: WaContact | null): string {
   if (!contact) return "WhatsApp";
-  const name = waContactLabel(contact);
-  const phone = String(contact.phoneNumber ?? "").trim();
-  if (phone && name !== phone) return `${name} · ${phone}`;
-  return name || phone || "WhatsApp";
+  const header = waContactThreadHeader(contact);
+  const name = header.subtitle ? `${header.title} · ${header.subtitle}` : header.title;
+  if (header.phone && name !== header.phone) return `${name} · ${header.phone}`;
+  return name || header.phone || "WhatsApp";
 }

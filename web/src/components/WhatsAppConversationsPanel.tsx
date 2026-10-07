@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MutableRefObject } from "react";
 import { toast } from "react-toastify";
-import { formatFechaHora } from "../lib/fechas";
+import { useAuth } from "../auth/AuthContext";
+import { formatFechaHora, fechaHoyIso } from "../lib/fechas";
+import {
+  extractSlashQuery,
+  formatTrigger,
+  quickReplyVars,
+  resolveQuickReply,
+  type QuickReply,
+} from "../lib/quickReplies";
+import {
+  consumePendingWaContact,
+  subscribeOpenWaContact,
+} from "../lib/whatsappNav";
 import {
   assignWaConversation,
   connectWhatsapp,
   fetchWaConversation,
+  fetchWaConversationByContact,
   fetchWaConversations,
   fetchWaMessages,
   fetchWaOperators,
@@ -19,23 +32,64 @@ import {
   waMediaUrl,
 } from "../services/whatsappCrmService";
 import type { WaConversation, WaMessage, WaOperator, WaTag, WaTagGroup } from "../types/whatsappCrm";
-import { waAssigneeLabel, waContactLabel } from "../types/whatsappCrm";
+import { waAssigneeLabel, waContactLabel, waContactThreadHeader } from "../types/whatsappCrm";
+import { DatePicker } from "./DatePicker";
 import {
-  extractSlashQuery,
-  formatTrigger,
-  quickReplyVars,
-  resolveQuickReply,
-  type QuickReply,
-} from "../lib/quickReplies";
-import { IconCheckSquare, IconClock, IconMinus, IconNote, IconPlus, IconSearch, IconTag, IconUsers } from "./Icons";
+  IconCheckSquare,
+  IconClock,
+  IconFilter,
+  IconMinus,
+  IconNote,
+  IconPlus,
+  IconSearch,
+  IconTag,
+  IconUsers,
+} from "./Icons";
 import { LoadingBlock } from "./InecoMark";
 import { Modal } from "./Modal";
 import {
   WhatsAppContactFollowUpModal,
   type WaFollowUpKind,
 } from "./WhatsAppContactFollowUpModal";
+import { WhatsAppContactProfileModal } from "./WhatsAppContactProfileModal";
 
 const CONVERSATIONS_PAGE_SIZE = 40;
+
+type WaInboxFilters = {
+  assignee: string;
+  tagIds: string[];
+  dateFrom: string;
+  dateTo: string;
+};
+
+const EMPTY_WA_FILTERS: WaInboxFilters = {
+  assignee: "",
+  tagIds: [],
+  dateFrom: "",
+  dateTo: "",
+};
+
+function countWaFilters(filters: WaInboxFilters): number {
+  let n = 0;
+  if (filters.assignee) n += 1;
+  if (filters.tagIds.length > 0) n += 1;
+  if (filters.dateFrom || filters.dateTo) n += 1;
+  return n;
+}
+
+function waFiltersQuery(filters: WaInboxFilters): {
+  assignee?: string;
+  tagIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+} {
+  return {
+    assignee: filters.assignee || undefined,
+    tagIds: filters.tagIds.length > 0 ? filters.tagIds : undefined,
+    dateFrom: filters.dateFrom || undefined,
+    dateTo: filters.dateTo || undefined,
+  };
+}
 
 function formatPreviewTime(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -104,6 +158,7 @@ export function WhatsAppConversationsPanel({
   onConnectionChange,
   connectRef,
 }: Props) {
+  const { user } = useAuth();
   const [ready, setReady] = useState(false);
   const [waStatus, setWaStatus] = useState<string>("");
   const [qr, setQr] = useState<string | null>(null);
@@ -116,6 +171,12 @@ export function WhatsAppConversationsPanel({
   const [nextConversationsOffset, setNextConversationsOffset] = useState<number | null>(null);
   const [conversations, setConversations] = useState<WaConversation[]>([]);
   const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<WaInboxFilters>(EMPTY_WA_FILTERS);
+  const [filterDraft, setFilterDraft] = useState<WaInboxFilters>(EMPTY_WA_FILTERS);
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+  const [tagFilterQuery, setTagFilterQuery] = useState("");
+  const [tagFilterSuggestOpen, setTagFilterSuggestOpen] = useState(false);
+  const tagFilterWrapRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<WaConversation | null>(null);
   const [messages, setMessages] = useState<WaMessage[]>([]);
@@ -136,6 +197,9 @@ export function WhatsAppConversationsPanel({
   );
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpKind, setFollowUpKind] = useState<WaFollowUpKind>("tarea");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [takeOverOpen, setTakeOverOpen] = useState(false);
+  const [pendingAssignee, setPendingAssignee] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [assigning, setAssigning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -148,10 +212,15 @@ export function WhatsAppConversationsPanel({
     search: "",
     selectedId: null as string | null,
     loadedCount: 0,
+    filters: EMPTY_WA_FILTERS,
   });
   const pendingTags = useRef<string[] | null>(null);
   const savingTags = useRef(false);
-  pollState.current = { search, selectedId, loadedCount: conversations.length };
+  const lastQuickReplyRef = useRef<QuickReply | null>(null);
+  pollState.current = { search, selectedId, loadedCount: conversations.length, filters };
+
+  const activeFilterCount = useMemo(() => countWaFilters(filters), [filters]);
+  const filtersQuery = useMemo(() => waFiltersQuery(filters), [filters]);
 
   const refreshStatus = useCallback(async () => {
     const status = await fetchWhatsappStatus();
@@ -161,7 +230,8 @@ export function WhatsAppConversationsPanel({
     return status;
   }, []);
 
-  const loadList = useCallback(async (q?: string) => {
+  const loadList = useCallback(async (q?: string, nextFilters?: WaInboxFilters) => {
+    const applied = nextFilters ?? filters;
     setLoadingList(true);
     setHasMoreConversations(false);
     setNextConversationsOffset(null);
@@ -171,6 +241,7 @@ export function WhatsAppConversationsPanel({
         status: "OPEN",
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: 0,
+        ...waFiltersQuery(applied),
       });
       setConversations(page.items);
       setHasMoreConversations(page.hasMore);
@@ -183,7 +254,7 @@ export function WhatsAppConversationsPanel({
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [filters]);
 
   const loadMoreConversations = useCallback(async () => {
     if (loadingMoreRef.current || loadingList || !hasMoreConversations || nextConversationsOffset == null) {
@@ -197,6 +268,7 @@ export function WhatsAppConversationsPanel({
         status: "OPEN",
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: nextConversationsOffset,
+        ...filtersQuery,
       });
       setConversations((prev) => {
         const seen = new Set(prev.map((item) => item.id));
@@ -211,7 +283,7 @@ export function WhatsAppConversationsPanel({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasMoreConversations, loadingList, nextConversationsOffset, search]);
+  }, [hasMoreConversations, loadingList, nextConversationsOffset, search, filtersQuery]);
 
   const loadThread = useCallback(async (id: string) => {
     setLoadingMessages(true);
@@ -300,6 +372,7 @@ export function WhatsAppConversationsPanel({
             status: "OPEN",
             limit: Math.max(snap.loadedCount, CONVERSATIONS_PAGE_SIZE),
             offset: 0,
+            ...waFiltersQuery(snap.filters),
           })
             .then((page) => {
               setConversations((prev) => {
@@ -388,8 +461,51 @@ export function WhatsAppConversationsPanel({
     }, 300);
   }
 
-  const selectedLabel = useMemo(
-    () => waContactLabel(selected?.contact),
+  function openFiltersModal() {
+    setFilterDraft(filters);
+    setTagFilterQuery("");
+    setTagFilterSuggestOpen(false);
+    setFiltersModalOpen(true);
+  }
+
+  function applyFilters() {
+    const next = {
+      ...filterDraft,
+      tagIds: [...filterDraft.tagIds],
+    };
+    setFilters(next);
+    setFiltersModalOpen(false);
+    setTagFilterQuery("");
+    setTagFilterSuggestOpen(false);
+    void loadList(search.trim() || undefined, next);
+  }
+
+  function clearFilters() {
+    setFilterDraft(EMPTY_WA_FILTERS);
+    setFilters(EMPTY_WA_FILTERS);
+    setFiltersModalOpen(false);
+    setTagFilterQuery("");
+    setTagFilterSuggestOpen(false);
+    void loadList(search.trim() || undefined, EMPTY_WA_FILTERS);
+  }
+
+  function addDraftTag(tagId: string) {
+    setFilterDraft((prev) =>
+      prev.tagIds.includes(tagId) ? prev : { ...prev, tagIds: [...prev.tagIds, tagId] },
+    );
+    setTagFilterQuery("");
+    setTagFilterSuggestOpen(true);
+  }
+
+  function removeDraftTag(tagId: string) {
+    setFilterDraft((prev) => ({
+      ...prev,
+      tagIds: prev.tagIds.filter((id) => id !== tagId),
+    }));
+  }
+
+  const threadHeader = useMemo(
+    () => waContactThreadHeader(selected?.contact),
     [selected],
   );
 
@@ -399,7 +515,43 @@ export function WhatsAppConversationsPanel({
     setDraft("");
     setAttachment(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    lastQuickReplyRef.current = null;
   }
+
+  const openByContactId = useCallback(async (contactId: string) => {
+    const id = contactId.trim();
+    if (!id) return;
+    try {
+      const conv = await fetchWaConversationByContact(id);
+      setConversations((prev) =>
+        prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev],
+      );
+      setSelectedId(conv.id);
+      setSelected(conv);
+      setDraft("");
+      setAttachment(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "No se pudo abrir la conversación",
+      );
+    }
+  }, []);
+
+  const pendingOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!ready || loadingList || pendingOpenedRef.current) return;
+    const pending = consumePendingWaContact();
+    pendingOpenedRef.current = true;
+    if (pending) void openByContactId(pending);
+  }, [ready, loadingList, openByContactId]);
+
+  useEffect(() => {
+    return subscribeOpenWaContact((contactId) => {
+      void openByContactId(contactId);
+    });
+  }, [openByContactId]);
+
   const assignedTags = useMemo(
     () => tags.filter((tag) => (selected?.tagIds ?? []).includes(tag.id)),
     [tags, selected?.tagIds],
@@ -437,6 +589,27 @@ export function WhatsAppConversationsPanel({
     return tagGroups.find((group) => group.id === tag.groupId)?.name ?? "Sin grupo";
   }
 
+  const selectedFilterTags = useMemo(
+    () =>
+      filterDraft.tagIds
+        .map((id) => tags.find((tag) => tag.id === id))
+        .filter((tag): tag is WaTag => Boolean(tag)),
+    [filterDraft.tagIds, tags],
+  );
+
+  const tagFilterSuggestions = useMemo(() => {
+    const q = tagFilterQuery.trim().toLowerCase();
+    return tags
+      .filter((tag) => !filterDraft.tagIds.includes(tag.id))
+      .filter((tag) => {
+        if (!q) return true;
+        const groupName = tagGroupLabel(tag).toLowerCase();
+        return tag.name.toLowerCase().includes(q) || groupName.includes(q);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+      .slice(0, 10);
+  }, [tags, filterDraft.tagIds, tagFilterQuery, tagGroups]);
+
   const tagsModalSelectedGroup = useMemo(
     () => tagGroups.find((group) => group.id === tagsModalGroupId) ?? null,
     [tagGroups, tagsModalGroupId],
@@ -452,6 +625,17 @@ export function WhatsAppConversationsPanel({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [tagsModalGroupMenuOpen]);
+
+  useEffect(() => {
+    if (!tagFilterSuggestOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!tagFilterWrapRef.current?.contains(e.target as Node)) {
+        setTagFilterSuggestOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [tagFilterSuggestOpen]);
 
   function setConversationTag(tagId: string, assigned: boolean) {
     const current = pendingTags.current ?? selected?.tagIds ?? [];
@@ -493,13 +677,39 @@ export function WhatsAppConversationsPanel({
     return quickReplyVars(selected?.contact, operadora);
   }
 
-  function matchQuickReply(raw: string): QuickReply | null {
-    const query = extractSlashQuery(raw.trim());
-    if (!query) return null;
-    return quickReplies.find((item) => item.isActive && item.trigger === query) ?? null;
+  function applyQuickReply(item: QuickReply) {
+    lastQuickReplyRef.current = item;
+    setDraft(resolveQuickReply(item.body, replyVars()));
   }
 
-  async function applyTags(tagIds: string[]) {
+  function resolveOutgoingText(raw: string): { text: string; reply: QuickReply | null } {
+    const query = extractSlashQuery(raw.trim());
+    if (query) {
+      const match = quickReplies.find((item) => item.isActive && item.trigger === query) ?? null;
+      if (match) {
+        return { text: resolveQuickReply(match.body, replyVars()), reply: match };
+      }
+    }
+    return { text: raw.trim(), reply: lastQuickReplyRef.current };
+  }
+
+  async function applyQuickReplyTag(item: QuickReply): Promise<void> {
+    const toAdd = (item.tagIds ?? []).map((id) => String(id).trim()).filter(Boolean);
+    if (toAdd.length === 0) return;
+    const current = pendingTags.current ?? selected?.tagIds ?? [];
+    const next = [...new Set([...current, ...toAdd])];
+    if (next.length === current.length) return;
+    await applyTags(next);
+  }
+
+  async function flushPendingTags(): Promise<void> {
+    for (let i = 0; i < 50; i += 1) {
+      if (!savingTags.current && !pendingTags.current) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 40));
+    }
+  }
+
+  async function applyTags(tagIds: string[]): Promise<void> {
     if (!selectedId) return;
     const conversationId = selectedId;
     pendingTags.current = tagIds;
@@ -507,7 +717,10 @@ export function WhatsAppConversationsPanel({
     setConversations((prev) =>
       prev.map((item) => (item.id === conversationId ? { ...item, tagIds } : item)),
     );
-    if (savingTags.current) return;
+    if (savingTags.current) {
+      await flushPendingTags();
+      return;
+    }
     savingTags.current = true;
     try {
       while (pendingTags.current) {
@@ -529,22 +742,8 @@ export function WhatsAppConversationsPanel({
       toast.error(error instanceof Error ? error.message : "No se pudieron guardar las etiquetas");
     } finally {
       savingTags.current = false;
-      if (pendingTags.current) void applyTags(pendingTags.current);
+      if (pendingTags.current) await applyTags(pendingTags.current);
     }
-  }
-
-  function applyQuickReplyTags(item: QuickReply) {
-    const toAdd = Array.isArray(item.tagIds) ? item.tagIds.filter(Boolean) : [];
-    if (toAdd.length === 0) return;
-    const current = pendingTags.current ?? selected?.tagIds ?? [];
-    const missing = toAdd.filter((id) => !current.includes(id));
-    if (missing.length === 0) return;
-    void applyTags([...current, ...missing]);
-  }
-
-  function applyQuickReply(item: QuickReply) {
-    setDraft(resolveQuickReply(item.body, replyVars()));
-    applyQuickReplyTags(item);
   }
 
   function toggleConversationTag(tagId: string) {
@@ -555,19 +754,62 @@ export function WhatsAppConversationsPanel({
     void applyTags(next);
   }
 
-  async function applyAssignee(kind: "none" | "bot" | "user", userId?: string) {
-    if (!selectedId || assigning) return;
+  async function applyAssignee(kind: "none" | "bot" | "user", userId?: string): Promise<boolean> {
+    if (!selectedId || assigning) return false;
     setAssigning(true);
     try {
       const updated = await assignWaConversation(selectedId, { kind, userId });
       const merged = { ...selected, ...updated, contact: updated.contact ?? selected?.contact };
       setSelected(merged);
       setConversations((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo asignar");
+      return false;
     } finally {
       setAssigning(false);
     }
+  }
+
+  function currentAssigneeSelectValue(): string {
+    if (selected?.assigneeKind === "bot") return "bot";
+    if (selected?.assigneeKind === "user") return selected.assigneeUserId ?? "";
+    return "";
+  }
+
+  function requestAssigneeChange(value: string) {
+    if (value === currentAssigneeSelectValue()) return;
+    setPendingAssignee(value);
+  }
+
+  async function confirmAssigneeChange() {
+    if (pendingAssignee === null) return;
+    const value = pendingAssignee;
+    let ok = false;
+    if (value === "bot") ok = await applyAssignee("bot");
+    else if (!value) ok = await applyAssignee("none");
+    else ok = await applyAssignee("user", value);
+    if (ok) setPendingAssignee(null);
+  }
+
+  async function confirmTakeOver() {
+    if (!user?.id) {
+      toast.error("No se pudo identificar tu usuario");
+      return;
+    }
+    const ok = await applyAssignee("user", user.id);
+    if (ok) setTakeOverOpen(false);
+  }
+
+  function closeSelectedConversation() {
+    setSelectedId(null);
+    setSelected(null);
+    setMessages([]);
+    setDraft("");
+    setAttachment(null);
+    setProfileOpen(false);
+    setTakeOverOpen(false);
+    setPendingAssignee(null);
   }
 
   async function handleConnect() {
@@ -595,35 +837,49 @@ export function WhatsAppConversationsPanel({
     e.preventDefault();
     if (!selectedId || sending) return;
     if (!draft.trim() && !attachment) return;
-    const matchedReply = matchQuickReply(draft);
-    const text = matchedReply
-      ? resolveQuickReply(matchedReply.body, replyVars())
-      : draft.trim();
+    const conversationId = selectedId;
+    const { text, reply } = resolveOutgoingText(draft);
     const file = attachment;
+    if (reply) {
+      await applyQuickReplyTag(reply);
+    }
+    await flushPendingTags();
+    lastQuickReplyRef.current = null;
     setSending(true);
     try {
-      if (matchedReply) applyQuickReplyTags(matchedReply);
       if (file) {
-        await sendWaMedia(selectedId, file, text || undefined);
+        await sendWaMedia(conversationId, file, text || undefined);
         setAttachment(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
-        await sendWaMessage(selectedId, text);
+        await sendWaMessage(conversationId, text);
       }
       setDraft("");
+      const localTagIds = pendingTags.current ?? selected?.tagIds ?? [];
       const [msgs, page] = await Promise.all([
-        fetchWaMessages(selectedId),
+        fetchWaMessages(conversationId),
         fetchWaConversations({
           search: search.trim() || undefined,
           status: "OPEN",
           limit: Math.max(conversations.length, CONVERSATIONS_PAGE_SIZE),
           offset: 0,
+          ...filtersQuery,
         }),
       ]);
       setMessages(msgs);
       setConversations((prev) => {
         const byId = new Map(page.items.map((item) => [item.id, item]));
-        const merged = prev.map((item) => byId.get(item.id) ?? item);
+        const merged = prev.map((item) => {
+          const fresh = byId.get(item.id);
+          if (!fresh) return item;
+          if (item.id !== conversationId) return { ...item, ...fresh };
+          return {
+            ...item,
+            ...fresh,
+            tagIds: [...new Set([...(fresh.tagIds ?? []), ...(item.tagIds ?? []), ...localTagIds])],
+            contact: fresh.contact ?? item.contact,
+          };
+        });
         const known = new Set(merged.map((item) => item.id));
         const fresh = page.items.filter((item) => !known.has(item.id));
         return [...fresh, ...merged].sort((a, b) => {
@@ -632,6 +888,16 @@ export function WhatsAppConversationsPanel({
           return tb - ta;
         });
       });
+      setSelected((prev) =>
+        prev && prev.id === conversationId
+          ? {
+              ...prev,
+              tagIds: [...new Set([...(prev.tagIds ?? []), ...localTagIds])],
+              lastMessagePreview: text.slice(0, 200),
+              lastMessageAt: new Date().toISOString(),
+            }
+          : prev,
+      );
       setHasMoreConversations(page.hasMore);
       setNextConversationsOffset(page.nextOffset);
     } catch (error) {
@@ -650,22 +916,97 @@ export function WhatsAppConversationsPanel({
   }
 
   const connected = waStatus === "CONNECTED";
+  const assignedToMe =
+    selected?.assigneeKind === "user" &&
+    Boolean(user?.id) &&
+    selected.assigneeUserId === user?.id;
+  const composerLocked =
+    Boolean(selected) &&
+    selected?.contact?.isBlocked !== true &&
+    !assignedToMe;
+  const takeOverHolderLabel = (() => {
+    if (!selected) return "";
+    if (selected.assigneeKind === "bot") return "Bot";
+    if (selected.assigneeKind === "user" && selected.assigneeName?.trim()) {
+      return selected.assigneeName.trim();
+    }
+    if (selected.assigneeKind === "user") return "otra operadora";
+    return "";
+  })();
+
+  const pendingAssigneeMessage = (() => {
+    if (pendingAssignee === null) return null;
+    if (user?.id && pendingAssignee === user.id) {
+      return (
+        <>
+          Si continuás, la conversación quedará <strong>en tus manos</strong> y vas a poder
+          escribir.
+        </>
+      );
+    }
+    if (pendingAssignee === "bot") {
+      return (
+        <>
+          Si continuás, se asignará al <strong>Bot</strong>.{" "}
+          <strong>No vas a poder mandar mensajes</strong> hasta que te la vuelvas a asignar.
+        </>
+      );
+    }
+    if (!pendingAssignee) {
+      return (
+        <>
+          Si continuás, la conversación quedará <strong>sin asignar</strong>.{" "}
+          <strong>No vas a poder mandar mensajes</strong> hasta que te la asignes.
+        </>
+      );
+    }
+    const otherName =
+      operators.find((op) => op.id === pendingAssignee)?.nombre?.trim() || "otra operadora";
+    return (
+      <>
+        Si continuás, se asignará a <strong>{otherName}</strong>.{" "}
+        <strong>No vas a poder mandar mensajes</strong> hasta que te la vuelvas a asignar.
+      </>
+    );
+  })();
 
   return (
     <div className="wa-inbox">
       <aside className="wa-inbox__list" aria-label="Conversaciones">
         <div className="wa-inbox__list-head">
-          <div className="table-search wa-inbox__search">
-            <span className="table-search__icon" aria-hidden>
-              <IconSearch size={16} />
-            </span>
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Buscar conversación…"
-              aria-label="Buscar conversación"
-            />
+          <div className="wa-inbox__list-tools">
+            <div className="table-search wa-inbox__search">
+              <span className="table-search__icon" aria-hidden>
+                <IconSearch size={16} />
+              </span>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Buscar conversación…"
+                aria-label="Buscar conversación"
+              />
+            </div>
+            <button
+              type="button"
+              className={`wa-inbox__filter-btn${activeFilterCount > 0 ? " is-active" : ""}`}
+              aria-label={
+                activeFilterCount > 0
+                  ? `Filtros (${activeFilterCount} activos)`
+                  : "Filtros"
+              }
+              title={
+                activeFilterCount > 0
+                  ? `Filtros activos: ${activeFilterCount}`
+                  : "Filtros"
+              }
+              onClick={openFiltersModal}
+            >
+              <IconFilter size={16} />
+              {activeFilterCount > 0 ? (
+                <span className="wa-inbox__filter-badge">{activeFilterCount}</span>
+              ) : null}
+            </button>
           </div>
         </div>
         <div
@@ -683,7 +1024,9 @@ export function WhatsAppConversationsPanel({
           ) : conversations.length === 0 ? (
             <p className="wa-inbox__empty">
               {connected
-                ? "No hay conversaciones abiertas."
+                ? activeFilterCount > 0 || search.trim()
+                  ? "No hay conversaciones con esos filtros."
+                  : "No hay conversaciones abiertas."
                 : "Conectá WhatsApp para empezar a recibir chats."}
             </p>
           ) : (
@@ -751,10 +1094,22 @@ export function WhatsAppConversationsPanel({
         ) : (
           <>
             <header className="wa-inbox__thread-head">
-              <div>
-                <h2>{selectedLabel}</h2>
-                <p>{selected?.contact?.phoneNumber ?? ""}</p>
-              </div>
+              <button
+                type="button"
+                className="wa-inbox__contact-open"
+                onClick={() => setProfileOpen(true)}
+                title="Ver ficha del contacto"
+              >
+                <h2>
+                  {threadHeader.title}
+                  {threadHeader.subtitle ? (
+                    <span className="wa-inbox__thread-rel"> · {threadHeader.subtitle}</span>
+                  ) : null}
+                </h2>
+                {threadHeader.phone ? (
+                  <p className="wa-inbox__thread-phone">{threadHeader.phone}</p>
+                ) : null}
+              </button>
               <div className="wa-inbox__assign">
                 <button
                   type="button"
@@ -820,19 +1175,10 @@ export function WhatsAppConversationsPanel({
                 <select
                   className="ui-select"
                   aria-label="Asignar operadora"
-                  value={
-                    selected?.assigneeKind === "bot"
-                      ? "bot"
-                      : selected?.assigneeKind === "user"
-                        ? selected.assigneeUserId ?? ""
-                        : ""
-                  }
-                  disabled={assigning}
+                  value={currentAssigneeSelectValue()}
+                  disabled={assigning || pendingAssignee !== null}
                   onChange={(event) => {
-                    const value = event.target.value;
-                    if (value === "bot") void applyAssignee("bot");
-                    else if (!value) void applyAssignee("none");
-                    else void applyAssignee("user", value);
+                    requestAssigneeChange(event.target.value);
                   }}
                 >
                   <option value="">Sin asignar</option>
@@ -843,6 +1189,13 @@ export function WhatsAppConversationsPanel({
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm wa-inbox__close-btn"
+                  onClick={closeSelectedConversation}
+                >
+                  Cerrar
+                </button>
               </div>
             </header>
             <div className="wa-inbox__tags">
@@ -916,8 +1269,24 @@ export function WhatsAppConversationsPanel({
               )}
               <div ref={messagesEndRef} />
             </div>
-            <form className="wa-inbox__composer" onSubmit={(e) => void handleSend(e)}>
-              {slashSuggestions.length > 0 ? (
+            <form
+              className={`wa-inbox__composer${composerLocked ? " is-locked" : ""}`}
+              onSubmit={(e) => {
+                if (composerLocked) {
+                  e.preventDefault();
+                  return;
+                }
+                void handleSend(e);
+              }}
+            >
+              {composerLocked ? (
+                <p className="wa-inbox__composer-lock">
+                  {takeOverHolderLabel
+                    ? `Asignada a ${takeOverHolderLabel}. Para escribir, asignátela a vos.`
+                    : "Para escribir, asignate la conversación."}
+                </p>
+              ) : null}
+              {slashSuggestions.length > 0 && !composerLocked ? (
                 <div className="wa-slash" role="listbox" aria-label="Respuestas rápidas">
                   {slashSuggestions.map((item, index) => (
                     <button
@@ -941,7 +1310,7 @@ export function WhatsAppConversationsPanel({
                   ))}
                 </div>
               ) : null}
-              {attachment ? (
+              {attachment && !composerLocked ? (
                 <div className="wa-inbox__pending">
                   <span>{attachment.name}</span>
                   <button
@@ -976,7 +1345,11 @@ export function WhatsAppConversationsPanel({
                   className="wa-inbox__attach"
                   aria-label="Adjuntar archivo"
                   title="Adjuntar imagen o archivo"
-                  disabled={sending || !connected || selected?.contact?.isBlocked === true}
+                  disabled={
+                    sending ||
+                    composerLocked ||
+                    selected?.contact?.isBlocked === true
+                  }
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
@@ -992,9 +1365,13 @@ export function WhatsAppConversationsPanel({
                 </button>
                 <input
                   type="text"
-                  value={draft}
+                  value={composerLocked ? "" : draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(event) => {
+                    if (composerLocked) {
+                      event.preventDefault();
+                      return;
+                    }
                     if (slashSuggestions.length === 0) return;
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
@@ -1023,29 +1400,43 @@ export function WhatsAppConversationsPanel({
                     }
                   }}
                   placeholder={
-                    attachment
-                      ? "Pie de foto o archivo (opcional)…"
-                      : !connected
-                        ? "Conectá WhatsApp para escribir"
+                    composerLocked
+                      ? "Asignate la conversación para escribir…"
+                      : attachment
+                        ? "Pie de foto o archivo (opcional)…"
                         : selected?.contact?.isBlocked
                           ? "Contacto bloqueado"
                           : "Escribí un mensaje… (/saludo)"
                   }
-                  disabled={sending || !connected || selected?.contact?.isBlocked === true}
-                  autoComplete="off"
-                />
-                <button
-                  type="submit"
-                  className="btn btn-primary"
                   disabled={
                     sending ||
-                    !connected ||
-                    (!draft.trim() && !attachment) ||
+                    composerLocked ||
                     selected?.contact?.isBlocked === true
                   }
-                >
-                  {sending ? "Enviando…" : "Enviar"}
-                </button>
+                  autoComplete="off"
+                />
+                {composerLocked ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={assigning || !user?.id}
+                    onClick={() => setTakeOverOpen(true)}
+                  >
+                    {assigning ? "Asignando…" : "Asignar a mí"}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={
+                      sending ||
+                      (!draft.trim() && !attachment) ||
+                      selected?.contact?.isBlocked === true
+                    }
+                  >
+                    {sending ? "Enviando…" : "Enviar"}
+                  </button>
+                )}
               </div>
             </form>
           </>
@@ -1294,6 +1685,200 @@ export function WhatsAppConversationsPanel({
       </Modal>
 
       <Modal
+        open={filtersModalOpen}
+        title="Filtros de conversaciones"
+        className="fl-modal--wa-filters"
+        onClose={() => setFiltersModalOpen(false)}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={clearFilters}>
+              Limpiar
+            </button>
+            <button type="button" className="btn btn-primary" onClick={applyFilters}>
+              Aplicar
+            </button>
+          </>
+        }
+      >
+        <div className="wa-filters">
+          <section className="wa-filters__section">
+            <h3 className="wa-filters__title">Fecha del último mensaje</h3>
+            <div className="wa-filters__dates">
+              <div className="form-group">
+                <label htmlFor="wa-filter-from">Desde</label>
+                <DatePicker
+                  id="wa-filter-from"
+                  value={filterDraft.dateFrom}
+                  formatHint={false}
+                  max={
+                    filterDraft.dateTo && filterDraft.dateTo < fechaHoyIso()
+                      ? filterDraft.dateTo
+                      : fechaHoyIso()
+                  }
+                  onChange={(value) =>
+                    setFilterDraft((prev) => {
+                      const hoy = fechaHoyIso();
+                      let dateFrom = value;
+                      if (dateFrom && dateFrom > hoy) dateFrom = hoy;
+                      let { dateTo } = prev;
+                      if (dateFrom && dateTo && dateFrom > dateTo) {
+                        dateTo = dateFrom;
+                      }
+                      return { ...prev, dateFrom, dateTo };
+                    })
+                  }
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="wa-filter-to">Hasta</label>
+                <DatePicker
+                  id="wa-filter-to"
+                  value={filterDraft.dateTo}
+                  formatHint={false}
+                  min={filterDraft.dateFrom || undefined}
+                  max={fechaHoyIso()}
+                  onChange={(value) =>
+                    setFilterDraft((prev) => {
+                      const hoy = fechaHoyIso();
+                      let dateTo = value;
+                      if (dateTo && dateTo > hoy) dateTo = hoy;
+                      let { dateFrom } = prev;
+                      if (dateFrom && dateTo && dateFrom > dateTo) {
+                        dateFrom = dateTo;
+                      }
+                      return { ...prev, dateFrom, dateTo };
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="wa-filters__section">
+            <h3 className="wa-filters__title">Asignado a</h3>
+            <select
+              className="ui-select"
+              value={filterDraft.assignee}
+              onChange={(e) =>
+                setFilterDraft((prev) => ({ ...prev, assignee: e.target.value }))
+              }
+              aria-label="Filtrar por asignación"
+            >
+              <option value="">Todos</option>
+              <option value="none">Sin asignar</option>
+              <option value="bot">Bot</option>
+              {operators.map((op) => (
+                <option key={op.id} value={op.id}>
+                  {op.nombre}
+                </option>
+              ))}
+            </select>
+          </section>
+
+          <section className="wa-filters__section wa-filters__section--tags">
+            <div className="wa-filters__tags-head">
+              <h3 className="wa-filters__title">Etiquetas</h3>
+              {filterDraft.tagIds.length > 0 ? (
+                <span className="wa-filters__tags-count">
+                  {filterDraft.tagIds.length} seleccionada
+                  {filterDraft.tagIds.length === 1 ? "" : "s"}
+                </span>
+              ) : null}
+            </div>
+            {tags.length === 0 ? (
+              <p className="wa-filters__hint">No hay etiquetas cargadas.</p>
+            ) : (
+              <div className="wa-filters__tag-search" ref={tagFilterWrapRef}>
+                <div className="wa-filters__tag-row">
+                  <div className="wa-filters__tag-input-wrap">
+                    <div className="table-search wa-filters__tag-input">
+                      <span className="table-search__icon" aria-hidden>
+                        <IconSearch size={16} />
+                      </span>
+                      <input
+                        type="search"
+                        value={tagFilterQuery}
+                        placeholder="Buscar etiqueta…"
+                        aria-label="Buscar etiqueta"
+                        aria-expanded={tagFilterSuggestOpen}
+                        aria-controls="wa-filter-tag-suggestions"
+                        onChange={(e) => {
+                          setTagFilterQuery(e.target.value);
+                          setTagFilterSuggestOpen(true);
+                        }}
+                        onFocus={() => setTagFilterSuggestOpen(true)}
+                      />
+                    </div>
+                    {tagFilterSuggestOpen ? (
+                      <div
+                        id="wa-filter-tag-suggestions"
+                        className="wa-filters__suggest"
+                        role="listbox"
+                        aria-label="Etiquetas sugeridas"
+                      >
+                        {tagFilterSuggestions.length === 0 ? (
+                          <p className="wa-filters__suggest-empty">
+                            {tagFilterQuery.trim()
+                              ? "Sin coincidencias"
+                              : "No quedan etiquetas para agregar"}
+                          </p>
+                        ) : (
+                          tagFilterSuggestions.map((tag) => (
+                            <button
+                              key={tag.id}
+                              type="button"
+                              className="wa-filters__suggest-item"
+                              role="option"
+                              onClick={() => addDraftTag(tag.id)}
+                            >
+                              <span
+                                className="wa-filters__tag-dot"
+                                style={{ background: tagColor(tag) }}
+                                aria-hidden
+                              />
+                              <span className="wa-filters__suggest-main">
+                                <span className="wa-filters__suggest-name">{tag.name}</span>
+                                <span className="wa-filters__suggest-group">
+                                  {tagGroupLabel(tag)}
+                                </span>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div
+                    className="wa-filters__selected"
+                    aria-live="polite"
+                    aria-label="Etiquetas seleccionadas"
+                  >
+                    {selectedFilterTags.map((tag) => (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        className="wa-filters__tag is-active wa-filters__tag--selected"
+                        style={{ "--tag-color": tagColor(tag) } as CSSProperties}
+                        onClick={() => removeDraftTag(tag.id)}
+                        title={`Quitar ${tag.name}`}
+                        aria-label={`Quitar ${tag.name}`}
+                      >
+                        <span className="wa-filters__tag-dot" aria-hidden />
+                        <span className="wa-filters__tag-name">{tag.name}</span>
+                        <span className="wa-filters__tag-remove" aria-hidden>
+                          ×
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      </Modal>
+
+      <Modal
         open={qrModalOpen && !connected}
         title="Vincular WhatsApp"
         onClose={() => setQrModalOpen(false)}
@@ -1322,21 +1907,162 @@ export function WhatsAppConversationsPanel({
       <WhatsAppContactFollowUpModal
         open={followUpOpen}
         contact={selected?.contact}
+        phoneNumber={selected?.contact?.phoneNumber}
         kind={followUpKind}
         onClose={() => setFollowUpOpen(false)}
         onContactSaved={(updated) => {
           setSelected((prev) =>
             prev && prev.contactId === updated.id
-              ? { ...prev, contact: updated }
+              ? {
+                  ...prev,
+                  contact: {
+                    ...updated,
+                    phoneNumber:
+                      updated.phoneNumber?.trim() ||
+                      prev.contact?.phoneNumber ||
+                      "",
+                  },
+                }
               : prev,
           );
           setConversations((prev) =>
             prev.map((c) =>
-              c.contactId === updated.id ? { ...c, contact: updated } : c,
+              c.contactId === updated.id
+                ? {
+                    ...c,
+                    contact: {
+                      ...updated,
+                      phoneNumber:
+                        updated.phoneNumber?.trim() ||
+                        c.contact?.phoneNumber ||
+                        "",
+                    },
+                  }
+                : c,
             ),
           );
         }}
       />
+
+      <WhatsAppContactProfileModal
+        open={profileOpen && Boolean(selected)}
+        contact={selected?.contact}
+        phoneNumber={selected?.contact?.phoneNumber}
+        tagIds={selected?.tagIds ?? []}
+        tags={tags}
+        tagGroups={tagGroups}
+        onClose={() => setProfileOpen(false)}
+        onToggleTag={toggleConversationTag}
+        onContactSaved={(updated) => {
+          setSelected((prev) =>
+            prev && prev.contactId === updated.id
+              ? {
+                  ...prev,
+                  contact: {
+                    ...updated,
+                    phoneNumber:
+                      updated.phoneNumber?.trim() ||
+                      prev.contact?.phoneNumber ||
+                      "",
+                  },
+                }
+              : prev,
+          );
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.contactId === updated.id
+                ? {
+                    ...c,
+                    contact: {
+                      ...updated,
+                      phoneNumber:
+                        updated.phoneNumber?.trim() ||
+                        c.contact?.phoneNumber ||
+                        "",
+                    },
+                  }
+                : c,
+            ),
+          );
+        }}
+        onCreate={(kind) => {
+          setProfileOpen(false);
+          setFollowUpKind(kind);
+          setFollowUpOpen(true);
+        }}
+      />
+
+      <Modal
+        open={takeOverOpen}
+        title="Tomar conversación"
+        onClose={() => {
+          if (!assigning) setTakeOverOpen(false);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={assigning}
+              onClick={() => setTakeOverOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={assigning || !user?.id}
+              onClick={() => void confirmTakeOver()}
+            >
+              {assigning ? "Asignando…" : "Asignar a mí"}
+            </button>
+          </>
+        }
+      >
+        <p className="wa-inbox__takeover-msg">
+          {takeOverHolderLabel ? (
+            <>
+              Esta conversación está asignada a <strong>{takeOverHolderLabel}</strong>. Si
+              continuás, pasará a estar <strong>en tus manos</strong>.
+            </>
+          ) : (
+            <>
+              Esta conversación no tiene asignación. Si continuás, quedará{" "}
+              <strong>en tus manos</strong>.
+            </>
+          )}
+        </p>
+      </Modal>
+
+      <Modal
+        open={pendingAssignee !== null}
+        title="Cambiar asignación"
+        onClose={() => {
+          if (!assigning) setPendingAssignee(null);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={assigning}
+              onClick={() => setPendingAssignee(null)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={assigning}
+              onClick={() => void confirmAssigneeChange()}
+            >
+              {assigning ? "Asignando…" : "Aceptar"}
+            </button>
+          </>
+        }
+      >
+        <p className="wa-inbox__takeover-msg">{pendingAssigneeMessage}</p>
+      </Modal>
     </div>
   );
 }

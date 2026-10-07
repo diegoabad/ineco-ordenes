@@ -1,7 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import { WHATSAPP_SECTIONS, type WhatsappSection } from "../lib/appNav";
 import { IconPlus } from "./Icons";
-import { WhatsAppConversationsPanel, type WaConnectionBanner } from "./WhatsAppConversationsPanel";
+import { WhatsAppCoberturasPanel } from "./WhatsAppCoberturasPanel";
+import {
+  WhatsAppConversationsPanel,
+  type WaConnectionBanner,
+} from "./WhatsAppConversationsPanel";
 import { WhatsAppFlowsPanel } from "./WhatsAppFlowsPanel";
 import { WhatsAppOperatorsPanel } from "./WhatsAppOperatorsPanel";
 import { WhatsAppProfileSchemaPanel } from "./WhatsAppProfileSchemaPanel";
@@ -33,6 +37,7 @@ export function WhatsAppModule({ section }: Props) {
   const createProfileFieldRef = useRef<(() => void) | null>(null);
   const createTagRef = useRef<(() => void) | null>(null);
   const createGroupRef = useRef<(() => void) | null>(null);
+  const createCoberturaRef = useRef<(() => void) | null>(null);
   const addOperatorRef = useRef<(() => void) | null>(null);
 
   return (
@@ -59,6 +64,8 @@ export function WhatsAppModule({ section }: Props) {
                   ? "Grupos para organizar y colorear las etiquetas"
                   : "Etiquetas para clasificar las conversaciones"}
               </p>
+            ) : section === "coberturas" ? (
+              <p>Obras sociales disponibles según Infanto o Adulto</p>
             ) : null}
           </div>
         </div>
@@ -116,6 +123,17 @@ export function WhatsAppModule({ section }: Props) {
               </button>
             )}
           </div>
+        ) : section === "coberturas" ? (
+          <div className="app-header__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => createCoberturaRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Nueva cobertura
+            </button>
+          </div>
         ) : section === "respuestas-rapidas" ? (
           <div className="app-header__actions">
             <button
@@ -170,6 +188,8 @@ export function WhatsAppModule({ section }: Props) {
           createGroupRef={createGroupRef}
           onTabChange={onTagsTabChange}
         />
+      ) : section === "coberturas" ? (
+        <WhatsAppCoberturasPanel createRef={createCoberturaRef} />
       ) : (
         <div className="fl-table-empty fl-table-empty--fill">
           <p className="fl-table-empty__title">Próximamente</p>

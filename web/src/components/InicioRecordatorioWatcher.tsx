@@ -142,8 +142,14 @@ export function InicioRecordatorioWatcher() {
   const [busy, setBusy] = useState(false);
   const emailNotifyRef = useRef<Set<string>>(new Set());
   const alertSoundPlayedRef = useRef<string | null>(null);
+  /** Evita reabrir/sonar el mismo disparo (id+fechaHora) tras Aceptar/Posponer. */
+  const dismissedAlertKeysRef = useRef<Set<string>>(new Set());
   const loadingRef = useRef(false);
   const pendingReloadRef = useRef(false);
+
+  function alertKey(item: Pick<InicioItem, "id" | "fechaHora">): string {
+    return `${item.id}|${item.fechaHora ?? ""}`;
+  }
 
   async function reloadRecordatorios() {
     if (loadingRef.current) {
@@ -203,30 +209,34 @@ export function InicioRecordatorioWatcher() {
       return;
     }
 
-    const nextAlert = due.find((it) => it.avisoApp);
+    const nextAlert = due.find(
+      (it) => it.avisoApp && !dismissedAlertKeysRef.current.has(alertKey(it)),
+    );
     if (nextAlert) setAlertRec(nextAlert);
   }, [now, recordatorios, alertRec]);
 
   useEffect(() => {
-    if (!alertRec) {
-      alertSoundPlayedRef.current = null;
-      return;
-    }
-    if (alertSoundPlayedRef.current === alertRec.id) return;
-    alertSoundPlayedRef.current = alertRec.id;
+    if (!alertRec) return;
+    const key = alertKey(alertRec);
+    if (alertSoundPlayedRef.current === key) return;
+    alertSoundPlayedRef.current = key;
     playRecordatorioChime();
-  }, [alertRec?.id]);
+  }, [alertRec?.id, alertRec?.fechaHora]);
 
   async function aceptarRecordatorioAlert() {
     if (!alertRec || busy) return;
     const id = alertRec.id;
     const previous = alertRec;
     const isRecurrente = (previous.recurrencia || "none") !== "none";
+    const key = alertKey(previous);
     setBusy(true);
+    dismissedAlertKeysRef.current.add(key);
+    if (!isRecurrente) {
+      setRecordatorios((prev) => prev.filter((it) => it.id !== id));
+    }
     setAlertRec(null);
     setPosponerOpen(false);
     emailNotifyRef.current.delete(id);
-    alertSoundPlayedRef.current = null;
 
     try {
       const result = await aceptarInicioRecordatorio(id);
@@ -237,6 +247,7 @@ export function InicioRecordatorioWatcher() {
       }
       notifyInicioItemsChanged();
     } catch (error) {
+      dismissedAlertKeysRef.current.delete(key);
       if (!isRecurrente) {
         setRecordatorios((prev) =>
           prev.some((it) => it.id === previous.id) ? prev : [previous, ...prev],
@@ -271,9 +282,11 @@ export function InicioRecordatorioWatcher() {
     }
     const id = alertRec.id;
     const previous = alertRec;
+    const previousKey = alertKey(previous);
     const fechaHora = when.toISOString();
     const optimistic = { ...alertRec, fechaHora, actualizadoAt: new Date().toISOString() };
     setBusy(true);
+    dismissedAlertKeysRef.current.add(previousKey);
     setRecordatorios((prev) => prev.map((it) => (it.id === id ? optimistic : it)));
     emailNotifyRef.current.delete(id);
     setAlertRec(null);
@@ -283,6 +296,7 @@ export function InicioRecordatorioWatcher() {
       setRecordatorios((prev) => prev.map((it) => (it.id === next.id ? next : it)));
       notifyInicioItemsChanged();
     } catch (error) {
+      dismissedAlertKeysRef.current.delete(previousKey);
       setRecordatorios((prev) => prev.map((it) => (it.id === previous.id ? previous : it)));
       setAlertRec(previous);
       toast.error(error instanceof Error ? error.message : "No se pudo posponer");
@@ -363,7 +377,11 @@ export function InicioRecordatorioWatcher() {
               <p className="inicio-rec-alert__title">{alertRec.titulo}</p>
               {alertRec.detalle.trim() ? (
                 <p className="inicio-rec-alert__detalle">{alertRec.detalle.trim()}</p>
-              ) : null}
+              ) : (
+                <p className="inicio-rec-alert__detalle inicio-rec-alert__detalle--empty">
+                  Sin detalle
+                </p>
+              )}
             </div>
           </div>
         ) : null}

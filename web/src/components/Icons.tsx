@@ -409,6 +409,16 @@ export function IconClock(p: IconProps) {
   );
 }
 
+/** Embudo / filtros. */
+export function IconFilter(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  );
+}
+
 /** Chincheta / pin. */
 export function IconPin(p: IconProps & { filled?: boolean }) {
   const s = base(p);

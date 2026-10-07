@@ -42,8 +42,9 @@ import {
   sendConversationText,
   setConversationAssignee,
   setConversationTags,
+  findOpenConversationByContact,
 } from "../whatsapp/runtime.js";
-import { updateContactDisplayName } from "../whatsapp/firestore-store.js";
+import { updateContact } from "../whatsapp/firestore-store.js";
 import {
   createWhatsappTag,
   createWhatsappTagGroup,
@@ -54,6 +55,12 @@ import {
   updateWhatsappTag,
   updateWhatsappTagGroup,
 } from "../whatsapp/tags.js";
+import {
+  createWhatsappCobertura,
+  deleteWhatsappCobertura,
+  listWhatsappCoberturas,
+  updateWhatsappCobertura,
+} from "../whatsapp/coberturas.js";
 
 const router = Router();
 const uploadMedia = multer({
@@ -217,7 +224,11 @@ router.post("/quick-replies", async (req, res) => {
       trigger: String(req.body?.trigger ?? ""),
       title: req.body?.title != null ? String(req.body.title) : null,
       body: String(req.body?.body ?? ""),
-      tagIds: Array.isArray(req.body?.tagIds) ? req.body.tagIds : undefined,
+      tagIds: Array.isArray(req.body?.tagIds)
+        ? req.body.tagIds.map((id: unknown) => String(id ?? "").trim()).filter(Boolean)
+        : req.body?.tagId
+          ? [String(req.body.tagId).trim()].filter(Boolean)
+          : [],
       isActive: req.body?.isActive !== false,
     });
     res.json({ ok: true, data });
@@ -234,7 +245,12 @@ router.patch("/quick-replies/:id", async (req, res) => {
       trigger: req.body?.trigger != null ? String(req.body.trigger) : undefined,
       title: req.body?.title !== undefined ? (req.body.title == null ? null : String(req.body.title)) : undefined,
       body: req.body?.body != null ? String(req.body.body) : undefined,
-      tagIds: Array.isArray(req.body?.tagIds) ? req.body.tagIds : undefined,
+      tagIds:
+        req.body?.tagIds === undefined
+          ? undefined
+          : Array.isArray(req.body.tagIds)
+            ? req.body.tagIds.map((tid: unknown) => String(tid ?? "").trim()).filter(Boolean)
+            : [],
       isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
     });
     res.json({ ok: true, data });
@@ -450,12 +466,64 @@ function tagStatus(message: string): number {
     message.includes("nombre") ||
     message.includes("color") ||
     message.includes("grupo") ||
-    message.includes("Ya existe")
+    message.includes("Ya existe") ||
+    message.includes("cobertura") ||
+    message.includes("etario")
   ) {
     return 400;
   }
   return 500;
 }
+
+router.get("/coberturas", async (req, res) => {
+  try {
+    const grupoEtario =
+      typeof req.query.grupoEtario === "string" ? req.query.grupoEtario : null;
+    const data = await listWhatsappCoberturas(grupoEtario);
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron listar las coberturas");
+  }
+});
+
+router.post("/coberturas", async (req, res) => {
+  try {
+    const data = await createWhatsappCobertura({
+      nombre: String(req.body?.nombre ?? ""),
+      gruposEtarios: req.body?.gruposEtarios,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo crear la cobertura";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.patch("/coberturas/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const data = await updateWhatsappCobertura(String(id ?? ""), {
+      nombre: req.body?.nombre != null ? String(req.body.nombre) : undefined,
+      gruposEtarios:
+        req.body?.gruposEtarios !== undefined ? req.body.gruposEtarios : undefined,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo guardar la cobertura";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.delete("/coberturas/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    await deleteWhatsappCobertura(String(id ?? ""));
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo eliminar la cobertura";
+    res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
 
 router.get("/tags", async (_req, res) => {
   try {
@@ -545,13 +613,52 @@ router.delete("/tags/:id", async (req, res) => {
 router.patch("/contacts/:id", async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const displayName =
-      typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
-    if (!displayName) {
-      res.status(400).json({ ok: false, message: "El nombre es obligatorio" });
+    const firstName =
+      typeof req.body?.firstName === "string" ? req.body.firstName.trim() : "";
+    const lastName =
+      typeof req.body?.lastName === "string" ? req.body.lastName.trim() : "";
+    const cobertura =
+      typeof req.body?.cobertura === "string" ? req.body.cobertura : "";
+    const email = typeof req.body?.email === "string" ? req.body.email : "";
+    const grupoEtario =
+      typeof req.body?.grupoEtario === "string" ? req.body.grupoEtario.trim() : "";
+    const consultaPara =
+      typeof req.body?.consultaPara === "string" ? req.body.consultaPara.trim() : "";
+    const relacionFamiliar =
+      typeof req.body?.relacionFamiliar === "string" ? req.body.relacionFamiliar : "";
+    const contactoNombre =
+      typeof req.body?.contactoNombre === "string"
+        ? req.body.contactoNombre
+        : typeof req.body?.terceroNombre === "string"
+          ? req.body.terceroNombre
+          : "";
+    const contactoApellido =
+      typeof req.body?.contactoApellido === "string" ? req.body.contactoApellido : "";
+    const dni = typeof req.body?.dni === "string" ? req.body.dni : "";
+    const esPacienteRaw = req.body?.esPaciente;
+    const esPaciente =
+      esPacienteRaw === true || esPacienteRaw === "true"
+        ? true
+        : esPacienteRaw === false || esPacienteRaw === "false"
+          ? false
+          : null;
+    if (!firstName) {
+      res.status(400).json({ ok: false, message: "El nombre del paciente es obligatorio" });
       return;
     }
-    const data = await updateContactDisplayName(String(id ?? ""), displayName);
+    const data = await updateContact(String(id ?? ""), {
+      firstName,
+      lastName,
+      cobertura,
+      email,
+      grupoEtario: grupoEtario || null,
+      consultaPara: consultaPara || null,
+      relacionFamiliar,
+      contactoNombre,
+      contactoApellido,
+      dni,
+      esPaciente,
+    });
     if (!data) {
       res.status(404).json({ ok: false, message: "Contacto no encontrado" });
       return;
@@ -559,7 +666,16 @@ router.patch("/contacts/:id", async (req, res) => {
     res.json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo actualizar el contacto";
-    const status = message.includes("obligatorio") ? 400 : 500;
+    const status =
+      message.includes("obligatorio") ||
+      message.includes("email") ||
+      message.includes("Infanto") ||
+      message.includes("tercero") ||
+      message.includes("relación familiar") ||
+      message.includes("quien escribe") ||
+      message.includes("paciente")
+        ? 400
+        : 500;
     res.status(status).json({ ok: false, message });
   }
 });
@@ -568,6 +684,15 @@ router.get("/conversations", async (req, res) => {
   try {
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const assignee = typeof req.query.assignee === "string" ? req.query.assignee : undefined;
+    const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+    const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
+    const tagIdsRaw = req.query.tagIds;
+    const tagIds = Array.isArray(tagIdsRaw)
+      ? tagIdsRaw.map(String)
+      : typeof tagIdsRaw === "string"
+        ? tagIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
     const limit =
       typeof req.query.limit === "string" && req.query.limit.trim()
         ? Number(req.query.limit)
@@ -576,10 +701,40 @@ router.get("/conversations", async (req, res) => {
       typeof req.query.offset === "string" && req.query.offset.trim()
         ? Number(req.query.offset)
         : undefined;
-    const data = await listConversations({ search, status, limit, offset });
+    const data = await listConversations({
+      search,
+      status,
+      limit,
+      offset,
+      assignee,
+      tagIds,
+      dateFrom,
+      dateTo,
+    });
     res.json({ ok: true, data: data.items, total: data.total, hasMore: data.hasMore, nextOffset: data.nextOffset });
   } catch (error) {
     sendError(res, error, "No se pudieron listar conversaciones");
+  }
+});
+
+router.get("/conversations/by-contact/:contactId", async (req, res) => {
+  try {
+    const contactId = Array.isArray(req.params.contactId)
+      ? req.params.contactId[0]
+      : req.params.contactId;
+    const found = await findOpenConversationByContact(String(contactId ?? "").trim());
+    if (!found) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    const data = await getConversation(found.id);
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo abrir la conversación");
   }
 });
 

@@ -7,6 +7,7 @@ export type QuickReply = {
   trigger: string;
   title: string | null;
   body: string;
+  /** Etiquetas opcionales a asignar al usar la respuesta. */
   tagIds: string[];
   isActive: boolean;
   createdAt: string;
@@ -27,9 +28,13 @@ export function normalizeTrigger(value: string): string {
     .replace(/_+/g, "_");
 }
 
-function normalizeTagIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
+function normalizeTagIds(raw: unknown, legacyTagId?: unknown): string[] {
+  const fromArray = Array.isArray(raw)
+    ? raw.map((id) => String(id ?? "").trim()).filter(Boolean)
+    : [];
+  const legacy = String(legacyTagId ?? "").trim();
+  if (legacy) fromArray.push(legacy);
+  return [...new Set(fromArray)];
 }
 
 function normalizeItem(raw: unknown): QuickReply | null {
@@ -45,7 +50,7 @@ function normalizeItem(raw: unknown): QuickReply | null {
     trigger,
     title: title || null,
     body,
-    tagIds: normalizeTagIds(row.tagIds),
+    tagIds: normalizeTagIds(row.tagIds, row.tagId),
     isActive: row.isActive !== false,
     createdAt: String(row.createdAt ?? ""),
     updatedAt: String(row.updatedAt ?? ""),
@@ -74,7 +79,7 @@ export async function createQuickReply(input: {
   trigger: string;
   title?: string | null;
   body: string;
-  tagIds?: string[];
+  tagIds?: string[] | null;
   isActive?: boolean;
 }): Promise<QuickReply> {
   const trigger = normalizeTrigger(input.trigger);
@@ -106,7 +111,7 @@ export async function updateQuickReply(
     trigger?: string;
     title?: string | null;
     body?: string;
-    tagIds?: string[];
+    tagIds?: string[] | null;
     isActive?: boolean;
   },
 ): Promise<QuickReply> {

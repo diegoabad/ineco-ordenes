@@ -14,6 +14,8 @@ import {
 import { firestore } from "../config/firebase.js";
 import type {
   WaContact,
+  WaContactConsultaPara,
+  WaContactGrupoEtario,
   WaConversation,
   WaConversationStatus,
   WaMessage,
@@ -30,6 +32,14 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function normalizeGrupoEtario(raw: unknown): WaContactGrupoEtario | null {
+  return raw === "infanto" || raw === "adulto" ? raw : null;
+}
+
+function normalizeConsultaPara(raw: unknown): WaContactConsultaPara | null {
+  return raw === "propio" || raw === "tercero" ? raw : null;
+}
+
 function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
   return {
     id,
@@ -38,6 +48,25 @@ function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
     lastName: raw.lastName != null ? String(raw.lastName) : null,
     displayName: raw.displayName != null ? String(raw.displayName) : null,
     whatsappName: raw.whatsappName != null ? String(raw.whatsappName) : null,
+    cobertura: raw.cobertura != null ? String(raw.cobertura).trim() || null : null,
+    email: raw.email != null ? String(raw.email).trim() || null : null,
+    grupoEtario: normalizeGrupoEtario(raw.grupoEtario),
+    consultaPara: normalizeConsultaPara(raw.consultaPara),
+    contactoNombre: (() => {
+      const next =
+        raw.contactoNombre != null ? String(raw.contactoNombre).trim() : "";
+      if (next) return next;
+      const legacy =
+        raw.terceroNombre != null ? String(raw.terceroNombre).trim() : "";
+      return legacy || null;
+    })(),
+    contactoApellido:
+      raw.contactoApellido != null ? String(raw.contactoApellido).trim() || null : null,
+    relacionFamiliar:
+      raw.relacionFamiliar != null ? String(raw.relacionFamiliar).trim() || null : null,
+    dni: raw.dni != null ? String(raw.dni).trim() || null : null,
+    esPaciente:
+      raw.esPaciente === true ? true : raw.esPaciente === false ? false : null,
     isBlocked: raw.isBlocked === true,
     lastInteractionAt: raw.lastInteractionAt != null ? String(raw.lastInteractionAt) : null,
     createdAt: String(raw.createdAt ?? nowIso()),
@@ -99,24 +128,120 @@ export async function getContact(id: string): Promise<WaContact | null> {
   return normalizeContact(snap.id, snap.data() as Record<string, unknown>);
 }
 
-export async function updateContactDisplayName(
+export async function updateContact(
   id: string,
-  displayName: string,
+  input: {
+    firstName: string;
+    lastName: string;
+    cobertura?: string;
+    email?: string;
+    grupoEtario?: string | null;
+    consultaPara?: string | null;
+    contactoNombre?: string | null;
+    contactoApellido?: string | null;
+    relacionFamiliar?: string | null;
+    dni?: string | null;
+    esPaciente?: boolean | null;
+  },
 ): Promise<WaContact | null> {
   const existing = await getContact(id);
   if (!existing) return null;
-  const name = displayName.trim();
-  if (!name) {
-    throw new Error("El nombre es obligatorio");
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  if (!firstName) {
+    throw new Error("El nombre del paciente es obligatorio");
   }
+  const cobertura =
+    input.cobertura !== undefined
+      ? input.cobertura.trim() || null
+      : existing.cobertura;
+  const emailRaw =
+    input.email !== undefined ? input.email.trim() : existing.email ?? "";
+  const email = emailRaw || null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("El email no es válido");
+  }
+  const grupoEtario =
+    input.grupoEtario !== undefined
+      ? normalizeGrupoEtario(input.grupoEtario)
+      : existing.grupoEtario;
+  const consultaPara =
+    input.consultaPara !== undefined
+      ? normalizeConsultaPara(input.consultaPara)
+      : existing.consultaPara;
+  if (input.grupoEtario !== undefined && input.grupoEtario && !grupoEtario) {
+    throw new Error("Indicá si es Infanto o Adulto");
+  }
+  if (input.consultaPara !== undefined && input.consultaPara && !consultaPara) {
+    throw new Error("Indicá si la consulta es para el paciente o para un tercero");
+  }
+  let relacionFamiliar =
+    input.relacionFamiliar !== undefined
+      ? input.relacionFamiliar.trim() || null
+      : existing.relacionFamiliar;
+  let contactoNombre =
+    input.contactoNombre !== undefined
+      ? input.contactoNombre.trim() || null
+      : existing.contactoNombre;
+  let contactoApellido =
+    input.contactoApellido !== undefined
+      ? input.contactoApellido.trim() || null
+      : existing.contactoApellido;
+  if (consultaPara !== "tercero") {
+    relacionFamiliar = null;
+    contactoNombre = null;
+    contactoApellido = null;
+  } else {
+    if (!relacionFamiliar) {
+      throw new Error("Indicá la relación familiar con el paciente");
+    }
+    if (!contactoNombre) {
+      throw new Error("Indicá el nombre de quien escribe (el contacto)");
+    }
+  }
+  const dni =
+    input.dni !== undefined ? input.dni.replace(/\D/g, "").trim() || null : existing.dni;
+  const esPaciente =
+    input.esPaciente !== undefined
+      ? input.esPaciente === true
+        ? true
+        : input.esPaciente === false
+          ? false
+          : null
+      : existing.esPaciente;
+  const displayName = [firstName, lastName].filter(Boolean).join(" ").trim();
   const now = nowIso();
   await updateDoc(doc(firestore, CONTACTS, id), {
-    displayName: name,
+    firstName,
+    lastName: lastName || null,
+    displayName,
+    cobertura,
+    email,
+    grupoEtario,
+    consultaPara,
+    relacionFamiliar,
+    contactoNombre,
+    contactoApellido,
+    terceroNombre: null,
+    dni,
+    esPaciente,
     updatedAt: now,
   });
   return {
     ...existing,
-    displayName: name,
+    firstName,
+    lastName: lastName || null,
+    displayName,
+    phoneNumber: existing.phoneNumber,
+    cobertura,
+    email,
+    grupoEtario,
+    consultaPara,
+    relacionFamiliar,
+    contactoNombre,
+    contactoApellido,
+    dni,
+    esPaciente,
     updatedAt: now,
   };
 }
@@ -156,6 +281,15 @@ export async function findOrCreateContact(input: {
     lastName: null,
     displayName: null,
     whatsappName: input.whatsappName?.trim() || null,
+    cobertura: null,
+    email: null,
+    grupoEtario: null,
+    consultaPara: null,
+    contactoNombre: null,
+    contactoApellido: null,
+    relacionFamiliar: null,
+    dni: null,
+    esPaciente: null,
     isBlocked: false,
     lastInteractionAt: now,
     createdAt: now,
@@ -181,6 +315,27 @@ export async function findOpenConversationByContact(contactId: string): Promise<
 export async function findOrCreateOpenConversation(contactId: string): Promise<WaConversation> {
   const existing = await findOpenConversationByContact(contactId);
   if (existing) return existing;
+
+  // Si había una cerrada, reabrirla para no duplicar el hilo.
+  const byContact = query(
+    collection(firestore, CONVERSATIONS),
+    where("contactId", "==", contactId),
+  );
+  const snap = await getDocs(byContact);
+  if (!snap.empty) {
+    const latest = snap.docs
+      .map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>))
+      .sort((a, b) => {
+        const aAt = a.lastMessageAt || a.updatedAt || a.createdAt;
+        const bAt = b.lastMessageAt || b.updatedAt || b.createdAt;
+        return bAt.localeCompare(aAt);
+      })[0];
+    if (latest) {
+      const reopened = await setConversationStatus(latest.id, "OPEN");
+      if (reopened) return reopened;
+    }
+  }
+
   const now = nowIso();
   const id = randomUUID();
   const conversation: WaConversation = {
@@ -226,18 +381,54 @@ export async function listConversations(opts?: {
   search?: string;
   limit?: number;
   offset?: number;
+  assignee?: string;
+  tagIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<ConversationListResult> {
   const status = opts?.status?.trim() || "OPEN";
   const pageSize = Math.min(Math.max(Number(opts?.limit ?? 40) || 40, 1), 100);
   const offset = Math.max(Number(opts?.offset ?? 0) || 0, 0);
   const q = query(collection(firestore, CONVERSATIONS), where("status", "==", status));
   const snap = await getDocs(q);
-  const items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
+  let items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
   items.sort((a, b) => {
     const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
     const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
     return tb - ta;
   });
+
+  const assignee = opts?.assignee?.trim() || "";
+  if (assignee === "none") {
+    items = items.filter((c) => {
+      const kind = c.assigneeKind || "none";
+      return kind === "none" || (!c.assigneeUserId && kind !== "bot" && kind !== "user");
+    });
+  } else if (assignee === "bot") {
+    items = items.filter((c) => (c.assigneeKind || "") === "bot");
+  } else if (assignee) {
+    items = items.filter(
+      (c) => (c.assigneeKind || "") === "user" && String(c.assigneeUserId ?? "") === assignee,
+    );
+  }
+
+  const tagIds = (opts?.tagIds ?? []).map((id) => id.trim()).filter(Boolean);
+  if (tagIds.length > 0) {
+    const wanted = new Set(tagIds);
+    items = items.filter((c) => (c.tagIds ?? []).some((id) => wanted.has(id)));
+  }
+
+  const dateFrom = opts?.dateFrom?.trim() || "";
+  const dateTo = opts?.dateTo?.trim() || "";
+  if (dateFrom || dateTo) {
+    const fromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00`) : Number.NEGATIVE_INFINITY;
+    const toMs = dateTo ? Date.parse(`${dateTo}T23:59:59.999`) : Number.POSITIVE_INFINITY;
+    items = items.filter((c) => {
+      if (!c.lastMessageAt) return false;
+      const t = Date.parse(c.lastMessageAt);
+      return Number.isFinite(t) && t >= fromMs && t <= toMs;
+    });
+  }
 
   const search = opts?.search?.trim().toLowerCase();
   if (search) {
@@ -249,6 +440,9 @@ export async function listConversations(opts?: {
         c.contact?.firstName,
         c.contact?.lastName,
         c.contact?.whatsappName,
+        c.contact?.cobertura,
+        c.contact?.email,
+        c.contact?.dni,
         c.lastMessagePreview,
       ]
         .filter(Boolean)
@@ -302,6 +496,18 @@ export async function setConversationAssignee(
     assigneeName: input.kind === "none" ? null : input.name ?? null,
     updatedAt: now,
   };
+  await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
+  return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+export async function setConversationStatus(
+  id: string,
+  status: WaConversationStatus,
+): Promise<WaConversation | null> {
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return null;
+  const now = nowIso();
+  const patch = { status, updatedAt: now };
   await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
   return normalizeConversation(id, { ...snap.data(), ...patch });
 }
