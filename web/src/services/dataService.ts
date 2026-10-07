@@ -528,6 +528,21 @@ export async function updatePedidoSistema(
   return res.data;
 }
 
+export async function completarPedidoSistema(
+  id: string,
+  mensaje: string,
+): Promise<{ pedido: PedidoSistema; emailError: string | null }> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: PedidoSistema;
+    emailError: string | null;
+  }>(`/api/pedidos-sistema/${id}/completar`, {
+    method: "POST",
+    body: JSON.stringify({ mensaje }),
+  });
+  return { pedido: res.data, emailError: res.emailError };
+}
+
 export async function deletePedidoSistema(id: string): Promise<void> {
   await apiFetch(`/api/pedidos-sistema/${id}`, { method: "DELETE" });
 }

@@ -34,7 +34,10 @@ import {
   type EmailConfig,
 } from "./email-templates.js";
 import { savePedidoFoto } from "./pedidos-files.service.js";
-import { sendPedidoSistemaEmail } from "./pedidos-email.service.js";
+import {
+  sendPedidoCompletadoEmail,
+  sendPedidoSistemaEmail,
+} from "./pedidos-email.service.js";
 import {
   createPreference,
   initPointPreference,
@@ -1826,6 +1829,32 @@ export async function updatePedidoSistema(
 
   await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
   return pedido;
+}
+
+export async function completarPedidoSistema(
+  id: string,
+  mensaje: string,
+): Promise<{ pedido: PedidoSistema; emailError: string | null }> {
+  const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+  if (!existing.exists()) throw new Error("Pedido no encontrado");
+  const current = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+
+  const pedido: PedidoSistema = {
+    ...current,
+    estado: "finalizado",
+    actualizadoAt: nowIso(),
+  };
+  await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
+
+  try {
+    await sendPedidoCompletadoEmail(pedido, mensaje);
+    return { pedido, emailError: null };
+  } catch (error) {
+    console.error("No se pudo avisar por mail que el pedido finalizó:", error);
+    const emailError =
+      error instanceof Error ? error.message : "No se pudo enviar el mail de finalización";
+    return { pedido, emailError };
+  }
 }
 
 export async function deletePedidoSistema(id: string): Promise<void> {

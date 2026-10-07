@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { AuthedRequest } from "../middleware/auth.middleware.js";
 import {
+  completarPedidoSistema,
   createPedidoSistema,
   deletePedidoSistema,
   getPedidoSistema,
@@ -128,6 +129,21 @@ router.post("/", async (req, res) => {
       ok: false,
       message: error instanceof Error ? error.message : "Error al crear pedido",
     });
+  }
+});
+
+router.post("/:id/completar", async (req, res) => {
+  try {
+    const mensaje = String((req.body as { mensaje?: unknown })?.mensaje ?? "");
+    const result = await completarPedidoSistema(paramId(req), mensaje);
+    res.json({
+      ok: true,
+      data: result.pedido,
+      emailError: result.emailError,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error al completar el pedido";
+    res.status(message === "Pedido no encontrado" ? 404 : 400).json({ ok: false, message });
   }
 });
 
