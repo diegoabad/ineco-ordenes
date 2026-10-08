@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { IconX } from '../Icons';
+import { IconX, IconBuilding, IconMonitor } from '../Icons';
 import { apiPost, getPersona, createTurno, config } from './medexisApi';
 import { fetchBuscaTurnoConfig, saveBuscaTurnoConfig } from './buscaTurnoConfigApi';
 import SearchableSelect from './SearchableSelect';
@@ -52,10 +52,21 @@ function writeSedesCarga(arr) {
   }
 }
 
+/** Filtro UI (client-side). Medexis no discrimina bien por modalidad en Disponible. */
 const MODALIDADES = [
+  { value: 'TODOS', label: 'Todos' },
   { value: 'PRESENCIAL', label: 'Presencial' },
-  { value: 'VIDEOCONSULTA', label: 'Videoconsulta' },
+  { value: 'VIRTUAL', label: 'Virtual' },
 ];
+
+/** Virtual = edificio "Video-Consulta Medexis" (sector vacío en la práctica). */
+function isSlotVirtual(edificio) {
+  return /video\s*-?\s*consulta\s*medexis/i.test(String(edificio ?? ''));
+}
+
+function slotModalidadLabel(edificio) {
+  return isSlotVirtual(edificio) ? 'Virtual' : 'Presencial';
+}
 
 const DEFAULT_DURACION = 15;
 
@@ -314,41 +325,13 @@ function formatTurnoFechaHoraMedexis(d) {
   return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())} ${p(x.getHours())}:${p(x.getMinutes())}:${p(x.getSeconds())}`;
 }
 
-/** Convierte respuesta API (yyyy-mm-dd o ISO) a dd/mm/aaaa para el input. */
-function fechaApiToDDMMYYYY(s) {
-  const t = String(s || '').trim();
-  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!iso) return '';
-  const day = parseInt(iso[3], 10);
-  const month = parseInt(iso[2], 10);
-  const year = parseInt(iso[1], 10);
-  return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
-}
-
-/** Parsea dd/mm/aaaa (o yyyy-mm-dd) a yyyy-mm-dd para enviar a la API. */
-function parseFechaNacimientoParaApi(s) {
-  const t = String(s || '').trim();
-  if (!t) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
-  if (!m) return '';
-  const day = parseInt(m[1], 10);
-  const month = parseInt(m[2], 10);
-  const year = parseInt(m[3], 10);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return '';
-  const d = new Date(year, month - 1, day);
-  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return '';
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-/** Inserta / al escribir: solo dígitos —  dd, dd/mm, dd/mm/aaaa (máx. 8 dígitos). */
-function formatFechaNacimientoInput(value) {
-  const d = String(value ?? '')
-    .replace(/\D/g, '')
-    .slice(0, 8);
-  if (d.length <= 2) return d;
-  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`;
-  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+/** Medexis exige PersonaFechaNacimiento; usamos la fecha del día (YYYY-MM-DD). */
+function fechaNacimientoHoyParaApi() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function titleCase(s) {
@@ -387,7 +370,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [progress, setProgress] = useState(null);
   const [status, setStatus] = useState({ text: '', error: false, visible: false });
   const [prestacionId, setPrestacionId] = useState('');
-  const [modalidad, setModalidad] = useState('PRESENCIAL');
+  const [modalidad, setModalidad] = useState('TODOS');
   const [searching, setSearching] = useState(false);
   const [slotsRaw, setSlotsRaw] = useState([]);
   const [searchReturnedEmpty, setSearchReturnedEmpty] = useState(false);
@@ -465,12 +448,23 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       });
   }, [configDraftPrestaciones, configSearchPrest, prestaciones, esSedeCargada]);
 
+  const slotsFiltered = useMemo(() => {
+    if (modalidad === 'VIRTUAL') return slotsRaw.filter((s) => isSlotVirtual(s.edificio));
+    if (modalidad === 'PRESENCIAL') return slotsRaw.filter((s) => !isSlotVirtual(s.edificio));
+    return slotsRaw;
+  }, [slotsRaw, modalidad]);
+
   const resultsSummaryDisplay = useMemo(() => {
     if (!slotsRaw.length || !prestacionId) return '';
     const nombrePrest = prestaciones[prestacionId]?.nombre || prestacionId;
-    const days = new Set(slotsRaw.map((s) => fmtDateKey(s.fechaHora))).size;
-    return `${slotsRaw.length} turno${slotsRaw.length !== 1 ? 's' : ''} disponibles para "${nombrePrest}" · ${days} día${days !== 1 ? 's' : ''}`;
-  }, [slotsRaw, prestacionId, prestaciones]);
+    const days = new Set(slotsFiltered.map((s) => fmtDateKey(s.fechaHora))).size;
+    const filtroLabel =
+      modalidad === 'VIRTUAL' ? ' virtuales' : modalidad === 'PRESENCIAL' ? ' presenciales' : '';
+    if (!slotsFiltered.length) {
+      return `0 turnos${filtroLabel} (de ${slotsRaw.length}) para "${nombrePrest}"`;
+    }
+    return `${slotsFiltered.length} turno${slotsFiltered.length !== 1 ? 's' : ''}${filtroLabel} disponibles para "${nombrePrest}" · ${days} día${days !== 1 ? 's' : ''}`;
+  }, [slotsRaw, slotsFiltered, prestacionId, prestaciones, modalidad]);
 
   const enabledProfDocs = useMemo(
     () => new Set(profesionalesCatalog.filter((p) => p.enabled).map((p) => String(p.doc))),
@@ -544,7 +538,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [assignTelefonoManual, setAssignTelefonoManual] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState('');
-  const [personaFechaNacimiento, setPersonaFechaNacimiento] = useState('');
 
   const setSelectedDocs = useCallback((next) => {
     if (!prestacionId) return;
@@ -1062,11 +1055,15 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
               sede: s.sede || s.Sede || '',
             };
           const fechaHora = s.turnoFechaHora || s.TurnoFechaHora;
+          const edificio = String(s.edificio ?? s.Edificio ?? '').trim();
+          const sector = String(s.sector ?? s.Sector ?? '').trim();
           return {
             fechaHora: new Date(fechaHora),
             profesional: prof.nombre || s.profesionalNombre || s.PrestadorNombre || '',
             profesionalDoc: String(doc),
             sede: prof.sede || s.sede || s.Sede || '',
+            edificio,
+            sector,
             prestacionId,
           };
         });
@@ -1077,7 +1074,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         const hasta = addDays(new Date(), dayOffset + 1);
         const fechaDesde = fmtDate(desde);
         const fechaHasta = fmtDate(hasta);
-        const modalidadValor = modalidad || 'PRESENCIAL';
+        // Medexis ignora el filtro de modalidad en Disponible: pedimos PRESENCIAL
+        // y filtramos Virtual/Presencial en el cliente según `edificio`.
+        const modalidadValor = 'PRESENCIAL';
 
         const requests = grupos.map(async (grupo) => {
           const body = {
@@ -1170,7 +1169,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     },
     [
       prestacionId,
-      modalidad,
       prestaciones,
       selectedPrestadorDocsByPrestacion,
       clearStatus,
@@ -1190,7 +1188,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setAssignEmailManual('');
     setAssignTelefonoManual('');
     setAssignError('');
-    setPersonaFechaNacimiento('');
   }, []);
 
   const openAssignModal = useCallback((slot) => {
@@ -1204,7 +1201,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setAssignEmailManual('');
     setAssignTelefonoManual('');
     setAssignError('');
-    setPersonaFechaNacimiento('');
   }, []);
 
   const limpiarBusqueda = useCallback(() => {
@@ -1216,7 +1212,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setPrestadoresModalOpen(false);
     setPrestadorFilter('');
     setSelectedPrestadorDocsByPrestacion({});
-    setModalidad('PRESENCIAL');
+    setModalidad('TODOS');
     clearStatus();
     closeAssignModal();
   }, [clearStatus, closeAssignModal]);
@@ -1241,9 +1237,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         return;
       }
       setPersonaData(person);
-      setPersonaFechaNacimiento(
-        fechaApiToDDMMYYYY(person.PersonaFechaNacimiento ?? person.FechaNacimiento ?? '')
-      );
     } catch (e) {
       // Si Medexis falla (p. ej. 500), permitir completar datos a mano.
       setAssignPacienteNoEncontrado(true);
@@ -1298,7 +1291,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       PersonaSexo: assignSexoManual,
       _manual: true,
     });
-    setPersonaFechaNacimiento('');
   }, [
     assignDni,
     assignNombreManual,
@@ -1314,17 +1306,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setAssignLoading(true);
     try {
       const slot = selectedSlotForAssign;
-      const fechaNacRaw =
-        personaFechaNacimiento.trim() ||
-        personaData.PersonaFechaNacimiento ||
-        personaData.FechaNacimiento ||
-        '';
-      const fechaNac = parseFechaNacimientoParaApi(fechaNacRaw);
-      if (!fechaNac) {
-        setAssignError('La fecha de nacimiento es obligatoria (formato dd/mm/aaaa).');
-        setAssignLoading(false);
-        return;
-      }
+      const fechaNac = fechaNacimientoHoyParaApi();
       if (!slot.prestacionId) {
         setAssignError('Falta el código de la prestación.');
         setAssignLoading(false);
@@ -1365,13 +1347,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     } finally {
       setAssignLoading(false);
     }
-  }, [
-    selectedSlotForAssign,
-    personaData,
-    assignDni,
-    personaFechaNacimiento,
-    closeAssignModal,
-  ]);
+  }, [selectedSlotForAssign, personaData, assignDni, closeAssignModal]);
 
   const prestacionList = useMemo(() => {
     return Object.entries(prestaciones)
@@ -1405,7 +1381,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   }, [prestacionList]);
 
   const byDay = {};
-  slotsRaw.forEach((s) => {
+  slotsFiltered.forEach((s) => {
     const key = fmtDateKey(s.fechaHora);
     if (!byDay[key]) byDay[key] = [];
     byDay[key].push(s);
@@ -1814,6 +1790,16 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         </div>
       )}
 
+      {slotsRaw.length > 0 && dayEntries.length === 0 && modalidad !== 'TODOS' && (
+        <div className="empty-state">
+          <p className="empty-state-text">
+            No hay turnos {modalidad === 'VIRTUAL' ? 'virtuales' : 'presenciales'} en estos
+            resultados.
+          </p>
+          <p className="empty-state-hint">Probá con “Todos” o cambiá la modalidad.</p>
+        </div>
+      )}
+
       {dayEntries.length > 0 && (
         <div id="results-container">
           {dayEntries.map(([key, daySlots]) => {
@@ -1870,15 +1856,34 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                         <div className="slot-grid slot-grid-by-prof">
                           {profSlots.map((s, i) => {
                             const sede = (s.sede && String(s.sede).trim()) || 'INECO';
+                            const virtual = isSlotVirtual(s.edificio);
+                            const modLabel = slotModalidadLabel(s.edificio);
+                            const lugarBits = [
+                              s.edificio,
+                              s.sector,
+                              sede !== 'INECO' ? sede : '',
+                            ].filter(Boolean);
+                            const lugar = lugarBits.join(' · ');
                             return (
                               <button
                                 key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}
                                 type="button"
-                                className="slot-card slot-card-compact"
+                                className={`slot-card slot-card-compact${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}`}
                                 onClick={() => openAssignModal(s)}
-                                title="Elegir este horario para asignar turno a un paciente"
-                                aria-label={`Asignar turno ${fmtTime(s.fechaHora)} · ${sede}`}
+                                title={`Elegir este horario (${modLabel}${lugar ? ` · ${lugar}` : ''})`}
+                                aria-label={`Asignar turno ${fmtTime(s.fechaHora)} · ${modLabel}${lugar ? ` · ${lugar}` : ''}`}
                               >
+                                <span
+                                  className="slot-mod-icon"
+                                  title={modLabel}
+                                  aria-hidden
+                                >
+                                  {virtual ? (
+                                    <IconMonitor size={14} />
+                                  ) : (
+                                    <IconBuilding size={14} />
+                                  )}
+                                </span>
                                 <span className="slot-time">{fmtTime(s.fechaHora)}</span>
                               </button>
                             );
@@ -1936,6 +1941,19 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 <div className="modal-slot-row">
                   <span className="modal-slot-label">Hora</span>
                   <span className="modal-slot-value modal-slot-value--time">{fmtTime(selectedSlotForAssign.fechaHora)}</span>
+                </div>
+                <div className="modal-slot-row">
+                  <span className="modal-slot-label">Modalidad</span>
+                  <span className="modal-slot-value">
+                    {slotModalidadLabel(selectedSlotForAssign.edificio)}
+                    {selectedSlotForAssign.edificio
+                      ? ` · ${selectedSlotForAssign.edificio}${
+                          selectedSlotForAssign.sector
+                            ? ` · ${selectedSlotForAssign.sector}`
+                            : ''
+                        }`
+                      : ''}
+                  </span>
                 </div>
                 <div className="modal-slot-row">
                   <span className="modal-slot-label">Profesional</span>
@@ -2044,6 +2062,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
               ) : (
                 <>
                   <div className="modal-persona">
+                    <p className="modal-persona-title">Datos del paciente</p>
                     <p>
                       <strong>
                         {titleCase(personaData.PersonaNombre)} {titleCase(personaData.PersonaApellido || '')}
@@ -2056,20 +2075,6 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                       <p>Tel. {personaData.PersonaTelefonoCel || '—'}</p>
                     )}
                   </div>
-                  <label className="modal-field">
-                    <span>Fecha de nacimiento (obligatorio)</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="bday"
-                      placeholder="dd/mm/aaaa"
-                      value={personaFechaNacimiento}
-                      onChange={(e) =>
-                        setPersonaFechaNacimiento(formatFechaNacimientoInput(e.target.value))
-                      }
-                      disabled={assignLoading}
-                    />
-                  </label>
                   {assignError && <p className="modal-error">{assignError}</p>}
                 </>
               )}
@@ -2124,13 +2129,13 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                       setAssignError('');
                     }}
                   >
-                    Otro DNI
+                    Cambiar paciente
                   </button>
                   <button
                     type="button"
                     className="btn btn-primary"
                     onClick={handleAsignarTurno}
-                    disabled={assignLoading || !personaFechaNacimiento.trim()}
+                    disabled={assignLoading}
                   >
                     {assignLoading ? 'Asignando...' : 'Asignar turno'}
                   </button>
