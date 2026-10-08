@@ -193,7 +193,7 @@ export function WhatsAppProfileSchemaPanel({ createRef }: Props) {
                 <th>Alcance</th>
                 <th>Tipo</th>
                 <th>Grupo</th>
-                <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
               </tr>
             </thead>
             {!loading && items.length > 0 ? (
@@ -223,7 +223,7 @@ export function WhatsAppProfileSchemaPanel({ createRef }: Props) {
                       <div className="fl-table-actions fl-table-actions--2">
                         <button
                           type="button"
-                          className="fl-icon-btn"
+                          className="fl-icon-btn fl-icon-btn--edit"
                           title="Editar"
                           onClick={() => openEdit(item)}
                         >

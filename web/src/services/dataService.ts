@@ -120,6 +120,7 @@ export async function enviarOrdenEmail(input: {
   filename?: string;
   fecha?: string;
   medicoNombre?: string;
+  email?: string;
   subject?: string;
   body?: string;
 }): Promise<{ to: string; envioId: string }> {
@@ -132,6 +133,7 @@ export async function enviarOrdenEmail(input: {
         filename: input.filename,
         fecha: input.fecha,
         medicoNombre: input.medicoNombre,
+        email: input.email,
         subject: input.subject,
         body: input.body,
       }),
@@ -405,7 +407,7 @@ export async function prepararPresupuestoLinkPago(id: string): Promise<Presupues
 
 export async function aceptarPresupuesto(
   id: string,
-  input: { enviarEmail: boolean; subject?: string; body?: string },
+  input: { enviarEmail: boolean; subject?: string; body?: string; email?: string },
 ): Promise<{ presupuesto: Presupuesto; emailError?: string }> {
   const res = await apiFetch<{
     ok: boolean;

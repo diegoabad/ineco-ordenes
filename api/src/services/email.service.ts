@@ -26,6 +26,8 @@ export type SendOrdenEmailInput = {
   filename?: string;
   fecha?: string;
   medicoNombre?: string;
+  /** Destinatarios (uno o varios). Si no viene, se usa el email del paciente. */
+  email?: string;
   /** Si vienen, se usan tal cual (preview editable del cliente). */
   subject?: string;
   body?: string;
@@ -98,8 +100,8 @@ export function clearEmailErrorMessage(error: unknown): string {
     return "No se encontró el paciente. Puede haber sido eliminado.";
   }
 
-  if (/no tiene email/i.test(raw)) {
-    return "El paciente no tiene un email cargado.";
+  if (/no tiene email/i.test(raw) || /al menos un email válido/i.test(raw)) {
+    return "Ingresá al menos un email válido.";
   }
 
   if (/pdf inválido/i.test(raw)) {
@@ -119,9 +121,12 @@ export async function sendOrdenEmail(
 ): Promise<{ to: string; envioId: string }> {
   const paciente = await getPacienteById(input.pacienteId);
   if (!paciente) throw new Error("Paciente no encontrado");
-  if (!paciente.email?.trim()) {
-    throw new Error("El paciente no tiene email cargado");
+
+  const recipients = parseEmailList(input.email ?? paciente.email).filter(isEmailAddress);
+  if (recipients.length === 0) {
+    throw new Error("Ingresá al menos un email válido");
   }
+  const to = joinEmails(recipients);
 
   const medico = await resolveMedicoForPaciente(paciente.medicoId);
   const medicoNombre =
@@ -136,7 +141,7 @@ export async function sendOrdenEmail(
   const config = await getEmailConfig();
   const vars = {
     nombrePaciente: formatNombrePersona(paciente.paciente) || "—",
-    email: paciente.email,
+    email: to,
     obraSocial: paciente.obraSocial || "—",
     afiliado: paciente.afiliado || "—",
     diagnostico: paciente.diagnostico || "—",
@@ -174,7 +179,7 @@ export async function sendOrdenEmail(
   const baseEnvio = {
     pacienteId: paciente.id,
     pacienteNombre: formatNombrePersona(paciente.paciente),
-    toEmail: paciente.email.trim(),
+    toEmail: to,
     medicoId: medico?.id ?? null,
     medicoNombre,
     fechaOrden: fechaOrdenRaw,
@@ -187,14 +192,14 @@ export async function sendOrdenEmail(
   try {
     ensureSendGrid();
     await sgMail.send({
-      to: paciente.email.trim(),
+      to: recipients,
       from: {
         email: config.fromEmail,
         name: config.fromName,
       },
       subject,
       text: bodyText,
-      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111">${bodyHtml}</div>`,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111;white-space:pre-wrap">${bodyHtml}</div>`,
       attachments: [
         {
           content: pdfContent,
@@ -214,7 +219,7 @@ export async function sendOrdenEmail(
       { id: envioId },
     );
 
-    return { to: paciente.email.trim(), envioId: envio.id };
+    return { to, envioId: envio.id };
   } catch (error) {
     const clear = clearEmailErrorMessage(error);
     try {
@@ -319,7 +324,7 @@ export async function sendPresupuestoEmail(
       },
       subject,
       text: bodyText,
-      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111">${bodyHtml}</div>`,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111;white-space:pre-wrap">${bodyHtml}</div>`,
       attachments: [
         {
           content: pdfContent,
@@ -403,7 +408,7 @@ export async function sendLinkPagoEmail(
       },
       subject,
       text: bodyText,
-      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111">${bodyHtml}</div>`,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111;white-space:pre-wrap">${bodyHtml}</div>`,
     });
 
     return { to };

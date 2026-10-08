@@ -244,9 +244,10 @@ export function PedidosSistemaPanel() {
                 <th className="pedidos-col-fecha">Fecha</th>
                 <th className="pedidos-col-usuario">Usuario</th>
                 <th className="pedidos-col-titulo">Título</th>
+                <th className="pedidos-col-detalle">Detalle</th>
                 <th className="pedidos-col-select">Prioridad</th>
                 <th className="pedidos-col-select">Estado</th>
-                <th className="fl-col-actions pedidos-col-actions">Acciones</th>
+                <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
               </tr>
             </thead>
             {!loading && filtrados.length > 0 ? (
@@ -275,6 +276,14 @@ export function PedidosSistemaPanel() {
                         {p.titulo}
                       </span>
                     </td>
+                    <td className="pedidos-col-detalle">
+                      <span
+                        className="pedidos-cell-text"
+                        title={p.detalle?.trim() || undefined}
+                      >
+                        {p.detalle?.trim() || "—"}
+                      </span>
+                    </td>
                     <td className="pedidos-col-select">
                       <div onClick={(e) => e.stopPropagation()}>
                         <PedidosColorSelect
@@ -297,7 +306,7 @@ export function PedidosSistemaPanel() {
                       />
                       </div>
                     </td>
-                    <td className="fl-col-actions pedidos-col-actions">
+                    <td className="fl-col-actions fl-col-actions--2">
                       <div className="fl-table-actions fl-table-actions--2">
                         {dueno ? (
                           <button

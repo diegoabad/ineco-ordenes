@@ -155,10 +155,6 @@ export function HistorialEnviosPanel({
       toast.warning("Ese paciente ya no existe. No se puede reintentar.");
       return;
     }
-    if (!paciente.email?.trim()) {
-      toast.warning("El paciente no tiene email cargado.");
-      return;
-    }
     onRetry(paciente);
   }
 
@@ -272,7 +268,7 @@ export function HistorialEnviosPanel({
                 <th>Paciente</th>
                 <th>Mail</th>
                 <th>Estado</th>
-                <th className="fl-col-actions fl-col-actions--4">Acciones</th>
+                <th className="fl-col-actions fl-col-actions--4" aria-label="Acciones" />
               </tr>
             </thead>
             {!loading && items.length > 0 ? (
@@ -307,7 +303,7 @@ export function HistorialEnviosPanel({
                         </span>
                       </td>
                       <td className="fl-col-actions fl-col-actions--4">
-                        <div className="fl-table-actions">
+                        <div className="fl-table-actions fl-table-actions--4">
                           <button
                             type="button"
                             className="fl-icon-btn fl-icon-btn--mail"
@@ -335,7 +331,7 @@ export function HistorialEnviosPanel({
                           </button>
                           <button
                             type="button"
-                            className="fl-icon-btn fl-icon-btn--view"
+                            className="fl-icon-btn fl-icon-btn--warning"
                             title={ok ? "Sin error" : "Ver detalle del error"}
                             aria-label="Ver detalle del error"
                             disabled={ok || !envio.errorMessage}

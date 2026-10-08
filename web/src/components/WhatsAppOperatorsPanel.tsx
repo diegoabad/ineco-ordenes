@@ -177,7 +177,7 @@ export function WhatsAppOperatorsPanel({ addRef }: Props) {
               <tr>
                 <th>Nombre</th>
                 <th>Email</th>
-                <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
               </tr>
             </thead>
             {!loading && operators.length > 0 ? (

@@ -387,7 +387,13 @@ router.post("/:id/aceptar", async (req, res) => {
     const enviarEmail = raw.enviarEmail === true;
     const subject = typeof raw.subject === "string" ? raw.subject : undefined;
     const body = typeof raw.body === "string" ? raw.body : undefined;
-    const result = await aceptarPresupuesto(id, { enviarEmail, subject, body });
+    const email = typeof raw.email === "string" ? raw.email.trim() : undefined;
+    const result = await aceptarPresupuesto(id, {
+      enviarEmail,
+      subject,
+      body,
+      email: email || undefined,
+    });
     res.json({
       ok: true,
       data: result.presupuesto,

@@ -182,25 +182,41 @@ export function stripRichHtml(input: string): string {
     .replace(/\n+$/, "");
 }
 
+/** Bloques vacíos → &nbsp; para que clientes de mail no colapsen las líneas en blanco. */
+function preserveBlankLinesForEmail(html: string): string {
+  return html
+    .replace(/<(div|p)(\b[^>]*)?>\s*<br\s*\/?>\s*<\/\1>/gi, "<div>&nbsp;</div>")
+    .replace(/<(div|p)(\b[^>]*)?>\s*<\/\1>/gi, "<div>&nbsp;</div>")
+    .replace(/(?:<br\s*\/?>\s*){2,}/gi, (match) => {
+      const count = (match.match(/<br/gi) || []).length;
+      return Array.from({ length: count }, () => "<div>&nbsp;</div>").join("");
+    });
+}
+
 export function emailBodyToHtml(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed) return "";
-  if (looksLikeRichHtml(trimmed)) {
+  if (!body.trim()) return "";
+  if (looksLikeRichHtml(body)) {
+    // No hacer trim agresivo: conservamos saltos / bloques vacíos del editor.
+    let html = body.replace(/\r\n/g, "\n");
+    html = preserveBlankLinesForEmail(html);
     // Plantillas en texto plano + {{linkPago}} como <a> dejan \n sueltos.
-    const withBreaks = trimmed.includes("\n")
-      ? trimmed.replace(/\r\n/g, "\n").replace(/\n/g, "<br>")
-      : trimmed;
-    return richClassesToInlineStyles(sanitizeRichHtml(withBreaks)).replace(
+    if (html.includes("\n")) {
+      html = html.replace(/\n/g, "<br>");
+    }
+    html = sanitizeRichHtml(html);
+    // sanitize puede volver a dejar <br> sueltos; reaplicar para el mail.
+    html = preserveBlankLinesForEmail(html);
+    return richClassesToInlineStyles(html).replace(
       /<a href="([^"]+)">/gi,
       '<a href="$1" style="color:#a61948;font-weight:600;text-decoration:underline">',
     );
   }
-  return plainTextToHtml(trimmed);
+  // Texto plano: respetar todos los saltos, incluidos los del inicio/final.
+  return plainTextToHtml(body.replace(/\r\n/g, "\n"));
 }
 
 export function emailBodyToPlainText(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed) return "";
-  if (looksLikeRichHtml(trimmed)) return stripRichHtml(trimmed);
-  return trimmed;
+  if (!body.trim()) return "";
+  if (looksLikeRichHtml(body)) return stripRichHtml(body);
+  return body.replace(/\r\n/g, "\n");
 }

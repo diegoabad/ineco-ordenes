@@ -274,7 +274,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
                 <tr>
                   <th>Etiqueta</th>
                   <th>Grupo</th>
-                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
                 </tr>
               </thead>
               {!loading && sortedItems.length > 0 ? (
@@ -294,7 +294,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
                         <div className="fl-table-actions fl-table-actions--2">
                           <button
                             type="button"
-                            className="fl-icon-btn"
+                            className="fl-icon-btn fl-icon-btn--edit"
                             title="Editar"
                             onClick={() => openEdit(tag)}
                           >
@@ -352,7 +352,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
                   <th>Grupo</th>
                   <th>Color</th>
                   <th>Etiquetas</th>
-                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
                 </tr>
               </thead>
               {!loading && sortedGroups.length > 0 ? (
@@ -376,7 +376,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
                         <div className="fl-table-actions fl-table-actions--2">
                           <button
                             type="button"
-                            className="fl-icon-btn"
+                            className="fl-icon-btn fl-icon-btn--edit"
                             title="Editar"
                             onClick={() => openEditGroup(group)}
                           >

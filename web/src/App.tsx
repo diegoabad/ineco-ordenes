@@ -624,10 +624,6 @@ export default function App() {
     paciente: Paciente,
     fecha: string,
   ): Promise<OrdenEmailDraft> {
-    if (!paciente.email?.trim()) {
-      throw new Error("Este paciente no tiene email cargado");
-    }
-
     const medico = medicoParaPaciente(paciente);
     if (!medico) {
       throw new Error(
@@ -760,16 +756,9 @@ export default function App() {
       toast.info("Ya hay un envío en curso. Esperá a que termine.");
       return;
     }
-    const conEmail = list.filter((p) => p.email?.trim());
-    if (conEmail.length === 0) {
-      toast.warning(
-        list.length === 1
-          ? "Este paciente no tiene email. Cargalo antes de enviar."
-          : "Ningún paciente tiene email cargado.",
-      );
-      return;
-    }
-    setFechaPending({ kind: "enviar", list: conEmail });
+    if (list.length === 0) return;
+    // El email se puede editar / completar en el modal de revisión.
+    setFechaPending({ kind: "enviar", list });
   }
 
   async function handleFechaConfirm(fecha: string) {
@@ -782,14 +771,7 @@ export default function App() {
       return;
     }
 
-    const conEmail = pending.list.filter((p) => p.email?.trim());
-    const omitidosSinEmail = pending.list.length - conEmail.length;
-    if (conEmail.length === 0) {
-      toast.warning("Ningún paciente tiene email cargado.");
-      return;
-    }
-
-    await cargarDraftOrdenEmail(conEmail, fecha, 0, [], omitidosSinEmail);
+    await cargarDraftOrdenEmail(pending.list, fecha, 0, [], 0);
   }
 
   function handleOrdenEmailSent(result: { to: string }) {
@@ -862,8 +844,8 @@ export default function App() {
     medicoPorDefecto || pacientesActivos.some((p) => p.medicoId),
   );
   const emailFlowActive = enviandoTodas || ordenEmailSession !== null;
-  const pacientesConEmail = pacientesActivos.filter((p) => p.email?.trim()).length;
-  const puedeEnviarTodas = pacientesConEmail > 0 && puedeImprimir && !emailFlowActive;
+  const puedeEnviarTodas =
+    pacientesActivos.length > 0 && puedeImprimir && !emailFlowActive;
 
   function handleNavigate(target: AppNavTarget) {
     setModule(target.module);
@@ -1034,13 +1016,11 @@ export default function App() {
             className="btn btn-primary"
             disabled={!puedeEnviarTodas}
             title={
-              pacientesConEmail === 0
-                ? "Ningún paciente tiene email"
-                : emailFlowActive
-                  ? ordenEmailSession?.preparing
-                    ? "Preparando email…"
-                    : "Revisá el email antes de enviar"
-                  : `Enviar órdenes por mail (${pacientesConEmail})`
+              emailFlowActive
+                ? ordenEmailSession?.preparing
+                  ? "Preparando email…"
+                  : "Revisá el email antes de enviar"
+                : `Enviar órdenes por mail (${pacientesActivos.length})`
             }
             onClick={() => solicitarEnviar(pacientesActivos)}
           >
@@ -1089,14 +1069,14 @@ export default function App() {
                 <col className="col-nombre" />
                 <col className="col-email" />
                 <col className="col-medico" />
-                <col className="col-actions" />
+                <col className="col-actions col-actions--5" />
               </colgroup>
               <thead>
                 <tr>
                   <th>Nombre</th>
                   <th>Email</th>
                   <th>Profesional</th>
-                  <th className="fl-col-actions">Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--5" aria-label="Acciones" />
                 </tr>
               </thead>
               {pacientesFiltrados.length > 0 ? (
@@ -1140,23 +1120,20 @@ export default function App() {
                             </span>
                           )}
                         </td>
-                        <td className="fl-col-actions">
-                          <div className="fl-table-actions">
+                        <td className="fl-col-actions fl-col-actions--5">
+                          <div className="fl-table-actions fl-table-actions--5">
                             <button
                               type="button"
                               className="fl-icon-btn fl-icon-btn--mail"
                               title={
                                 !p.activo
                                   ? "Paciente inactivo"
-                                  : p.email?.trim()
-                                    ? "Enviar orden por email"
-                                    : "Sin email — cargalo en el paciente"
+                                  : "Enviar orden por email"
                               }
                               aria-label="Enviar orden por email"
                               disabled={
                                 !p.activo ||
                                 emailFlowActive ||
-                                !p.email?.trim() ||
                                 !medicoParaPaciente(p)
                               }
                               onClick={() => solicitarEnviar([p])}
@@ -1314,7 +1291,7 @@ export default function App() {
                 <col className="col-especialidad" />
                 <col className="col-matricula" />
                 <col className="col-firma" />
-                <col className="col-actions" />
+                <col className="col-actions col-actions--5" />
               </colgroup>
               <thead>
                 <tr>
@@ -1322,7 +1299,7 @@ export default function App() {
                   <th>Especialidad</th>
                   <th>Matrícula</th>
                   <th>Firma</th>
-                  <th className="fl-col-actions">Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--5" aria-label="Acciones" />
                 </tr>
               </thead>
               {medicosFiltrados.length > 0 ? (
@@ -1389,8 +1366,8 @@ export default function App() {
                             );
                           })()}
                         </td>
-                        <td className="fl-col-actions">
-                          <div className="fl-table-actions">
+                        <td className="fl-col-actions fl-col-actions--5">
+                          <div className="fl-table-actions fl-table-actions--5">
                             <button
                               type="button"
                               className="fl-icon-btn fl-icon-btn--default"

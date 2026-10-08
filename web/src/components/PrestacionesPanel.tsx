@@ -150,7 +150,7 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
                 <th className="fl-col-prest-num">Duración</th>
                 <th className="fl-col-prest-num">Efect/Transf</th>
                 <th className="fl-col-prest-num">3 cuotas</th>
-                <th className="fl-col-actions fl-col-actions--3">Acciones</th>
+                <th className="fl-col-actions fl-col-actions--3" aria-label="Acciones" />
               </tr>
             </thead>
             {!loading && filtradas.length > 0 ? (
@@ -170,7 +170,7 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
                     <td className="fl-col-prest-num">{formatMoney(p.precioEfectivo)}</td>
                     <td className="fl-col-prest-num">{formatMoney(p.precio3Cuotas)}</td>
                     <td className="fl-col-actions fl-col-actions--3">
-                      <div className="fl-table-actions">
+                      <div className="fl-table-actions fl-table-actions--3">
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--view"
