@@ -25,7 +25,10 @@ import whatsappCrmRoutes from "./routes/whatsapp-crm.routes.js";
 import { ensureUploadsDir, firmaCandidateIds, resolveFirmaPath } from "./services/image.service.js";
 import { listMedicos } from "./services/db.service.js";
 import { ensurePamiUploadsDir } from "./services/pami-files.service.js";
-import { ensurePedidosUploadsDir } from "./services/pedidos-files.service.js";
+import {
+  ensurePedidosUploadsDir,
+  resolvePedidoFotoPath,
+} from "./services/pedidos-files.service.js";
 
 const app = express();
 
@@ -99,6 +102,18 @@ app.use(
     },
   }),
 );
+/** Pedidos: si el archivo está en una ruta legacy, lo recupera antes de servir. */
+app.use("/uploads/pedidos", async (req, _res, next) => {
+  try {
+    const fileName = path.basename(String(req.path ?? ""));
+    if (fileName && !fileName.includes("..")) {
+      await resolvePedidoFotoPath(fileName);
+    }
+  } catch (error) {
+    console.error("[uploads/pedidos] No se pudo resolver adjunto", req.path, error);
+  }
+  next();
+});
 app.use(
   "/uploads/pedidos",
   express.static(uploadsPedidosDir(), {

@@ -51,6 +51,18 @@ export function uploadsPedidosDir(): string {
   return path.join(uploadsRootDir(), "pedidos");
 }
 
+/** Rutas históricas donde a veces quedaron adjuntos de pedidos. */
+export function legacyPedidoDirs(): string[] {
+  const root = uploadsRootDir();
+  return [
+    path.join(uploadsFirmasDir(), "pedidos"),
+    path.join(API_ROOT, "pedidos"),
+    path.join(API_ROOT, "uploads", "pedidos"),
+    path.join(path.dirname(API_ROOT), "uploads", "pedidos"),
+    path.join(path.dirname(root), "pedidos"),
+  ];
+}
+
 /** Rutas históricas / mal configuradas donde a veces quedaron PDFs. */
 export function legacyPresupuestoPdfDirs(): string[] {
   const root = uploadsRootDir();
