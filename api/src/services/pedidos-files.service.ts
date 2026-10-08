@@ -1,6 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { legacyPedidoDirs, uploadsPedidosDir } from "../config/paths.js";
+import {
+  API_ROOT,
+  legacyPedidoDirs,
+  uploadsFirmasDir,
+  uploadsPedidosDir,
+  uploadsRootDir,
+} from "../config/paths.js";
 
 export async function ensurePedidosUploadsDir(): Promise<void> {
   await fs.mkdir(uploadsPedidosDir(), { recursive: true });
@@ -45,7 +51,14 @@ export function pedidoFotoFileNameFromUrl(url: string): string | null {
 function candidatePedidoFotoPaths(fileName: string): string[] {
   const primary = path.join(uploadsPedidosDir(), fileName);
   const legacy = legacyPedidoDirs().map((dir) => path.join(dir, fileName));
-  return [...new Set([primary, ...legacy])];
+  const extra = [
+    path.join(uploadsRootDir(), fileName),
+    path.join(uploadsFirmasDir(), fileName),
+    path.join(uploadsFirmasDir(), "pedidos", fileName),
+    path.join(API_ROOT, "uploads", "pedidos", fileName),
+    path.join(API_ROOT, "pedidos", fileName),
+  ];
+  return [...new Set([primary, ...legacy, ...extra])];
 }
 
 async function isReadableFile(filePath: string): Promise<boolean> {
@@ -56,6 +69,39 @@ async function isReadableFile(filePath: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
+}
+
+/** Busca el archivo por nombre bajo uploads/ (por si quedó en una subcarpeta rara). */
+async function findPedidoFotoUnderUploads(fileName: string): Promise<string | null> {
+  const root = uploadsRootDir();
+  const queue: string[] = [root];
+  const seen = new Set<string>();
+  let depth = 0;
+
+  while (queue.length > 0 && depth < 4) {
+    const levelCount = queue.length;
+    for (let i = 0; i < levelCount; i += 1) {
+      const dir = queue.shift()!;
+      if (seen.has(dir)) continue;
+      seen.add(dir);
+      let entries: import("node:fs").Dirent[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name === fileName) {
+          if (await isReadableFile(full)) return full;
+        } else if (entry.isDirectory() && !entry.name.startsWith(".")) {
+          queue.push(full);
+        }
+      }
+    }
+    depth += 1;
+  }
+  return null;
 }
 
 export type ResolvePedidoFotoResult = {
@@ -88,7 +134,11 @@ export async function resolvePedidoFotoPathDetailed(
   const canonical = path.join(uploadsPedidosDir(), fileName);
   if (await isReadableFile(canonical)) return { path: canonical, recovered: false };
 
-  for (const candidate of candidatePedidoFotoPaths(fileName)) {
+  const candidates = candidatePedidoFotoPaths(fileName);
+  const deep = await findPedidoFotoUnderUploads(fileName);
+  if (deep) candidates.push(deep);
+
+  for (const candidate of [...new Set(candidates)]) {
     if (candidate === canonical) continue;
     if (!(await isReadableFile(candidate))) continue;
 
@@ -108,6 +158,9 @@ export async function resolvePedidoFotoPathDetailed(
     }
   }
 
+  console.warn(
+    `[pedido-files] No se encontró ${fileName} (canónico=${canonical}; root=${uploadsRootDir()})`,
+  );
   return { path: null, recovered: false };
 }
 

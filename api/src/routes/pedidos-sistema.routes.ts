@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { AuthedRequest } from "../middleware/auth.middleware.js";
+import path from "node:path";
 import {
   addPedidoSistemaFotos,
   completarPedidoSistema,
@@ -10,6 +11,10 @@ import {
   removePedidoSistemaFoto,
   updatePedidoSistema,
 } from "../services/db.service.js";
+import {
+  pedidoFotoFileNameFromUrl,
+  resolvePedidoFotoPath,
+} from "../services/pedidos-files.service.js";
 import type {
   AppUserPublic,
   PedidoSistema,
@@ -164,6 +169,64 @@ router.get("/:id", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al obtener pedido";
     res.status(message === "Pedido no encontrado" ? 404 : 400).json({ ok: false, message });
+  }
+});
+
+/** Igual que PDF de envíos: resolve + sendFile, o ADJUNTO_MISSING. */
+router.get("/:id/fotos/:fileName", async (req, res) => {
+  try {
+    const user = viewer(req as AuthedRequest);
+    const id = paramId(req);
+    const pedido = await getPedidoSistema(id, { recoverFotos: false });
+    assertPuedeVer(pedido, user);
+
+    const fileName = String(req.params.fileName ?? "").trim();
+    if (!fileName || fileName.includes("..") || fileName.includes("/") || fileName.includes("\\")) {
+      res.status(400).json({ ok: false, message: "Nombre de archivo inválido" });
+      return;
+    }
+
+    const belongs = pedido.fotos.some((f) => pedidoFotoFileNameFromUrl(f.url) === fileName);
+    if (!belongs) {
+      res.status(404).json({
+        ok: false,
+        code: "ADJUNTO_MISSING",
+        message: "Adjunto no encontrado en el pedido",
+      });
+      return;
+    }
+
+    // Igual que PDF: resolve (legacy → canónico) y después sendFile.
+    const filePath = await resolvePedidoFotoPath(fileName);
+    if (!filePath) {
+      res.status(404).json({
+        ok: false,
+        code: "ADJUNTO_MISSING",
+        message: "El adjunto no está en el servidor. Si sos el creador, volvé a subirlo.",
+      });
+      return;
+    }
+
+    const ext = path.extname(fileName).toLowerCase();
+    const type =
+      ext === ".png"
+        ? "image/png"
+        : ext === ".jpg" || ext === ".jpeg"
+          ? "image/jpeg"
+          : ext === ".webp"
+            ? "image/webp"
+            : ext === ".gif"
+              ? "image/gif"
+              : ext === ".pdf"
+                ? "application/pdf"
+                : "application/octet-stream";
+
+    res.setHeader("Content-Type", type);
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error al leer el adjunto";
+    res.status(message === "Pedido no encontrado" ? 404 : 500).json({ ok: false, message });
   }
 });
 

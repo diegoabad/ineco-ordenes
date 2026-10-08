@@ -1742,13 +1742,16 @@ export async function listPedidosSistema(): Promise<PedidoSistema[]> {
   );
 }
 
-export async function getPedidoSistema(id: string): Promise<PedidoSistema> {
+export async function getPedidoSistema(
+  id: string,
+  opts?: { recoverFotos?: boolean },
+): Promise<PedidoSistema> {
   const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
   if (!existing.exists()) throw new Error("Pedido no encontrado");
   let pedido = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
 
   // Al abrir: recuperar adjuntos desde rutas legacy y refrescar cache-bust si hace falta.
-  if (pedido.fotos.length > 0) {
+  if (opts?.recoverFotos !== false && pedido.fotos.length > 0) {
     const { fotos, changed } = await ensurePedidoFotosResolved(pedido.fotos);
     if (changed) {
       pedido = { ...pedido, fotos, actualizadoAt: nowIso() };

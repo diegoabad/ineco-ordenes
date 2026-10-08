@@ -8991,6 +8991,11 @@ tbody tr.is-inactive td {
   height: 3.5rem;
 }
 
+.pedidos-adjuntos__thumb.is-missing .pedidos-adjuntos__file {
+  opacity: 0.55;
+  outline: 1px dashed var(--danger);
+}
+
 .pedidos-adjuntos__item a {
   display: block;
   width: 3.5rem;

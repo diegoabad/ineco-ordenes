@@ -5,7 +5,6 @@ import path from "node:path";
 import {
   uploadsEnviosDir,
   uploadsPamiDir,
-  uploadsPedidosDir,
   uploadsPresupuestosDir,
 } from "./config/paths.js";
 import { requireAuth, requireModule } from "./middleware/auth.middleware.js";
@@ -102,28 +101,36 @@ app.use(
     },
   }),
 );
-/** Pedidos: si el archivo está en una ruta legacy, lo recupera antes de servir. */
-app.use("/uploads/pedidos", async (req, _res, next) => {
+/**
+ * Pedidos: igual que firmas / PDF de envíos.
+ * Resuelve rutas legacy, copia a canónico y sirve con sendFile (no express.static).
+ */
+app.get("/uploads/pedidos/:filename", async (req, res, next) => {
   try {
-    const fileName = path.basename(String(req.path ?? ""));
-    if (fileName && !fileName.includes("..")) {
-      await resolvePedidoFotoPath(fileName);
+    const filename = String(req.params.filename ?? "").trim();
+    if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+      res.status(400).end();
+      return;
     }
+
+    const resolved = await resolvePedidoFotoPath(filename);
+    if (!resolved) {
+      res.status(404).json({
+        ok: false,
+        code: "ADJUNTO_MISSING",
+        message: "El adjunto no está en el servidor. Si sos el creador, volvé a subirlo.",
+      });
+      return;
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(path.resolve(resolved), (err) => {
+      if (err) next(err);
+    });
   } catch (error) {
-    console.error("[uploads/pedidos] No se pudo resolver adjunto", req.path, error);
+    next(error);
   }
-  next();
 });
-app.use(
-  "/uploads/pedidos",
-  express.static(uploadsPedidosDir(), {
-    etag: false,
-    lastModified: false,
-    setHeaders(res) {
-      res.setHeader("Cache-Control", "no-store");
-    },
-  }),
-);
 
 /** Proxy Medexis antes de express.json (necesita el body crudo). */
 app.use(
