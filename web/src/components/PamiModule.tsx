@@ -454,7 +454,7 @@ export function PamiModule({ section, onSectionChange }: Props) {
                     <th className="pami-col-num">Observadas</th>
                     <th className="pami-col-num">OPs</th>
                     <th className="pami-col-motivo">Motivo</th>
-                    <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                    <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
                   </tr>
                 </thead>
                 {!loadingHist && historial.length > 0 ? (

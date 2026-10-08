@@ -2824,18 +2824,20 @@ button.chip--button:disabled {
 
 .col-hist-fechahora {
   width: 12.75rem;
+  min-width: 12.75rem;
+  max-width: 12.75rem;
 }
 
-.col-hist-paciente {
-  width: 28%;
-}
-
+.col-hist-paciente,
 .col-hist-mail {
-  width: 32%;
+  width: auto;
+  min-width: 0;
 }
 
 .col-hist-estado {
   width: 8.5rem;
+  min-width: 8.5rem;
+  max-width: 8.5rem;
 }
 
 .col-presup-fecha,
@@ -3967,33 +3969,29 @@ tbody tr.is-inactive td {
   padding-left: 1.25rem;
 }
 
-/* Pacientes: Nombre / Email / Profesional + acciones fijas */
-.col-nombre {
-  width: 32%;
-}
-
-.col-email {
-  width: 34%;
-}
-
-.col-medico {
-  width: 22%;
+/* Pacientes / profesionales: el sobrante lo absorben las cols flexibles, no Acciones. */
+.col-nombre,
+.col-email,
+.col-medico,
+.col-especialidad {
+  width: auto;
+  min-width: 0;
 }
 
 .col-diagnostico {
   width: 16%;
 }
 
-.col-especialidad {
-  /* resto junto a nombre */
-}
-
 .col-matricula {
-  width: 14%;
+  width: 7.5rem;
+  min-width: 7.5rem;
+  max-width: 7.5rem;
 }
 
 .col-firma {
-  width: 14%;
+  width: 6.5rem;
+  min-width: 6.5rem;
+  max-width: 6.5rem;
 }
 
 .col-actions {
@@ -7175,11 +7173,11 @@ tbody tr.is-inactive td {
   table-layout: fixed;
 }
 
-/* Acciones fija; el resto se reparte en partes iguales */
+/* Acciones con ancho adaptativo (--2); el resto se reparte en partes iguales */
 .pami-table--historial .pami-col-mes,
 .pami-table--historial .pami-col-num,
 .pami-table--historial .pami-col-motivo {
-  width: calc((100% - 5.1rem) / 5);
+  width: calc((100% - (2 * 1.85rem + 1 * 0.15rem + 0.6rem)) / 5);
   text-align: center;
   white-space: nowrap;
 }
@@ -7199,11 +7197,11 @@ tbody tr.is-inactive td {
 
 .pami-table--historial .fl-col-actions,
 .pami-table--historial .fl-col-actions--2 {
-  width: 6.5rem;
-  min-width: 6.5rem;
-  max-width: 6.5rem;
-  padding-left: 0.35rem;
-  padding-right: 0.5rem;
+  width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  min-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  max-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  padding-left: 0.2rem;
+  padding-right: 0.4rem;
 }
 
 .pami-table--historial tbody tr {
@@ -7813,11 +7811,11 @@ tbody tr.is-inactive td {
 }
 
 .pedidos-cell-text {
-  display: inline-block;
+  display: block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  vertical-align: bottom;
+  white-space: nowrap;
 }
 
 .fl-modal--pedido-completar {
@@ -7840,12 +7838,25 @@ tbody tr.is-inactive td {
 }
 
 .pedidos-col-usuario {
-  width: 10.75rem;
-  min-width: 10.75rem;
-  max-width: 10.75rem;
+  width: 8.5rem;
+  min-width: 8.5rem;
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pedidos-col-titulo {
+  width: 9.5rem;
+  min-width: 9.5rem;
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pedidos-col-detalle {
+  width: auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7863,12 +7874,6 @@ tbody tr.is-inactive td {
 
 .pedidos-col-select .pedidos-color-select {
   width: 8.25rem;
-}
-
-.pedidos-col-actions {
-  width: 6.5rem;
-  min-width: 6.5rem;
-  max-width: 6.5rem;
 }
 
 .pedidos-color-select {

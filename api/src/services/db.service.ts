@@ -1442,6 +1442,7 @@ export type AceptarPresupuestoInput = {
   enviarEmail: boolean;
   subject?: string;
   body?: string;
+  email?: string;
 };
 
 export type AceptarPresupuestoResult = {
@@ -1478,12 +1479,15 @@ export async function aceptarPresupuesto(
   }
 
   try {
-    if (!current.email.trim()) {
-      throw new Error("El presupuesto no tiene email cargado");
+    const toEmail = joinEmails(
+      parseEmailList(input.email ?? current.email).filter(isEmailAddress),
+    );
+    if (!toEmail) {
+      throw new Error("Ingresá al menos un email válido");
     }
     current = await ensurePresupuestoLinkPago(id);
     await sendLinkPagoEmail({
-      toEmail: current.email,
+      toEmail,
       nombrePaciente: current.nombrePaciente,
       profesional: current.profesional,
       fechaPresupuesto: current.fecha,

@@ -382,7 +382,7 @@ export function UsuariosPanel() {
               <thead>
                 <tr>
                   <th>Dominio</th>
-                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
                 </tr>
               </thead>
               {!domainsLoading && domains.length > 0 ? (
@@ -443,7 +443,7 @@ export function UsuariosPanel() {
                   <th>Nombre</th>
                   <th>Email</th>
                   <th>{tab === "pending" ? "Solicitado" : "Rol"}</th>
-                  <th className="fl-col-actions fl-col-actions--2">Acciones</th>
+                  <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
                 </tr>
               </thead>
               {!loading && users.length > 0 ? (
@@ -479,7 +479,7 @@ export function UsuariosPanel() {
                               </button>
                               <button
                                 type="button"
-                                className="fl-icon-btn fl-icon-btn--danger"
+                                className="fl-icon-btn fl-icon-btn--warning"
                                 title="Rechazar"
                                 onClick={() => setRejectTarget(u)}
                               >

@@ -216,6 +216,7 @@ router.post("/pacientes/:id/enviar-orden", requireAuth, requireModule("ordenes")
 
     const subject = String(req.body?.subject ?? "").trim();
     const emailBody = typeof req.body?.body === "string" ? req.body.body : "";
+    const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
 
     const result = await sendOrdenEmail({
       pacienteId: id,
@@ -223,6 +224,7 @@ router.post("/pacientes/:id/enviar-orden", requireAuth, requireModule("ordenes")
       filename: typeof req.body?.filename === "string" ? req.body.filename : undefined,
       fecha: typeof req.body?.fecha === "string" ? req.body.fecha : undefined,
       medicoNombre: typeof req.body?.medicoNombre === "string" ? req.body.medicoNombre : undefined,
+      email: email || undefined,
       subject: subject || undefined,
       body: emailBody.trim() ? emailBody : undefined,
     });

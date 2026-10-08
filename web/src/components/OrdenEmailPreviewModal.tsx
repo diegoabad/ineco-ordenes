@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
-import { formatNombrePersona } from "../lib/nombrePersona";
+import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
 import { buildOrdenEmailVars, renderOrdenEmailPreview } from "../lib/ordenEmail";
 import { enviarOrdenEmail, fetchEmailConfig } from "../services/dataService";
 import type { Paciente } from "../types";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
+import { EmailChipsInput } from "./EmailChipsInput";
 import { Modal } from "./Modal";
 
 export type OrdenEmailDraft = {
@@ -40,6 +41,7 @@ export function OrdenEmailPreviewModal({
   const [loadError, setLoadError] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [toEmails, setToEmails] = useState("");
   const [editorKey, setEditorKey] = useState(0);
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export function OrdenEmailPreviewModal({
     setLoadError("");
     setSubject("");
     setBody("");
+    setToEmails(current.paciente.email ?? "");
 
     void (async () => {
       try {
@@ -96,6 +99,11 @@ export function OrdenEmailPreviewModal({
       toast.warning("El cuerpo del email no puede estar vacío");
       return;
     }
+    const email = joinEmails(parseEmailList(toEmails).filter(isEmailAddress));
+    if (!email) {
+      toast.warning("Ingresá al menos un email válido");
+      return;
+    }
 
     setSending(true);
     try {
@@ -105,6 +113,7 @@ export function OrdenEmailPreviewModal({
         filename: draft.filename,
         fecha: draft.fecha,
         medicoNombre: draft.medicoNombre,
+        email,
         subject: subject.trim(),
         body,
       });
@@ -121,6 +130,7 @@ export function OrdenEmailPreviewModal({
   if (!open || !draft) return null;
 
   const disabled = loading || sending || Boolean(loadError);
+  const emailListo = parseEmailList(toEmails).some(isEmailAddress);
   const title = queueLabel
     ? `Revisar email de la orden (${queueLabel})`
     : "Revisar email de la orden";
@@ -147,7 +157,7 @@ export function OrdenEmailPreviewModal({
             type="button"
             className="btn btn-primary"
             onClick={() => void handleEnviar()}
-            disabled={disabled || !subject.trim() || !body.trim()}
+            disabled={disabled || !subject.trim() || !body.trim() || !emailListo}
           >
             {sending ? "Enviando…" : queueLabel ? "Enviar y continuar" : "Enviar orden"}
           </button>
@@ -164,23 +174,11 @@ export function OrdenEmailPreviewModal({
         <div className="form-stack">
           <div className="form-group">
             <label htmlFor="orden-email-preview-to">Para</label>
-            <input
+            <EmailChipsInput
               id="orden-email-preview-to"
-              type="email"
-              value={draft.paciente.email}
-              readOnly
-              disabled
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="orden-email-preview-paciente">Paciente</label>
-            <input
-              id="orden-email-preview-paciente"
-              type="text"
-              value={formatNombrePersona(draft.paciente.paciente)}
-              readOnly
-              disabled
+              value={toEmails}
+              disabled={disabled}
+              onChange={setToEmails}
             />
           </div>
 

@@ -4,6 +4,7 @@ import {
   buildPresupuestoEmailVarsFromPresupuesto,
   renderLinkPagoEmailPreview,
 } from "../lib/presupuestoEmail";
+import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
 import {
   aceptarPresupuesto,
   fetchPresupuestoEmailConfig,
@@ -31,8 +32,8 @@ export function PresupuestoLinkPagoEmailModal({
   const [saving, setSaving] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [toEmails, setToEmails] = useState("");
   const [editorKey, setEditorKey] = useState(0);
-  const [prepared, setPrepared] = useState<Presupuesto | null>(null);
 
   useEffect(() => {
     if (!open || !presupuesto) return;
@@ -42,13 +43,13 @@ export function PresupuestoLinkPagoEmailModal({
     setLoading(true);
     setSubject("");
     setBody("");
-    setPrepared(null);
+    setToEmails(current.email);
 
     void (async () => {
       try {
         const withLink = await prepararPresupuestoLinkPago(current.id);
         if (cancelled) return;
-        setPrepared(withLink);
+        setToEmails((prev) => prev.trim() || withLink.email);
 
         const { data: config } = await fetchPresupuestoEmailConfig();
         if (cancelled) return;
@@ -91,8 +92,9 @@ export function PresupuestoLinkPagoEmailModal({
       toast.warning("El cuerpo del email no puede estar vacío");
       return;
     }
-    if (!(prepared?.email || presupuesto.email).trim()) {
-      toast.warning("El presupuesto no tiene email cargado");
+    const email = joinEmails(parseEmailList(toEmails).filter(isEmailAddress));
+    if (!email) {
+      toast.warning("Ingresá al menos un email válido");
       return;
     }
 
@@ -104,6 +106,7 @@ export function PresupuestoLinkPagoEmailModal({
           enviarEmail: true,
           subject: subject.trim(),
           body,
+          email,
         },
       );
       onDone(updated);
@@ -127,7 +130,7 @@ export function PresupuestoLinkPagoEmailModal({
   if (!open || !presupuesto) return null;
 
   const disabled = loading || saving;
-  const email = prepared?.email || presupuesto.email;
+  const emailListo = parseEmailList(toEmails).some(isEmailAddress);
 
   return (
     <Modal
@@ -151,7 +154,7 @@ export function PresupuestoLinkPagoEmailModal({
             type="button"
             className="btn btn-primary"
             onClick={() => void handleEnviar()}
-            disabled={disabled || !subject.trim() || !body.trim() || !email.trim()}
+            disabled={disabled || !subject.trim() || !body.trim() || !emailListo}
           >
             {saving ? "Enviando…" : "Enviar"}
           </button>
@@ -164,7 +167,12 @@ export function PresupuestoLinkPagoEmailModal({
         <div className="form-stack">
           <div className="form-group">
             <label htmlFor="presup-link-pago-to">Para</label>
-            <EmailChipsInput id="presup-link-pago-to" value={email} readOnly />
+            <EmailChipsInput
+              id="presup-link-pago-to"
+              value={toEmails}
+              disabled={disabled}
+              onChange={setToEmails}
+            />
           </div>
 
           <div className="form-group">
