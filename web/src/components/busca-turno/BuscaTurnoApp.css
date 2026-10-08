@@ -867,16 +867,17 @@
   font-size: 1rem;
   font-weight: 700;
   color: var(--color-text);
-  padding: 0.2rem 0.15rem 0.65rem;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
-  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #e8d5db;
+  border-bottom: 1px solid #e8d5db;
+  margin: 0 0 0.7rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   text-transform: capitalize;
-  background: transparent;
+  background: linear-gradient(180deg, #f7eef1 0%, #f1e4e9 100%);
+  border-radius: var(--radius-sm, 8px);
   cursor: pointer;
   font-family: inherit;
   text-align: left;
@@ -884,8 +885,6 @@
 
 .day-group.is-collapsed .day-header {
   margin-bottom: 0;
-  padding-bottom: 0.15rem;
-  border-bottom: none;
 }
 
 .day-header-main {
@@ -992,11 +991,11 @@
 
 .slot-card-compact {
   width: auto;
-  min-width: 3.75rem;
+  min-width: 4.35rem;
   max-width: none;
   height: 2.15rem;
-  padding: 0 0.7rem;
-  border-radius: 999px;
+  padding: 0 0.55rem;
+  border-radius: 8px;
   text-align: center;
   flex: 0 0 auto;
   background: #fff;
@@ -1004,6 +1003,29 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.35rem;
+}
+
+.slot-mod-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted, #8a7a82);
+  flex: 0 0 auto;
+  line-height: 0;
+  opacity: 0.95;
+}
+
+.slot-card-compact:hover .slot-mod-icon {
+  color: var(--color-primary);
+}
+
+.slot-card--virtual .slot-mod-icon {
+  color: #3b6ea5;
+}
+
+.slot-card--presencial .slot-mod-icon {
+  color: #7a6a72;
 }
 
 button.slot-card.slot-card-compact {
@@ -1231,6 +1253,12 @@ button.slot-card.slot-card-compact:focus-visible {
   margin: 0;
 }
 
+/* Modal asignar turno: un poco más ancho que el fl-modal base */
+.fl-modal.fl-modal--busca-asignar {
+  width: min(520px, calc(100vw - 2rem));
+  max-width: min(520px, calc(100vw - 2rem));
+}
+
 .modal-persona {
   margin-bottom: 1.25rem;
   padding: 1rem;
@@ -1245,6 +1273,15 @@ button.slot-card.slot-card-compact:focus-visible {
 
 .modal-persona p:last-child {
   margin-bottom: 0;
+}
+
+.modal-persona .modal-persona-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--color-text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .modal-actions {

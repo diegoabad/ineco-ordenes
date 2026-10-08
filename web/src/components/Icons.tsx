@@ -461,3 +461,30 @@ export function IconPalette(p: IconProps) {
   );
 }
 
+/** Edificio / presencial. */
+export function IconBuilding(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M4 21V7l8-4 8 4v14" />
+      <path d="M9 21v-6h6v6" />
+      <path d="M9 10h.01" />
+      <path d="M15 10h.01" />
+      <path d="M9 14h.01" />
+      <path d="M15 14h.01" />
+    </svg>
+  );
+}
+
+/** Monitor / virtual. */
+export function IconMonitor(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
+}
+

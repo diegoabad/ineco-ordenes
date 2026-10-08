@@ -153,6 +153,8 @@ export default function App() {
   const [busquedaMedicos, setBusquedaMedicos] = useState("");
   const [filtroPacientes, setFiltroPacientes] = useState<FiltroActivo>("activos");
   const [filtroMedicos, setFiltroMedicos] = useState<FiltroActivo>("activos");
+  const [selectedPacienteIds, setSelectedPacienteIds] = useState<string[]>([]);
+  const selectAllPacientesRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [savingMedico, setSavingMedico] = useState(false);
@@ -387,6 +389,57 @@ export default function App() {
     pacientesFiltrados,
     `${filtroPacientes}|${qPacientes}`,
   );
+
+  /** Solo activos visibles (filtro/búsqueda) se pueden marcar para envío masivo. */
+  const pacientesSeleccionables = useMemo(
+    () => pacientesFiltrados.filter((p) => p.activo),
+    [pacientesFiltrados],
+  );
+  const selectedPacienteIdSet = useMemo(
+    () => new Set(selectedPacienteIds),
+    [selectedPacienteIds],
+  );
+  const pacientesSeleccionados = useMemo(
+    () => pacientesSeleccionables.filter((p) => selectedPacienteIdSet.has(p.id)),
+    [pacientesSeleccionables, selectedPacienteIdSet],
+  );
+  const allPacientesSelected =
+    pacientesSeleccionables.length > 0 &&
+    pacientesSeleccionados.length === pacientesSeleccionables.length;
+  const somePacientesSelected =
+    pacientesSeleccionados.length > 0 && !allPacientesSelected;
+
+  useEffect(() => {
+    const el = selectAllPacientesRef.current;
+    if (el) el.indeterminate = somePacientesSelected;
+  }, [somePacientesSelected, allPacientesSelected]);
+
+  useEffect(() => {
+    const alive = new Set(pacientes.map((p) => p.id));
+    setSelectedPacienteIds((prev) => {
+      const next = prev.filter((id) => alive.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [pacientes]);
+
+  function toggleSeleccionarTodosPacientes() {
+    if (allPacientesSelected) {
+      const visible = new Set(pacientesSeleccionables.map((p) => p.id));
+      setSelectedPacienteIds((prev) => prev.filter((id) => !visible.has(id)));
+      return;
+    }
+    setSelectedPacienteIds((prev) => {
+      const next = new Set(prev);
+      for (const p of pacientesSeleccionables) next.add(p.id);
+      return [...next];
+    });
+  }
+
+  function toggleSeleccionarPaciente(id: string) {
+    setSelectedPacienteIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
 
   async function handleMedicoSeleccionadoChange(
     id: string | null,
@@ -844,8 +897,8 @@ export default function App() {
     medicoPorDefecto || pacientesActivos.some((p) => p.medicoId),
   );
   const emailFlowActive = enviandoTodas || ordenEmailSession !== null;
-  const puedeEnviarTodas =
-    pacientesActivos.length > 0 && puedeImprimir && !emailFlowActive;
+  const puedeEnviarSeleccionados =
+    pacientesSeleccionados.length > 0 && puedeImprimir && !emailFlowActive;
 
   function handleNavigate(target: AppNavTarget) {
     setModule(target.module);
@@ -1014,22 +1067,26 @@ export default function App() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!puedeEnviarTodas}
+            disabled={!puedeEnviarSeleccionados}
             title={
               emailFlowActive
                 ? ordenEmailSession?.preparing
                   ? "Preparando email…"
                   : "Revisá el email antes de enviar"
-                : `Enviar órdenes por mail (${pacientesActivos.length})`
+                : pacientesSeleccionados.length === 0
+                  ? "Seleccioná al menos un paciente"
+                  : `Enviar órdenes por mail (${pacientesSeleccionados.length})`
             }
-            onClick={() => solicitarEnviar(pacientesActivos)}
+            onClick={() => solicitarEnviar(pacientesSeleccionados)}
           >
             <IconMail size={16} />
             {emailFlowActive
               ? ordenEmailSession?.preparing
                 ? "Preparando…"
                 : "Revisando email…"
-              : "Enviar todas"}
+              : pacientesSeleccionados.length > 0
+                ? `Enviar seleccionados (${pacientesSeleccionados.length})`
+                : "Enviar seleccionados"}
           </button>
         </div>
       </header>
@@ -1073,7 +1130,19 @@ export default function App() {
               </colgroup>
               <thead>
                 <tr>
-                  <th>Nombre</th>
+                  <th>
+                    <label className="pacientes-check pacientes-check--head">
+                      <input
+                        ref={selectAllPacientesRef}
+                        type="checkbox"
+                        checked={allPacientesSelected}
+                        disabled={pacientesSeleccionables.length === 0 || emailFlowActive}
+                        onChange={toggleSeleccionarTodosPacientes}
+                        aria-label="Seleccionar todos los pacientes visibles"
+                      />
+                      <span>Nombre</span>
+                    </label>
+                  </th>
                   <th>Email</th>
                   <th>Profesional</th>
                   <th className="fl-col-actions fl-col-actions--5" aria-label="Acciones" />
@@ -1083,15 +1152,33 @@ export default function App() {
                 <tbody>
                   {pacientesPage.pageItems.map((p) => {
                     const medicoNombre = nombreMedico(p.medicoId);
+                    const seleccionado = selectedPacienteIdSet.has(p.id);
                     return (
-                      <tr key={p.id} className={p.activo ? undefined : "is-inactive"}>
+                      <tr
+                        key={p.id}
+                        className={[
+                          p.activo ? "" : "is-inactive",
+                          seleccionado ? "is-selected" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined}
+                      >
                         <td>
-                          <span className="fl-texto-principal">{formatNombrePersona(p.paciente)}</span>
-                          {!p.activo ? (
-                            <span className="chip chip--muted" style={{ marginLeft: "0.4rem" }}>
-                              Inactivo
+                          <label className="pacientes-check">
+                            <input
+                              type="checkbox"
+                              checked={seleccionado}
+                              disabled={!p.activo || emailFlowActive}
+                              onChange={() => toggleSeleccionarPaciente(p.id)}
+                              aria-label={`Seleccionar ${formatNombrePersona(p.paciente)}`}
+                            />
+                            <span className="fl-texto-principal">
+                              {formatNombrePersona(p.paciente)}
                             </span>
-                          ) : null}
+                            {!p.activo ? (
+                              <span className="chip chip--muted">Inactivo</span>
+                            ) : null}
+                          </label>
                         </td>
                         <td className="fl-col-email">
                           {p.email?.trim() ? (
