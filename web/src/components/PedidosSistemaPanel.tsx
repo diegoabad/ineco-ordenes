@@ -4,9 +4,12 @@ import { useAuth } from "../auth/AuthContext";
 import { usePedidosPendientes } from "../auth/PedidosPendientesContext";
 import { resolveAssetUrl } from "../config/api";
 import {
+  addPedidoSistemaFotos,
   completarPedidoSistema,
   deletePedidoSistema,
+  fetchPedidoSistema,
   fetchPedidosSistema,
+  removePedidoSistemaFoto,
   updatePedidoSistema,
 } from "../services/dataService";
 import type {
@@ -18,7 +21,7 @@ import {
   PEDIDO_SECCION_LABEL,
 } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { IconCheck, IconFile, IconPlus, IconSearch, IconTrash, IconX } from "./Icons";
+import { IconCheck, IconFile, IconPlus, IconSearch, IconTrash, IconUpload, IconX } from "./Icons";
 import { LoadingBlock } from "./InecoMark";
 import { Modal } from "./Modal";
 import { PedidoSistemaFormModal } from "./PedidoSistemaFormModal";
@@ -26,6 +29,9 @@ import { PedidosColorSelect, type PedidosColorOption } from "./PedidosColorSelec
 import { formatNombrePersona } from "../lib/nombrePersona";
 import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
+
+const MAX_ADJUNTOS = 8;
+const MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
 
 const PRIORIDAD_OPTIONS: PedidosColorOption<PedidoSistemaPrioridad>[] = [
   { value: "baja", label: "Baja", tone: "amarillo" },
@@ -76,17 +82,47 @@ function isImageAdjunto(nombre: string, url: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(name);
 }
 
+function esCreadorPedido(pedido: PedidoSistema, userId?: string | null, email?: string | null): boolean {
+  if (pedido.creadoPorUserId && userId && pedido.creadoPorUserId === userId) return true;
+  const mine = email?.trim().toLowerCase() ?? "";
+  return Boolean(mine && pedido.creadoPorEmail?.trim().toLowerCase() === mine);
+}
+
+async function fileToFotoInput(file: File): Promise<{ base64: string; nombre: string; mime?: string }> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("No se pudo leer el archivo"));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
+  const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1]! : dataUrl;
+  return {
+    base64,
+    nombre: file.name,
+    ...(file.type ? { mime: file.type } : {}),
+  };
+}
+
 export function PedidosSistemaPanel() {
   const { user } = useAuth();
   const dueno = user?.sistemas === true;
   const { pedidosPendientesCount } = usePedidosPendientes();
   const prevPendientes = useRef<number | null>(null);
+  const adjuntoInputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<PedidoSistema[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | PedidoSistemaEstado>("todos");
   const [formOpen, setFormOpen] = useState(false);
   const [viewing, setViewing] = useState<PedidoSistema | null>(null);
+  const [viewingLoading, setViewingLoading] = useState(false);
+  const [adjuntosBusy, setAdjuntosBusy] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [aBorrar, setABorrar] = useState<PedidoSistema | null>(null);
   const [aCompletar, setACompletar] = useState<PedidoSistema | null>(null);
@@ -192,6 +228,75 @@ export function PedidosSistemaPanel() {
     }
   }
 
+  function aplicarPedidoActualizado(updated: PedidoSistema) {
+    setItems((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setViewing((prev) => (prev?.id === updated.id ? updated : prev));
+  }
+
+  async function abrirDetalle(pedido: PedidoSistema) {
+    setViewing(pedido);
+    setViewingLoading(true);
+    try {
+      // Fuerza recover de adjuntos en el servidor (nginx no pasa por Express).
+      const fresh = await fetchPedidoSistema(pedido.id);
+      aplicarPedidoActualizado(fresh);
+    } catch (error) {
+      toast.warning(
+        error instanceof Error
+          ? error.message
+          : "No se pudieron recuperar los adjuntos del pedido",
+      );
+    } finally {
+      setViewingLoading(false);
+    }
+  }
+
+  async function onAgregarAdjuntos(files: FileList | null) {
+    if (!viewing || !files?.length || adjuntosBusy) return;
+    const room = MAX_ADJUNTOS - viewing.fotos.length;
+    if (room <= 0) {
+      toast.warning(`Podés adjuntar como máximo ${MAX_ADJUNTOS} archivos`);
+      return;
+    }
+
+    const picked = Array.from(files).slice(0, room);
+    const inputs: { base64: string; nombre: string; mime?: string }[] = [];
+    for (const file of picked) {
+      if (file.size > MAX_ADJUNTO_BYTES) {
+        toast.warning(`"${file.name}" supera 8 MB`);
+        continue;
+      }
+      inputs.push(await fileToFotoInput(file));
+    }
+    if (inputs.length === 0) return;
+
+    setAdjuntosBusy(true);
+    try {
+      const updated = await addPedidoSistemaFotos(viewing.id, inputs);
+      aplicarPedidoActualizado(updated);
+      toast.success(inputs.length === 1 ? "Adjunto agregado" : "Adjuntos agregados");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudieron subir los adjuntos");
+    } finally {
+      setAdjuntosBusy(false);
+      if (adjuntoInputRef.current) adjuntoInputRef.current.value = "";
+    }
+  }
+
+  async function onQuitarAdjunto(url: string) {
+    if (!viewing || adjuntosBusy) return;
+    setAdjuntosBusy(true);
+    try {
+      const updated = await removePedidoSistemaFoto(viewing.id, url);
+      aplicarPedidoActualizado(updated);
+      toast.success("Adjunto eliminado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo eliminar el adjunto");
+    } finally {
+      setAdjuntosBusy(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -256,7 +361,7 @@ export function PedidosSistemaPanel() {
                   <tr
                     key={p.id}
                     className="pedidos-row"
-                    onClick={() => setViewing(p)}
+                    onClick={() => void abrirDetalle(p)}
                   >
                     <td className="pedidos-col-fecha">
                       <span className="pedidos-cell-text" title={formatDateTime(p.creadoAt)}>
@@ -510,15 +615,45 @@ export function PedidosSistemaPanel() {
               </div>
 
               <div className="pedido-detalle__block">
-                <p className="pedido-detalle__label">Adjuntos</p>
+                <div className="pedido-detalle__adjuntos-head">
+                  <p className="pedido-detalle__label">Adjuntos</p>
+                  {esCreadorPedido(viewing, user?.id, user?.email) ? (
+                    <>
+                      <input
+                        ref={adjuntoInputRef}
+                        type="file"
+                        multiple
+                        hidden
+                        onChange={(e) => void onAgregarAdjuntos(e.target.files)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={
+                          adjuntosBusy ||
+                          viewingLoading ||
+                          viewing.fotos.length >= MAX_ADJUNTOS
+                        }
+                        onClick={() => adjuntoInputRef.current?.click()}
+                      >
+                        <IconUpload size={14} />
+                        {adjuntosBusy ? "Subiendo…" : "Subir"}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
                 <div className="pedidos-adjuntos">
-                    {viewing.fotos.length > 0 ? (
-                      <ul className="pedidos-adjuntos__grid">
-                        {viewing.fotos.map((f, idx) => {
-                          const src = fotoSrc(f.url);
-                          const image = isImageAdjunto(f.nombre, f.url);
-                          return (
-                            <li key={`${f.url}-${idx}`} className="pedidos-adjuntos__item">
+                  {viewingLoading && viewing.fotos.length === 0 ? (
+                    <p className="text-muted pedidos-adjuntos__empty">Cargando adjuntos…</p>
+                  ) : viewing.fotos.length > 0 ? (
+                    <ul className="pedidos-adjuntos__grid">
+                      {viewing.fotos.map((f, idx) => {
+                        const src = fotoSrc(f.url);
+                        const image = isImageAdjunto(f.nombre, f.url);
+                        const canEdit = esCreadorPedido(viewing, user?.id, user?.email);
+                        return (
+                          <li key={`${f.url}-${idx}`} className="pedidos-adjuntos__item">
+                            <div className="pedidos-adjuntos__thumb">
                               <a
                                 href={src}
                                 target="_blank"
@@ -530,18 +665,31 @@ export function PedidosSistemaPanel() {
                                   <img src={src} alt={f.nombre} />
                                 ) : (
                                   <span className="pedidos-adjuntos__file-icon" aria-hidden>
-                                    <IconFile size={28} />
+                                    <IconFile size={18} />
                                   </span>
                                 )}
                               </a>
-                              <span title={f.nombre}>{f.nombre}</span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : (
-                      <p className="text-muted pedidos-adjuntos__empty">Sin adjuntos</p>
-                    )}
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  className="fl-icon-btn fl-icon-btn--danger pedidos-adjuntos__remove"
+                                  title="Eliminar adjunto"
+                                  aria-label={`Eliminar ${f.nombre}`}
+                                  disabled={adjuntosBusy}
+                                  onClick={() => void onQuitarAdjunto(f.url)}
+                                >
+                                  <IconTrash size={12} />
+                                </button>
+                              ) : null}
+                            </div>
+                            <span title={f.nombre}>{f.nombre}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="text-muted pedidos-adjuntos__empty">Sin adjuntos</p>
+                  )}
                 </div>
               </div>
             </div>

@@ -33,7 +33,12 @@ import {
   emailConfigNeedsLegacyBodyUpgrade,
   type EmailConfig,
 } from "./email-templates.js";
-import { savePedidoFoto } from "./pedidos-files.service.js";
+import {
+  deletePedidoFotoFile,
+  ensurePedidoFotosResolved,
+  nextPedidoFotoIndex,
+  savePedidoFoto,
+} from "./pedidos-files.service.js";
 import {
   sendPedidoCompletadoEmail,
   sendPedidoSistemaEmail,
@@ -1740,7 +1745,18 @@ export async function listPedidosSistema(): Promise<PedidoSistema[]> {
 export async function getPedidoSistema(id: string): Promise<PedidoSistema> {
   const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
   if (!existing.exists()) throw new Error("Pedido no encontrado");
-  return normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+  let pedido = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+
+  // Al abrir: recuperar adjuntos desde rutas legacy y refrescar cache-bust si hace falta.
+  if (pedido.fotos.length > 0) {
+    const { fotos, changed } = await ensurePedidoFotosResolved(pedido.fotos);
+    if (changed) {
+      pedido = { ...pedido, fotos, actualizadoAt: nowIso() };
+      await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
+    }
+  }
+
+  return pedido;
 }
 
 export async function createPedidoSistema(
@@ -1835,6 +1851,70 @@ export async function updatePedidoSistema(
   return pedido;
 }
 
+const MAX_PEDIDO_FOTOS = 8;
+
+export async function addPedidoSistemaFotos(
+  id: string,
+  inputs: { base64: string; nombre: string; mime?: string }[],
+): Promise<PedidoSistema> {
+  const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+  if (!existing.exists()) throw new Error("Pedido no encontrado");
+  const current = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+
+  const room = MAX_PEDIDO_FOTOS - current.fotos.length;
+  if (room <= 0) throw new Error(`Podés adjuntar como máximo ${MAX_PEDIDO_FOTOS} archivos`);
+  const toAdd = inputs.slice(0, room);
+  if (toAdd.length === 0) throw new Error("No hay archivos para subir");
+
+  let index = nextPedidoFotoIndex(id, current.fotos);
+  const added: PedidoSistemaFoto[] = [];
+  for (const f of toAdd) {
+    const saved = await savePedidoFoto(
+      id,
+      index,
+      f.base64,
+      String(f.nombre ?? `foto-${index + 1}`),
+      f.mime,
+    );
+    added.push(saved);
+    index += 1;
+  }
+
+  const pedido: PedidoSistema = {
+    ...current,
+    fotos: [...current.fotos, ...added],
+    actualizadoAt: nowIso(),
+  };
+  await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
+  return pedido;
+}
+
+export async function removePedidoSistemaFoto(
+  id: string,
+  url: string,
+): Promise<PedidoSistema> {
+  const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
+  if (!existing.exists()) throw new Error("Pedido no encontrado");
+  const current = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+  const target = String(url ?? "").trim();
+  if (!target) throw new Error("Falta la URL del adjunto");
+
+  const targetBase = target.split("?")[0] ?? target;
+  const fotos = current.fotos.filter((f) => (f.url.split("?")[0] ?? f.url) !== targetBase);
+  if (fotos.length === current.fotos.length) {
+    throw new Error("Adjunto no encontrado");
+  }
+
+  await deletePedidoFotoFile(target);
+  const pedido: PedidoSistema = {
+    ...current,
+    fotos,
+    actualizadoAt: nowIso(),
+  };
+  await setDoc(doc(firestore, PEDIDOS_SISTEMA, id), pedidoSistemaPayload(pedido));
+  return pedido;
+}
+
 export async function completarPedidoSistema(
   id: string,
   mensaje: string,
@@ -1864,6 +1944,14 @@ export async function completarPedidoSistema(
 export async function deletePedidoSistema(id: string): Promise<void> {
   const existing = await getDoc(doc(firestore, PEDIDOS_SISTEMA, id));
   if (!existing.exists()) throw new Error("Pedido no encontrado");
+  const current = normalizePedidoSistema(id, existing.data() as Record<string, unknown>);
+  for (const foto of current.fotos) {
+    try {
+      await deletePedidoFotoFile(foto.url);
+    } catch (error) {
+      console.error(`[pedidos] No se pudo borrar adjunto ${foto.url}`, error);
+    }
+  }
   await deleteDoc(doc(firestore, PEDIDOS_SISTEMA, id));
 }
 

@@ -1,11 +1,13 @@
 import { Router } from "express";
 import type { AuthedRequest } from "../middleware/auth.middleware.js";
 import {
+  addPedidoSistemaFotos,
   completarPedidoSistema,
   createPedidoSistema,
   deletePedidoSistema,
   getPedidoSistema,
   listPedidosSistema,
+  removePedidoSistemaFoto,
   updatePedidoSistema,
 } from "../services/db.service.js";
 import type {
@@ -44,6 +46,11 @@ function esPedidoPropio(pedido: PedidoSistema, user: AppUserPublic): boolean {
 function assertPuedeVer(pedido: PedidoSistema, user: AppUserPublic): void {
   if (esDuenoPedidos(user) || esPedidoPropio(pedido, user)) return;
   throw new Error("Pedido no encontrado");
+}
+
+function assertPuedeEditarFotos(pedido: PedidoSistema, user: AppUserPublic): void {
+  if (esPedidoPropio(pedido, user)) return;
+  throw new Error("Solo quien creó el pedido puede cambiar los adjuntos");
 }
 
 function isSeccion(value: unknown): value is PedidoSistemaSeccion {
@@ -214,6 +221,50 @@ router.patch("/:id", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al actualizar pedido";
     res.status(message === "Pedido no encontrado" ? 404 : 400).json({ ok: false, message });
+  }
+});
+
+router.post("/:id/fotos", async (req, res) => {
+  try {
+    const user = viewer(req as AuthedRequest);
+    const id = paramId(req);
+    const current = await getPedidoSistema(id);
+    assertPuedeVer(current, user);
+    assertPuedeEditarFotos(current, user);
+    const fotos = parseFotos((req.body as { fotos?: unknown })?.fotos);
+    const data = await addPedidoSistemaFotos(id, fotos);
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error al subir adjuntos";
+    const status =
+      message === "Pedido no encontrado"
+        ? 404
+        : message.includes("Solo quien creó")
+          ? 403
+          : 400;
+    res.status(status).json({ ok: false, message });
+  }
+});
+
+router.delete("/:id/fotos", async (req, res) => {
+  try {
+    const user = viewer(req as AuthedRequest);
+    const id = paramId(req);
+    const current = await getPedidoSistema(id);
+    assertPuedeVer(current, user);
+    assertPuedeEditarFotos(current, user);
+    const url = String((req.body as { url?: unknown })?.url ?? "").trim();
+    const data = await removePedidoSistemaFoto(id, url);
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error al eliminar adjunto";
+    const status =
+      message === "Pedido no encontrado" || message === "Adjunto no encontrado"
+        ? 404
+        : message.includes("Solo quien creó")
+          ? 403
+          : 400;
+    res.status(status).json({ ok: false, message });
   }
 });
 

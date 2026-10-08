@@ -500,6 +500,13 @@ export async function fetchPedidosSistema(): Promise<PedidoSistema[]> {
   return res.data;
 }
 
+export async function fetchPedidoSistema(id: string): Promise<PedidoSistema> {
+  const res = await apiFetch<{ ok: boolean; data: PedidoSistema }>(
+    `/api/pedidos-sistema/${id}`,
+  );
+  return res.data;
+}
+
 export async function createPedidoSistema(
   data: PedidoSistemaCreateInput,
 ): Promise<PedidoSistema> {
@@ -525,6 +532,34 @@ export async function updatePedidoSistema(
     {
       method: "PATCH",
       body: JSON.stringify(data),
+    },
+  );
+  return res.data;
+}
+
+export async function addPedidoSistemaFotos(
+  id: string,
+  fotos: { base64: string; nombre: string; mime?: string }[],
+): Promise<PedidoSistema> {
+  const res = await apiFetch<{ ok: boolean; data: PedidoSistema }>(
+    `/api/pedidos-sistema/${id}/fotos`,
+    {
+      method: "POST",
+      body: JSON.stringify({ fotos }),
+    },
+  );
+  return res.data;
+}
+
+export async function removePedidoSistemaFoto(
+  id: string,
+  url: string,
+): Promise<PedidoSistema> {
+  const res = await apiFetch<{ ok: boolean; data: PedidoSistema }>(
+    `/api/pedidos-sistema/${id}/fotos`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ url }),
     },
   );
   return res.data;
