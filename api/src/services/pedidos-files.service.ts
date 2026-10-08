@@ -58,6 +58,12 @@ async function isReadableFile(filePath: string): Promise<boolean> {
   }
 }
 
+export type ResolvePedidoFotoResult = {
+  path: string | null;
+  /** true si se copió desde una ruta legacy a la canónica. */
+  recovered: boolean;
+};
+
 /**
  * Resuelve un adjunto en disco. Si está en una ruta legacy, lo copia a la canónica
  * (`uploads/pedidos`) para que nginx/Express lo sirvan.
@@ -65,15 +71,22 @@ async function isReadableFile(filePath: string): Promise<boolean> {
 export async function resolvePedidoFotoPath(
   fileNameOrUrl: string,
 ): Promise<string | null> {
+  const result = await resolvePedidoFotoPathDetailed(fileNameOrUrl);
+  return result.path;
+}
+
+export async function resolvePedidoFotoPathDetailed(
+  fileNameOrUrl: string,
+): Promise<ResolvePedidoFotoResult> {
   const fileName =
     pedidoFotoFileNameFromUrl(fileNameOrUrl) ??
     (fileNameOrUrl.includes("/") || fileNameOrUrl.includes("\\")
       ? null
       : fileNameOrUrl.trim());
-  if (!fileName) return null;
+  if (!fileName) return { path: null, recovered: false };
 
   const canonical = path.join(uploadsPedidosDir(), fileName);
-  if (await isReadableFile(canonical)) return canonical;
+  if (await isReadableFile(canonical)) return { path: canonical, recovered: false };
 
   for (const candidate of candidatePedidoFotoPaths(fileName)) {
     if (candidate === canonical) continue;
@@ -85,17 +98,28 @@ export async function resolvePedidoFotoPath(
       console.warn(
         `[pedido-files] Recuperado ${fileName} desde ${candidate} → ${canonical}`,
       );
-      return canonical;
+      return { path: canonical, recovered: true };
     } catch (error) {
       console.error(
         `[pedido-files] Encontrado en ${candidate} pero no se pudo copiar a ${canonical}`,
         error,
       );
-      return candidate;
+      return { path: candidate, recovered: false };
     }
   }
 
-  return null;
+  return { path: null, recovered: false };
+}
+
+export async function deletePedidoFotoFile(url: string): Promise<void> {
+  const fileName = pedidoFotoFileNameFromUrl(url);
+  if (!fileName) return;
+  const filePath = path.join(uploadsPedidosDir(), fileName);
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }
 
 export async function savePedidoFoto(
@@ -119,4 +143,46 @@ export async function savePedidoFoto(
     url: `/uploads/pedidos/${safeName}?v=${Date.now()}`,
     nombre: nombre.trim() || safeName,
   };
+}
+
+/** Siguiente índice libre mirando URLs ya guardadas (`pedidoId-N.ext`). */
+export function nextPedidoFotoIndex(
+  pedidoId: string,
+  fotos: { url: string }[],
+): number {
+  let max = -1;
+  const prefix = `${pedidoId}-`;
+  for (const foto of fotos) {
+    const name = pedidoFotoFileNameFromUrl(foto.url);
+    if (!name?.startsWith(prefix)) continue;
+    const m = /^(\d+)\./.exec(name.slice(prefix.length));
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max + 1;
+}
+
+function withCacheBust(url: string): string {
+  const base = String(url ?? "").split("?")[0] ?? "";
+  if (!base) return url;
+  return `${base}?v=${Date.now()}`;
+}
+
+/**
+ * Intenta recuperar cada adjunto desde rutas legacy y refresca `?v=` si hubo recover.
+ */
+export async function ensurePedidoFotosResolved(
+  fotos: { url: string; nombre: string }[],
+): Promise<{ fotos: { url: string; nombre: string }[]; changed: boolean }> {
+  let changed = false;
+  const next: { url: string; nombre: string }[] = [];
+  for (const foto of fotos) {
+    const { recovered } = await resolvePedidoFotoPathDetailed(foto.url);
+    if (recovered) {
+      changed = true;
+      next.push({ ...foto, url: withCacheBust(foto.url) });
+    } else {
+      next.push(foto);
+    }
+  }
+  return { fotos: next, changed };
 }
