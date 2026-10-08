@@ -507,6 +507,35 @@ export async function fetchPedidoSistema(id: string): Promise<PedidoSistema> {
   return res.data;
 }
 
+/** Igual que PDF de envíos: resolve en API; si falta → ADJUNTO_MISSING. */
+export async function fetchPedidoFotoBlob(
+  pedidoId: string,
+  fileName: string,
+): Promise<Blob> {
+  const response = await fetch(
+    `${getApiUrl()}/api/pedidos-sistema/${encodeURIComponent(pedidoId)}/fotos/${encodeURIComponent(fileName)}`,
+    { credentials: "include" },
+  );
+  if (response.ok) {
+    return response.blob();
+  }
+
+  let message = `Error del servidor (${response.status})`;
+  let code: string | undefined;
+  try {
+    const raw = await response.text();
+    if (raw.trim()) {
+      const data = JSON.parse(raw) as { message?: string; code?: string };
+      if (data.message) message = data.message;
+      if (data.code) code = data.code;
+    }
+  } catch {
+    // ignore
+  }
+
+  throw Object.assign(new Error(message), { status: response.status, code });
+}
+
 export async function createPedidoSistema(
   data: PedidoSistemaCreateInput,
 ): Promise<PedidoSistema> {

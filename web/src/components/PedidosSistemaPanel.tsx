@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
 import { usePedidosPendientes } from "../auth/PedidosPendientesContext";
-import { resolveAssetUrl } from "../config/api";
 import {
   addPedidoSistemaFotos,
   completarPedidoSistema,
   deletePedidoSistema,
+  fetchPedidoFotoBlob,
   fetchPedidoSistema,
   fetchPedidosSistema,
   removePedidoSistemaFoto,
@@ -15,6 +15,7 @@ import {
 import type {
   PedidoSistema,
   PedidoSistemaEstado,
+  PedidoSistemaFoto,
   PedidoSistemaPrioridad,
 } from "../types";
 import {
@@ -32,6 +33,22 @@ import { useClientPagination } from "../hooks/useClientPagination";
 
 const MAX_ADJUNTOS = 8;
 const MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
+
+type AdjuntoView = {
+  key: string;
+  foto: PedidoSistemaFoto;
+  fileName: string;
+  blobUrl: string | null;
+  missing: boolean;
+  isImage: boolean;
+};
+
+function pedidoFotoFileName(url: string): string | null {
+  const clean = String(url ?? "").split("?")[0] ?? "";
+  const match = /\/uploads\/pedidos\/([^/]+)$/i.exec(clean);
+  const name = match?.[1]?.trim() ?? "";
+  return name || null;
+}
 
 const PRIORIDAD_OPTIONS: PedidosColorOption<PedidoSistemaPrioridad>[] = [
   { value: "baja", label: "Baja", tone: "amarillo" },
@@ -71,10 +88,6 @@ function formatDateTime(iso: string | null | undefined): string {
 
 function seccionLabel(pedido: PedidoSistema): string {
   return PEDIDO_SECCION_LABEL[pedido.seccion] ?? pedido.seccion;
-}
-
-function fotoSrc(url: string): string {
-  return resolveAssetUrl(url) ?? url;
 }
 
 function isImageAdjunto(nombre: string, url: string): boolean {
@@ -122,7 +135,9 @@ export function PedidosSistemaPanel() {
   const [formOpen, setFormOpen] = useState(false);
   const [viewing, setViewing] = useState<PedidoSistema | null>(null);
   const [viewingLoading, setViewingLoading] = useState(false);
+  const [adjuntosView, setAdjuntosView] = useState<AdjuntoView[]>([]);
   const [adjuntosBusy, setAdjuntosBusy] = useState(false);
+  const adjuntosBlobUrls = useRef<string[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [aBorrar, setABorrar] = useState<PedidoSistema | null>(null);
   const [aCompletar, setACompletar] = useState<PedidoSistema | null>(null);
@@ -228,18 +243,73 @@ export function PedidosSistemaPanel() {
     }
   }
 
+  function revokeAdjuntosBlobs() {
+    for (const url of adjuntosBlobUrls.current) {
+      URL.revokeObjectURL(url);
+    }
+    adjuntosBlobUrls.current = [];
+  }
+
   function aplicarPedidoActualizado(updated: PedidoSistema) {
     setItems((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     setViewing((prev) => (prev?.id === updated.id ? updated : prev));
   }
 
+  async function cargarAdjuntosComoPdf(pedido: PedidoSistema) {
+    revokeAdjuntosBlobs();
+    if (pedido.fotos.length === 0) {
+      setAdjuntosView([]);
+      return;
+    }
+
+    const next: AdjuntoView[] = [];
+    let missingCount = 0;
+    for (const foto of pedido.fotos) {
+      const fileName = pedidoFotoFileName(foto.url);
+      const key = `${foto.url}`;
+      const image = isImageAdjunto(foto.nombre, foto.url);
+      if (!fileName) {
+        missingCount += 1;
+        next.push({ key, foto, fileName: "", blobUrl: null, missing: true, isImage: image });
+        continue;
+      }
+      try {
+        // Misma lógica que PDF: API resolve (+ legacy) y blob; si falta → ADJUNTO_MISSING.
+        const blob = await fetchPedidoFotoBlob(pedido.id, fileName);
+        const blobUrl = URL.createObjectURL(blob);
+        adjuntosBlobUrls.current.push(blobUrl);
+        next.push({ key, foto, fileName, blobUrl, missing: false, isImage: image });
+      } catch (error) {
+        const code = (error as Error & { code?: string }).code;
+        const status = (error as Error & { status?: number }).status;
+        if (status === 404 || code === "ADJUNTO_MISSING") {
+          missingCount += 1;
+          next.push({ key, foto, fileName, blobUrl: null, missing: true, isImage: image });
+        } else {
+          missingCount += 1;
+          next.push({ key, foto, fileName, blobUrl: null, missing: true, isImage: image });
+        }
+      }
+    }
+    setAdjuntosView(next);
+    if (missingCount > 0) {
+      toast.warning(
+        missingCount === 1
+          ? "Un adjunto no está en el servidor. Si sos el creador, volvé a subirlo."
+          : `${missingCount} adjuntos no están en el servidor. Si sos el creador, volvelos a subir.`,
+      );
+    }
+  }
+
   async function abrirDetalle(pedido: PedidoSistema) {
     setViewing(pedido);
     setViewingLoading(true);
+    setAdjuntosView([]);
     try {
-      // Fuerza recover de adjuntos en el servidor (nginx no pasa por Express).
+      // Fuerza recover de adjuntos en el servidor (igual que al abrir un PDF).
       const fresh = await fetchPedidoSistema(pedido.id);
       aplicarPedidoActualizado(fresh);
+      await cargarAdjuntosComoPdf(fresh);
     } catch (error) {
       toast.warning(
         error instanceof Error
@@ -250,6 +320,10 @@ export function PedidosSistemaPanel() {
       setViewingLoading(false);
     }
   }
+
+  useEffect(() => {
+    return () => revokeAdjuntosBlobs();
+  }, []);
 
   async function onAgregarAdjuntos(files: FileList | null) {
     if (!viewing || !files?.length || adjuntosBusy) return;
@@ -274,6 +348,7 @@ export function PedidosSistemaPanel() {
     try {
       const updated = await addPedidoSistemaFotos(viewing.id, inputs);
       aplicarPedidoActualizado(updated);
+      await cargarAdjuntosComoPdf(updated);
       toast.success(inputs.length === 1 ? "Adjunto agregado" : "Adjuntos agregados");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudieron subir los adjuntos");
@@ -289,12 +364,19 @@ export function PedidosSistemaPanel() {
     try {
       const updated = await removePedidoSistemaFoto(viewing.id, url);
       aplicarPedidoActualizado(updated);
+      await cargarAdjuntosComoPdf(updated);
       toast.success("Adjunto eliminado");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo eliminar el adjunto");
     } finally {
       setAdjuntosBusy(false);
     }
+  }
+
+  function cerrarDetalle() {
+    revokeAdjuntosBlobs();
+    setAdjuntosView([]);
+    setViewing(null);
   }
 
   return (
@@ -560,7 +642,7 @@ export function PedidosSistemaPanel() {
               <button
                 type="button"
                 className="fl-icon-btn"
-                onClick={() => setViewing(null)}
+                onClick={cerrarDetalle}
                 aria-label="Cerrar"
               >
                 <IconX size={18} />
@@ -643,46 +725,59 @@ export function PedidosSistemaPanel() {
                   ) : null}
                 </div>
                 <div className="pedidos-adjuntos">
-                  {viewingLoading && viewing.fotos.length === 0 ? (
-                    <p className="text-muted pedidos-adjuntos__empty">Cargando adjuntos…</p>
-                  ) : viewing.fotos.length > 0 ? (
+                  {viewingLoading ? (
+                    <p className="text-muted pedidos-adjuntos__empty">Recuperando adjuntos…</p>
+                  ) : adjuntosView.length > 0 ? (
                     <ul className="pedidos-adjuntos__grid">
-                      {viewing.fotos.map((f, idx) => {
-                        const src = fotoSrc(f.url);
-                        const image = isImageAdjunto(f.nombre, f.url);
+                      {adjuntosView.map((item) => {
                         const canEdit = esCreadorPedido(viewing, user?.id, user?.email);
                         return (
-                          <li key={`${f.url}-${idx}`} className="pedidos-adjuntos__item">
-                            <div className="pedidos-adjuntos__thumb">
-                              <a
-                                href={src}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={f.nombre}
-                                className={image ? undefined : "pedidos-adjuntos__file"}
-                              >
-                                {image ? (
-                                  <img src={src} alt={f.nombre} />
-                                ) : (
+                          <li key={item.key} className="pedidos-adjuntos__item">
+                            <div
+                              className={`pedidos-adjuntos__thumb${item.missing ? " is-missing" : ""}`}
+                            >
+                              {item.missing ? (
+                                <span
+                                  className="pedidos-adjuntos__file"
+                                  title="Archivo no encontrado en el servidor"
+                                >
                                   <span className="pedidos-adjuntos__file-icon" aria-hidden>
                                     <IconFile size={18} />
                                   </span>
-                                )}
-                              </a>
+                                </span>
+                              ) : item.blobUrl ? (
+                                <a
+                                  href={item.blobUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={item.foto.nombre}
+                                  className={item.isImage ? undefined : "pedidos-adjuntos__file"}
+                                >
+                                  {item.isImage ? (
+                                    <img src={item.blobUrl} alt={item.foto.nombre} />
+                                  ) : (
+                                    <span className="pedidos-adjuntos__file-icon" aria-hidden>
+                                      <IconFile size={18} />
+                                    </span>
+                                  )}
+                                </a>
+                              ) : null}
                               {canEdit ? (
                                 <button
                                   type="button"
                                   className="fl-icon-btn fl-icon-btn--danger pedidos-adjuntos__remove"
                                   title="Eliminar adjunto"
-                                  aria-label={`Eliminar ${f.nombre}`}
+                                  aria-label={`Eliminar ${item.foto.nombre}`}
                                   disabled={adjuntosBusy}
-                                  onClick={() => void onQuitarAdjunto(f.url)}
+                                  onClick={() => void onQuitarAdjunto(item.foto.url)}
                                 >
                                   <IconTrash size={12} />
                                 </button>
                               ) : null}
                             </div>
-                            <span title={f.nombre}>{f.nombre}</span>
+                            <span title={item.foto.nombre}>
+                              {item.missing ? `${item.foto.nombre} (faltante)` : item.foto.nombre}
+                            </span>
                           </li>
                         );
                       })}
