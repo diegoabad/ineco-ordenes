@@ -28,7 +28,7 @@ import type {
 import { PRESUPUESTO_ESTADO_LABEL } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LoadingBlock } from "./InecoMark";
-import { IconCheck, IconMail, IconPalette, IconPdf, IconPencil, IconRefresh, IconSearch, IconTrash, IconUndo, IconX } from "./Icons";
+import { IconCheck, IconMail, IconPdf, IconPencil, IconRefresh, IconSearch, IconTag, IconTrash, IconUndo, IconX } from "./Icons";
 import { PresupuestoEmailPreviewModal } from "./PresupuestoEmailPreviewModal";
 import { PresupuestoFormModal } from "./PresupuestoFormModal";
 import { PresupuestoRechazoDialog } from "./PresupuestoRechazoDialog";
@@ -139,8 +139,8 @@ export function PresupuestosPanel({
     top: number;
     left: number;
   } | null>(null);
-  const [guardandoColor, setGuardandoColor] = useState(false);
   const colorMenuRef = useRef<HTMLDivElement>(null);
+  const colorSaveSeq = useRef(0);
   const [motivosRechazo, setMotivosRechazo] = useState<MotivoRechazoPresupuesto[]>([]);
   const [guardandoEstadoId, setGuardandoEstadoId] = useState<string | null>(null);
   const [emailPreview, setEmailPreview] = useState<Presupuesto | null>(null);
@@ -312,18 +312,35 @@ export function PresupuestosPanel({
     setColorMenu({ id: presupuestoId, top, left });
   }
 
-  async function elegirColorFila(colorFila: PresupuestoColorFila | null) {
-    if (!colorMenu || guardandoColor) return;
-    setGuardandoColor(true);
-    try {
-      const updated = await updatePresupuestoColorFila(colorMenu.id, colorFila);
-      upsertPresupuesto(updated);
+  function elegirColorFila(colorFila: PresupuestoColorFila | null) {
+    if (!colorMenu) return;
+    const id = colorMenu.id;
+    const prev = items.find((item) => item.id === id);
+    if (!prev || prev.colorFila === colorFila) {
       setColorMenu(null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo guardar el color");
-    } finally {
-      setGuardandoColor(false);
+      return;
     }
+
+    // Optimistic: pintar ya y cerrar el menú; el guardado va en segundo plano.
+    const seq = ++colorSaveSeq.current;
+    setItems((list) =>
+      list.map((item) => (item.id === id ? { ...item, colorFila } : item)),
+    );
+    setColorMenu(null);
+
+    void (async () => {
+      try {
+        const updated = await updatePresupuestoColorFila(id, colorFila);
+        if (colorSaveSeq.current !== seq) return;
+        upsertPresupuesto(updated);
+      } catch (error) {
+        if (colorSaveSeq.current !== seq) return;
+        setItems((list) =>
+          list.map((item) => (item.id === id ? { ...item, colorFila: prev.colorFila } : item)),
+        );
+        toast.error(error instanceof Error ? error.message : "No se pudo guardar el color");
+      }
+    })();
   }
 
   async function abrirRechazo(p: Presupuesto) {
@@ -492,7 +509,7 @@ export function PresupuestosPanel({
                 <th>Profesional</th>
                 <th className="fl-col-presup-total">Total</th>
                 <th className="fl-col-presup-estado">Estado</th>
-                <th className={`fl-col-actions ${accionesClass()}`}>Acciones</th>
+                <th className={`fl-col-actions ${accionesClass()}`} aria-label="Acciones" />
               </tr>
             </thead>
             {!loading && filtrados.length > 0 ? (
@@ -550,7 +567,7 @@ export function PresupuestosPanel({
                         {p.estado === "aceptado" ? (
                           <button
                             type="button"
-                            className="fl-icon-btn fl-icon-btn--default"
+                            className="fl-icon-btn fl-icon-btn--link"
                             title={`Volver a ${PRESUPUESTO_ESTADO_LABEL[estadoAlVolver(p)].toLowerCase()}`}
                             aria-label={`Volver al estado anterior: ${PRESUPUESTO_ESTADO_LABEL[estadoAlVolver(p)]}`}
                             disabled={
@@ -580,7 +597,7 @@ export function PresupuestosPanel({
                         )}
                         <button
                           type="button"
-                          className="fl-icon-btn fl-icon-btn--danger"
+                          className="fl-icon-btn fl-icon-btn--warning"
                           title={
                             p.estado === "rechazado"
                               ? "Ya está rechazado"
@@ -660,14 +677,14 @@ export function PresupuestosPanel({
                         </button>
                         <button
                           type="button"
-                          className="fl-icon-btn fl-icon-btn--default"
+                          className="fl-icon-btn fl-icon-btn--tag"
                           data-presup-color-trigger
-                          title="Color del renglón"
-                          aria-label="Color del renglón"
+                          title="Cambiar color"
+                          aria-label="Cambiar color"
                           aria-expanded={colorMenu?.id === p.id}
                           onClick={(event) => abrirColorMenu(p.id, event.currentTarget)}
                         >
-                          <IconPalette size={16} />
+                          <IconTag size={16} />
                         </button>
                         <button
                           type="button"
@@ -754,7 +771,7 @@ export function PresupuestosPanel({
               ref={colorMenuRef}
               className="presup-color-menu"
               role="menu"
-              aria-label="Color del renglón"
+              aria-label="Cambiar color"
               style={{ top: colorMenu.top, left: colorMenu.left }}
             >
               <button
@@ -764,8 +781,7 @@ export function PresupuestosPanel({
                 }`}
                 title="Sin color"
                 aria-label="Sin color"
-                disabled={guardandoColor}
-                onClick={() => void elegirColorFila(null)}
+                onClick={() => elegirColorFila(null)}
               />
               {COLORES_FILA.map((color) => (
                 <button
@@ -776,8 +792,7 @@ export function PresupuestosPanel({
                   }`}
                   title={color.label}
                   aria-label={color.label}
-                  disabled={guardandoColor}
-                  onClick={() => void elegirColorFila(color.id)}
+                  onClick={() => elegirColorFila(color.id)}
                 />
               ))}
             </div>,

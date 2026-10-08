@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import sgMail from "@sendgrid/mail";
 import { env } from "../config/env.js";
-import { uploadsPedidosDir } from "../config/paths.js";
 import type { PedidoSistema } from "../types.js";
+import { resolvePedidoFotoPath } from "./pedidos-files.service.js";
 
 const PEDIDOS_TO = [
   "dabad@ineco.ar",
@@ -67,11 +67,8 @@ function mimeFromExt(ext: string): string {
   }
 }
 
-function filePathFromFotoUrl(url: string): string | null {
-  const clean = url.split("?")[0] ?? "";
-  const match = /\/uploads\/pedidos\/([^/]+)$/i.exec(clean);
-  if (!match?.[1]) return null;
-  return path.join(uploadsPedidosDir(), match[1]);
+async function filePathFromFotoUrl(url: string): Promise<string | null> {
+  return resolvePedidoFotoPath(url);
 }
 
 const SECCION_LABEL: Record<PedidoSistema["seccion"], string> = {
@@ -135,7 +132,7 @@ export async function sendPedidoSistemaEmail(pedido: PedidoSistema): Promise<voi
   }[] = [];
 
   for (const foto of pedido.fotos) {
-    const filePath = filePathFromFotoUrl(foto.url);
+    const filePath = await filePathFromFotoUrl(foto.url);
     if (!filePath) continue;
     try {
       const buffer = await fs.readFile(filePath);

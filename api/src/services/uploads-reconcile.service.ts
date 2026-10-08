@@ -1,6 +1,13 @@
-import { listEmailEnvios, listMedicos, listPresupuestos, setMedicoFirmaUrl } from "./db.service.js";
+import {
+  listEmailEnvios,
+  listMedicos,
+  listPedidosSistema,
+  listPresupuestos,
+  setMedicoFirmaUrl,
+} from "./db.service.js";
 import { resolveEnvioPdfPath } from "./envio-pdf.service.js";
 import { firmaPublicUrl, resolveFirmaPath } from "./image.service.js";
+import { resolvePedidoFotoPath } from "./pedidos-files.service.js";
 import { resolvePresupuestoPdfPath } from "./presupuesto-pdf.service.js";
 
 export type UploadsReconcileReport = {
@@ -11,10 +18,12 @@ export type UploadsReconcileReport = {
   presupuestosFaltantes: number;
   enviosOk: number;
   enviosFaltantes: number;
+  pedidosOk: number;
+  pedidosFaltantes: number;
 };
 
 /**
- * Al levantar el contenedor: busca firmas/PDFs en rutas legacy y los deja
+ * Al levantar el contenedor: busca firmas/PDFs/adjuntos en rutas legacy y los deja
  * en la carpeta canónica del volumen para que nginx/API los sirvan.
  */
 export async function reconcileUploadsOnStartup(): Promise<UploadsReconcileReport> {
@@ -26,6 +35,8 @@ export async function reconcileUploadsOnStartup(): Promise<UploadsReconcileRepor
     presupuestosFaltantes: 0,
     enviosOk: 0,
     enviosFaltantes: 0,
+    pedidosOk: 0,
+    pedidosFaltantes: 0,
   };
 
   try {
@@ -101,10 +112,30 @@ export async function reconcileUploadsOnStartup(): Promise<UploadsReconcileRepor
     console.error("[uploads-reconcile] Error reconciliando PDFs de envíos", error);
   }
 
+  try {
+    const pedidos = await listPedidosSistema();
+    for (const pedido of pedidos) {
+      for (const foto of pedido.fotos ?? []) {
+        if (!foto.url?.trim()) continue;
+        const before = await resolvePedidoFotoPath(foto.url);
+        if (!before) {
+          report.pedidosFaltantes += 1;
+          continue;
+        }
+        // resolve ya copia desde legacy si hace falta; no distinguimos ok vs recuperado
+        // sin un flag, así que contamos ok si existe canónico tras resolve.
+        report.pedidosOk += 1;
+      }
+    }
+  } catch (error) {
+    console.error("[uploads-reconcile] Error reconciliando adjuntos de pedidos", error);
+  }
+
   console.log(
     `[uploads-reconcile] firmas ok=${report.firmasOk} recuperadas=${report.firmasRecuperadas} faltantes=${report.firmasFaltantes} | ` +
       `presupuestos ok=${report.presupuestosOk} faltantes=${report.presupuestosFaltantes} | ` +
-      `envios ok=${report.enviosOk} faltantes=${report.enviosFaltantes}`,
+      `envios ok=${report.enviosOk} faltantes=${report.enviosFaltantes} | ` +
+      `pedidos ok=${report.pedidosOk} faltantes=${report.pedidosFaltantes}`,
   );
 
   return report;

@@ -18,6 +18,7 @@
   --action-view: #0284c7;
   --action-edit: #d97706;
   --action-link: #7c3aed;
+  --action-tag: #0f766e;
   --radius: 8px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -2642,18 +2643,18 @@ button.chip--button:disabled {
   background-color: #c5cad3;
   background-image: linear-gradient(
     135deg,
-    transparent 42%,
-    #fff 42%,
-    #fff 58%,
-    transparent 58%
+    transparent calc(50% - 0.7px),
+    #4b5563 calc(50% - 0.7px),
+    #4b5563 calc(50% + 0.7px),
+    transparent calc(50% + 0.7px)
   );
 }
-.presup-color-dot--ambar { background: #fff3d1; }
-.presup-color-dot--menta { background: #b7e4c7; }
-.presup-color-dot--cielo { background: #a9d6ef; }
-.presup-color-dot--rosa { background: #f4b8c8; }
-.presup-color-dot--lila { background: #d4c2ef; }
-.presup-color-dot--durazno { background: #f6c9ae; }
+.presup-color-dot--ambar { background: #f6e7b8; }
+.presup-color-dot--menta { background: #d3eddc; }
+.presup-color-dot--cielo { background: #d2e9f5; }
+.presup-color-dot--rosa { background: #f6d6e2; }
+.presup-color-dot--lila { background: #e4d8f4; }
+.presup-color-dot--durazno { background: #f6e0d0; }
 
 .email-chips {
   display: flex;
@@ -2840,18 +2841,28 @@ button.chip--button:disabled {
   max-width: 8.5rem;
 }
 
-.col-presup-fecha,
-.col-presup-total,
+.col-presup-fecha {
+  width: 9.25rem;
+  min-width: 9.25rem;
+  max-width: 9.25rem;
+}
+
+.col-presup-total {
+  width: 9.75rem;
+  min-width: 9.75rem;
+  max-width: 9.75rem;
+}
+
 .col-presup-estado {
-  width: 8rem;
-  min-width: 8rem;
-  max-width: 8rem;
+  width: 9.5rem;
+  min-width: 9.5rem;
+  max-width: 9.5rem;
 }
 
 .col-presup-paciente,
 .col-presup-profesional {
-  width: 22%;
-  min-width: 10rem;
+  width: auto;
+  min-width: 0;
 }
 
 .fl-col-presup-fecha,
@@ -3924,40 +3935,40 @@ tbody tr:hover td {
 }
 
 tbody tr.presup-fila--ambar td {
-  background: #fff3d1;
-}
-tbody tr.presup-fila--ambar:hover td {
   background: #f6e7b8;
 }
-tbody tr.presup-fila--menta td {
-  background: #e4f6ea;
+tbody tr.presup-fila--ambar:hover td {
+  background: #f9edc8;
 }
-tbody tr.presup-fila--menta:hover td {
+tbody tr.presup-fila--menta td {
   background: #d3eddc;
 }
-tbody tr.presup-fila--cielo td {
-  background: #e3f3fb;
+tbody tr.presup-fila--menta:hover td {
+  background: #dbf1e3;
 }
-tbody tr.presup-fila--cielo:hover td {
+tbody tr.presup-fila--cielo td {
   background: #d2e9f5;
 }
-tbody tr.presup-fila--rosa td {
-  background: #fde7ee;
+tbody tr.presup-fila--cielo:hover td {
+  background: #daedf7;
 }
-tbody tr.presup-fila--rosa:hover td {
+tbody tr.presup-fila--rosa td {
   background: #f6d6e2;
 }
-tbody tr.presup-fila--lila td {
-  background: #f0e8fb;
+tbody tr.presup-fila--rosa:hover td {
+  background: #f9dde7;
 }
-tbody tr.presup-fila--lila:hover td {
+tbody tr.presup-fila--lila td {
   background: #e4d8f4;
 }
+tbody tr.presup-fila--lila:hover td {
+  background: #e9dff6;
+}
 tbody tr.presup-fila--durazno td {
-  background: #fdede3;
+  background: #f6e0d0;
 }
 tbody tr.presup-fila--durazno:hover td {
-  background: #f6e0d0;
+  background: #f9e6da;
 }
 
 tbody tr.is-inactive td {
@@ -3994,46 +4005,47 @@ tbody tr.is-inactive td {
   max-width: 6.5rem;
 }
 
+/* Ancho fijo al contenido; el sobrante de la tabla lo absorben paciente/profesional. */
 .col-actions {
-  width: 11.5rem;
-  min-width: 11.5rem;
-  max-width: 11.5rem;
+  width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  min-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  max-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
 }
 
 .col-actions--2 {
-  width: 6.5rem;
-  min-width: 6.5rem;
-  max-width: 6.5rem;
+  width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  min-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  max-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
 }
 
 .col-actions--3 {
-  width: 7.1rem;
-  min-width: 7.1rem;
-  max-width: 7.1rem;
+  width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
+  min-width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
+  max-width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
 }
 
 .col-actions--4 {
-  width: 9.1rem;
-  min-width: 9.1rem;
-  max-width: 9.1rem;
+  width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  min-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  max-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
 }
 
 .col-actions--5 {
-  width: 11.1rem;
-  min-width: 11.1rem;
-  max-width: 11.1rem;
+  width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
+  min-width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
+  max-width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
 }
 
 .col-actions--6 {
-  width: 13.1rem;
-  min-width: 13.1rem;
-  max-width: 13.1rem;
+  width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
+  min-width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
+  max-width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
 }
 
 .col-actions--7 {
-  width: 15.1rem;
-  min-width: 15.1rem;
-  max-width: 15.1rem;
+  width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+  min-width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+  max-width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
 }
 
 .col-prest-titulo {
@@ -4531,11 +4543,11 @@ tbody tr.is-inactive td {
 }
 
 .fl-col-actions {
-  width: 11.5rem;
-  min-width: 6.5rem; /* al menos el texto "Acciones" */
-  max-width: 11.5rem;
-  padding-left: 0.5rem;
-  padding-right: 0.75rem;
+  width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  min-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  max-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  padding-left: 0.2rem;
+  padding-right: 0.4rem;
   white-space: nowrap;
   overflow: hidden;
   text-align: left;
@@ -4543,39 +4555,46 @@ tbody tr.is-inactive td {
 }
 
 .fl-col-actions--2 {
-  width: 6.5rem;
-  min-width: 6.5rem;
-  max-width: 6.5rem;
+  width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  min-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+  max-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
 }
 
 .fl-col-actions--3 {
-  width: 7.1rem;
-  min-width: 7.1rem;
-  max-width: 7.1rem;
+  width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
+  min-width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
+  max-width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
 }
 
 .fl-col-actions--4 {
-  width: 9.1rem;
-  min-width: 9.1rem;
-  max-width: 9.1rem;
+  width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  min-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+  max-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
 }
 
 .fl-col-actions--5 {
-  width: 11.1rem;
-  min-width: 11.1rem;
-  max-width: 11.1rem;
+  width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
+  min-width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
+  max-width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
 }
 
 .fl-col-actions--6 {
-  width: 13.1rem;
-  min-width: 13.1rem;
-  max-width: 13.1rem;
+  width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
+  min-width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
+  max-width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
 }
 
 .fl-col-actions--7 {
-  width: 15.1rem;
-  min-width: 15.1rem;
-  max-width: 15.1rem;
+  width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+  min-width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+  max-width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+}
+
+.fl-table-card table th.fl-col-actions,
+.fl-table-card table td.fl-col-actions {
+  padding-left: 0.2rem;
+  padding-right: 0.4rem;
+  overflow: hidden;
 }
 
 .fl-col-firma {
@@ -4602,6 +4621,28 @@ tbody tr.is-inactive td {
   align-items: center;
   justify-content: flex-start;
   gap: 0.15rem;
+}
+
+/*
+ * En tablas: el cuadrado del hover oscurece un poco el fondo de la fila
+ * (blanco o color), sin el gris fijo de --bg-subtle.
+ */
+.fl-table-actions .fl-icon-btn:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--print:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--mail:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--view:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--edit:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--link:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--tag:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--danger:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--accent:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--success:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--muted:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--warning:hover:not(:disabled),
+.fl-table-actions .fl-icon-btn--default:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.07);
+  filter: none;
+  opacity: 1;
 }
 
 .fl-table-actions--2 {
@@ -4698,6 +4739,15 @@ tbody tr.is-inactive td {
 .fl-icon-btn--link:hover:not(:disabled) {
   background: color-mix(in srgb, var(--action-link) 12%, white);
   color: var(--action-link);
+}
+
+.fl-icon-btn--tag:not(:disabled) {
+  color: var(--action-tag);
+}
+
+.fl-icon-btn--tag:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--action-tag) 12%, white);
+  color: var(--action-tag);
 }
 
 .fl-icon-btn--danger:not(:disabled) {
@@ -5748,51 +5798,51 @@ tbody tr.is-inactive td {
 
   .col-actions,
   .fl-col-actions {
-    width: 11.5rem;
-    min-width: 11.5rem;
-    max-width: 11.5rem;
+    width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+    min-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+    max-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
   }
 
   .col-actions--2,
   .fl-col-actions--2 {
-    width: 6.5rem;
-    min-width: 6.5rem;
-    max-width: 6.5rem;
+    width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+    min-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
+    max-width: calc(2 * 1.85rem + 1 * 0.15rem + 0.6rem);
   }
 
   .col-actions--3,
   .fl-col-actions--3 {
-    width: 7.1rem;
-    min-width: 7.1rem;
-    max-width: 7.1rem;
+    width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
+    min-width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
+    max-width: calc(3 * 1.85rem + 2 * 0.15rem + 0.6rem);
   }
 
   .col-actions--4,
   .fl-col-actions--4 {
-    width: 9.1rem;
-    min-width: 9.1rem;
-    max-width: 9.1rem;
+    width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+    min-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
+    max-width: calc(4 * 1.85rem + 3 * 0.15rem + 0.6rem);
   }
 
   .col-actions--5,
   .fl-col-actions--5 {
-    width: 11.1rem;
-    min-width: 11.1rem;
-    max-width: 11.1rem;
+    width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
+    min-width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
+    max-width: calc(5 * 1.85rem + 4 * 0.15rem + 0.6rem);
   }
 
   .col-actions--6,
   .fl-col-actions--6 {
-    width: 13.1rem;
-    min-width: 13.1rem;
-    max-width: 13.1rem;
+    width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
+    min-width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
+    max-width: calc(6 * 1.85rem + 5 * 0.15rem + 0.6rem);
   }
 
   .col-actions--7,
   .fl-col-actions--7 {
-    width: 15.1rem;
-    min-width: 15.1rem;
-    max-width: 15.1rem;
+    width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+    min-width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
+    max-width: calc(7 * 1.85rem + 6 * 0.15rem + 0.6rem);
   }
 }
 
