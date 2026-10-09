@@ -37,12 +37,13 @@ const SCHEMA_DOC = doc(firestore, "ordenes_config", "whatsapp_profile_schema");
 const TYPE_SET = new Set<string>(WA_PROFILE_FIELD_TYPES);
 const SCOPE_SET = new Set<string>(WA_PROFILE_FIELD_SCOPES);
 
-const CONTACT_KEYS = new Set([
-  "nombre_contacto",
-  "telefono",
+const CONTACT_KEYS = new Set(["nombre_contacto", "telefono"]);
+
+/** Campos de contacto que ya no usamos (el resto va en Paciente según para_quien). */
+const DEPRECATED_PROFILE_KEYS = new Set([
+  "domicilio",
   "dni_contacto",
   "fecha_nacimiento_contacto",
-  "domicilio",
 ]);
 
 const DEFAULT_FIELDS: Array<{
@@ -74,35 +75,70 @@ const DEFAULT_FIELDS: Array<{
     askPrompt: "¿Cuál es un teléfono de contacto?",
   },
   {
-    key: "dni_contacto",
-    label: "DNI de quien contacta",
-    type: "text",
-    scope: "contact",
-    group: "Contacto",
-  },
-  {
-    key: "fecha_nacimiento_contacto",
-    label: "Fecha de nacimiento (contacto)",
-    type: "date",
-    scope: "contact",
-    group: "Contacto",
-  },
-  {
-    key: "domicilio",
-    label: "Domicilio",
-    type: "text",
-    scope: "contact",
-    group: "Contacto",
-  },
-  {
     key: "para_quien",
     label: "Para quién es",
     type: "enum",
     scope: "case",
     options: ["yo", "tercero"],
-    group: "Paciente",
+    group: "Contacto",
     askPrompt: "¿La consulta es para vos o para otra persona?",
     confirmPrompt: "¿Confirmás que es para {{valor}}?",
+  },
+  {
+    key: "parentesco",
+    label: "Parentesco",
+    description: "Solo si la consulta es para un tercero",
+    type: "enum",
+    scope: "case",
+    options: [
+      "Padre",
+      "Madre",
+      "Abuelo",
+      "Abuela",
+      "Hijo",
+      "Hija",
+      "Tío",
+      "Tía",
+      "Sobrino",
+      "Sobrina",
+      "Tutor",
+      "Otro",
+    ],
+    group: "Contacto",
+    askPrompt: "¿Cuál es tu parentesco con el paciente?",
+  },
+  {
+    key: "sede",
+    label: "Sede",
+    type: "text",
+    scope: "case",
+    group: "Contacto",
+    askPrompt: "¿Para qué sede sería?",
+    description: "Por defecto este número es CABA",
+  },
+  {
+    key: "motivo",
+    label: "Motivo de la comunicación",
+    type: "enum",
+    scope: "case",
+    options: [
+      "turno_nuevo",
+      "turno_cambiar",
+      "turno_cancelar",
+      "turno_confirmar",
+      "turno_consultar",
+      "evaluacion",
+      "diagnostico_sintomas",
+      "tratamiento_info",
+      "sede_info",
+      "cobertura",
+      "recetas",
+      "admin",
+      "reclamo",
+      "otro",
+    ],
+    group: "Contacto",
+    askPrompt: "¿En qué te puedo ayudar?",
   },
   {
     key: "nombre_paciente",
@@ -215,40 +251,28 @@ const DEFAULT_FIELDS: Array<{
     group: "Clínica",
     askPrompt: "¿Quién lo derivó o qué le indicaron?",
   },
-  {
-    key: "sede",
-    label: "Sede",
-    type: "text",
-    scope: "case",
-    group: "Intención",
-    askPrompt: "¿Para qué sede sería?",
-    description: "Por defecto este número es CABA",
-  },
-  {
-    key: "motivo",
-    label: "Motivo de la comunicación",
-    type: "enum",
-    scope: "case",
-    options: [
-      "turno_nuevo",
-      "turno_cambiar",
-      "turno_cancelar",
-      "turno_confirmar",
-      "turno_consultar",
-      "evaluacion",
-      "diagnostico_sintomas",
-      "tratamiento_info",
-      "sede_info",
-      "cobertura",
-      "recetas",
-      "admin",
-      "reclamo",
-      "otro",
-    ],
-    group: "Intención",
-    askPrompt: "¿En qué te puedo ayudar?",
-  },
 ];
+
+function fieldFromDefault(
+  def: (typeof DEFAULT_FIELDS)[number],
+  now: string,
+): WaProfileField {
+  return {
+    id: randomUUID(),
+    key: def.key,
+    label: def.label,
+    description: def.description ?? null,
+    type: def.type,
+    scope: def.scope,
+    options: def.options ?? [],
+    group: def.group,
+    askPrompt: def.askPrompt ?? null,
+    confirmPrompt: def.confirmPrompt ?? null,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 function normalizeKey(value: string): string {
   return String(value ?? "")
@@ -359,34 +383,57 @@ export async function listWhatsappProfileFields(): Promise<WaProfileField[]> {
 /** Si el catálogo está vacío, carga el set inicial acordado. */
 export async function ensureWhatsappProfileSchemaDefaults(): Promise<WaProfileField[]> {
   const existing = await readAll();
+  const now = new Date().toISOString();
   if (existing.length > 0) {
-    // Asegura scope persistido en docs viejos
-    const now = new Date().toISOString();
-    const migrated = existing.map((item) => ({
-      ...item,
-      scope: item.scope || defaultScopeForKey(item.key, item.group),
-      updatedAt: item.scope ? item.updatedAt : now,
-    }));
-    const changed = migrated.some((item, i) => item.scope !== existing[i]?.scope);
+    const defaultsByKey = new Map(DEFAULT_FIELDS.map((def) => [def.key, def]));
+    // Saca campos deprecados, corrige grupo/scope y agrega faltantes del set acordado
+    let migrated = existing
+      .filter((item) => !DEPRECATED_PROFILE_KEYS.has(item.key))
+      .map((item) => {
+        const def = defaultsByKey.get(item.key);
+        const nextGroup = def?.group ?? item.group;
+        // Preferir scope del default (ej. para_quien queda "case" aunque el grupo sea Contacto)
+        const nextScope =
+          def?.scope ?? (item.scope || defaultScopeForKey(item.key, nextGroup));
+        const nextOptions =
+          def?.type === "enum" && def.options?.length ? def.options : item.options;
+        const touched =
+          nextGroup !== item.group ||
+          nextScope !== item.scope ||
+          (def?.type === "enum" &&
+            JSON.stringify(nextOptions) !== JSON.stringify(item.options));
+        return {
+          ...item,
+          group: nextGroup,
+          scope: nextScope,
+          options: nextOptions,
+          description: def?.description ?? item.description,
+          askPrompt: def?.askPrompt ?? item.askPrompt,
+          confirmPrompt: def?.confirmPrompt ?? item.confirmPrompt,
+          updatedAt: touched ? now : item.updatedAt,
+        };
+      });
+    const known = new Set(migrated.map((item) => item.key));
+    for (const def of DEFAULT_FIELDS) {
+      if (!known.has(def.key)) {
+        migrated.push(fieldFromDefault(def, now));
+      }
+    }
+    const changed =
+      migrated.length !== existing.length ||
+      migrated.some((item, i) => {
+        const prev = existing.find((row) => row.key === item.key);
+        if (!prev) return true;
+        return (
+          prev.group !== item.group ||
+          prev.scope !== item.scope ||
+          JSON.stringify(prev.options) !== JSON.stringify(item.options)
+        );
+      });
     if (changed) await writeAll(migrated);
     return sortFields(migrated);
   }
-  const now = new Date().toISOString();
-  const fields: WaProfileField[] = DEFAULT_FIELDS.map((def) => ({
-    id: randomUUID(),
-    key: def.key,
-    label: def.label,
-    description: def.description ?? null,
-    type: def.type,
-    scope: def.scope,
-    options: def.options ?? [],
-    group: def.group,
-    askPrompt: def.askPrompt ?? null,
-    confirmPrompt: def.confirmPrompt ?? null,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  const fields: WaProfileField[] = DEFAULT_FIELDS.map((def) => fieldFromDefault(def, now));
   await writeAll(fields);
   return fields;
 }

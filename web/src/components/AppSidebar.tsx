@@ -192,13 +192,14 @@ export function AppSidebar({
       <div className="app-sidebar__brand">
         <img className="app-sidebar__logo" src={LOGO_INECO_DATA_URL} alt="Ineco" />
       </div>
-      <nav className="app-sidebar__nav" aria-label="Módulos">
+      <div className="app-sidebar__menu">
         {top.length > 0 ? (
-          <div className="app-sidebar__nav-top">
+          <nav className="app-sidebar__nav-top" aria-label="Inicio">
             <FlatNavButtons items={top} module={module} onNavigate={navigateFlat} />
-          </div>
+          </nav>
         ) : null}
 
+        <nav className="app-sidebar__nav" aria-label="Módulos">
         {showWhatsapp ? (
           <AccordionGroup
             id="whatsapp"
@@ -324,7 +325,8 @@ export function AppSidebar({
             ))}
           </AccordionGroup>
         ) : null}
-      </nav>
+        </nav>
+      </div>
 
       <div className="app-sidebar__bottom">
         {config.length > 0 ? (

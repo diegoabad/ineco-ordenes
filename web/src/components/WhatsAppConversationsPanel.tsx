@@ -417,7 +417,11 @@ export function WhatsAppConversationsPanel({
   }, [selectedId, loadThread]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
   }, [messages]);
 
   useEffect(() => {
@@ -1100,14 +1104,9 @@ export function WhatsAppConversationsPanel({
                 onClick={() => setProfileOpen(true)}
                 title="Ver ficha del contacto"
               >
-                <h2>
-                  {threadHeader.title}
-                  {threadHeader.subtitle ? (
-                    <span className="wa-inbox__thread-rel"> · {threadHeader.subtitle}</span>
-                  ) : null}
-                </h2>
-                {threadHeader.phone ? (
-                  <p className="wa-inbox__thread-phone">{threadHeader.phone}</p>
+                <h2>{threadHeader.title}</h2>
+                {threadHeader.subtitle ? (
+                  <p className="wa-inbox__thread-rel">{threadHeader.subtitle}</p>
                 ) : null}
               </button>
               <div className="wa-inbox__assign">
@@ -1279,13 +1278,6 @@ export function WhatsAppConversationsPanel({
                 void handleSend(e);
               }}
             >
-              {composerLocked ? (
-                <p className="wa-inbox__composer-lock">
-                  {takeOverHolderLabel
-                    ? `Asignada a ${takeOverHolderLabel}. Para escribir, asignátela a vos.`
-                    : "Para escribir, asignate la conversación."}
-                </p>
-              ) : null}
               {slashSuggestions.length > 0 && !composerLocked ? (
                 <div className="wa-slash" role="listbox" aria-label="Respuestas rápidas">
                   {slashSuggestions.map((item, index) => (

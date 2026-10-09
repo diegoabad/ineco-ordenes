@@ -129,8 +129,8 @@ export function waPatientLabel(contact?: WaContact | null): string {
 
 /**
  * Header del chat:
- * - Título: nombre del paciente (sin prefijo)
- * - Si escribe un tercero: subtítulo chico en gris "Relación: Nombre del contacto"
+ * - Título: nombre de agenda; si no hay agenda, el número de teléfono
+ * - Debajo: solo si es familiar/tercero → "Padre: Nombre" (u otra relación)
  */
 export function waContactThreadHeader(contact?: WaContact | null): {
   title: string;
@@ -139,30 +139,26 @@ export function waContactThreadHeader(contact?: WaContact | null): {
 } {
   const phone = String(contact?.phoneNumber ?? "").trim();
   if (!contact) {
-    return { title: "Contacto", subtitle: null, phone };
+    return { title: phone || "Contacto", subtitle: null, phone };
   }
 
   const patient = waPatientLabel(contact);
+  const title = patient || phone || "Contacto";
+
   const contactoNombre = [contact.contactoNombre, contact.contactoApellido]
     .map((p) => p?.trim())
     .filter(Boolean)
     .join(" ");
   const relacion = contact.relacionFamiliar?.trim() || "";
 
+  let subtitle: string | null = null;
   if (contact.consultaPara === "tercero") {
-    const title = patient || waContactLabel(contact);
-    let subtitle: string | null = null;
     if (relacion && contactoNombre) subtitle = `${relacion}: ${contactoNombre}`;
     else if (relacion) subtitle = relacion;
     else if (contactoNombre) subtitle = contactoNombre;
-    return { title, subtitle, phone };
   }
 
-  return {
-    title: waContactLabel(contact),
-    subtitle: null,
-    phone,
-  };
+  return { title, subtitle, phone };
 }
 
 /** Nombre y teléfono para tooltips / etiquetas de Inicio. */
