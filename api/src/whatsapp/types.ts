@@ -52,10 +52,10 @@ export type WaConversation = {
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   assigneeKind: "none" | "bot" | "user";
-    assigneeUserId: string | null;
-    assigneeName: string | null;
-    tagIds: string[];
-    createdAt: string;
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+  tagIds: string[];
+  createdAt: string;
   updatedAt: string;
   contact?: WaContact;
 };

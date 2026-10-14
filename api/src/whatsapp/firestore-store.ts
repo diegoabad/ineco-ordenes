@@ -345,6 +345,10 @@ export async function findOrCreateOpenConversation(contactId: string): Promise<W
     unreadCount: 0,
     lastMessagePreview: null,
     lastMessageAt: null,
+    assigneeKind: "none",
+    assigneeUserId: null,
+    assigneeName: null,
+    tagIds: [],
     createdAt: now,
     updatedAt: now,
   };

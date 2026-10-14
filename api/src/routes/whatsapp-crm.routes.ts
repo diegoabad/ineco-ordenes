@@ -13,18 +13,6 @@ import {
   listQuickReplies,
   updateQuickReply,
 } from "../whatsapp/quick-replies.js";
-import {
-  createWhatsappFlow,
-  deleteWhatsappFlow,
-  listWhatsappFlows,
-  updateWhatsappFlow,
-} from "../whatsapp/flows.js";
-import {
-  createWhatsappProfileField,
-  deleteWhatsappProfileField,
-  ensureWhatsappProfileSchemaDefaults,
-  updateWhatsappProfileField,
-} from "../whatsapp/profile-schema.js";
 import multer from "multer";
 import { createReadStream, existsSync } from "node:fs";
 import {
@@ -61,6 +49,20 @@ import {
   listWhatsappCoberturas,
   updateWhatsappCobertura,
 } from "../whatsapp/coberturas.js";
+import {
+  getWhatsappBotConfig,
+  saveWhatsappBotConfig,
+} from "../whatsapp/bot-config.js";
+import {
+  getWhatsappMotorConfig,
+  saveWhatsappMotorConfig,
+} from "../whatsapp/motor-config.js";
+import {
+  createIntencion,
+  deleteIntencion,
+  listIntenciones,
+  updateIntencion,
+} from "../whatsapp/intenciones.js";
 
 const router = Router();
 const uploadMedia = multer({
@@ -268,195 +270,6 @@ router.delete("/quick-replies/:id", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo eliminar la respuesta";
     res.status(quickReplyStatus(message)).json({ ok: false, message });
-  }
-});
-
-function flowStatus(message: string): number {
-  if (message.includes("no encontrad")) return 404;
-  if (
-    message.includes("nombre") ||
-    message.includes("paso") ||
-    message.includes("Ya existe") ||
-    message.includes("mensaje") ||
-    message.includes("subflujo") ||
-    message.includes("campo")
-  ) {
-    return 400;
-  }
-  return 500;
-}
-
-router.get("/flows", async (_req, res) => {
-  try {
-    const data = await listWhatsappFlows();
-    res.json({ ok: true, data });
-  } catch (error) {
-    sendError(res, error, "No se pudieron listar los flujos");
-  }
-});
-
-router.post("/flows", async (req, res) => {
-  try {
-    const data = await createWhatsappFlow({
-      name: String(req.body?.name ?? ""),
-      objective: req.body?.objective != null ? String(req.body.objective) : null,
-      description: req.body?.description != null ? String(req.body.description) : null,
-      triggers: req.body?.triggers,
-      requiredFieldKeys: Array.isArray(req.body?.requiredFieldKeys)
-        ? req.body.requiredFieldKeys.map((item: unknown) => String(item ?? ""))
-        : undefined,
-      childFlowIds: Array.isArray(req.body?.childFlowIds)
-        ? req.body.childFlowIds.map((item: unknown) => String(item ?? ""))
-        : undefined,
-      steps: req.body?.steps,
-      isActive: req.body?.isActive !== false,
-    });
-    res.json({ ok: true, data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo crear el flujo";
-    res.status(flowStatus(message)).json({ ok: false, message });
-  }
-});
-
-router.patch("/flows/:id", async (req, res) => {
-  try {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const data = await updateWhatsappFlow(String(id ?? ""), {
-      name: req.body?.name != null ? String(req.body.name) : undefined,
-      objective:
-        req.body?.objective !== undefined
-          ? req.body.objective == null
-            ? null
-            : String(req.body.objective)
-          : undefined,
-      description:
-        req.body?.description !== undefined
-          ? req.body.description == null
-            ? null
-            : String(req.body.description)
-          : undefined,
-      triggers: req.body?.triggers,
-      requiredFieldKeys: Array.isArray(req.body?.requiredFieldKeys)
-        ? req.body.requiredFieldKeys.map((item: unknown) => String(item ?? ""))
-        : undefined,
-      childFlowIds: Array.isArray(req.body?.childFlowIds)
-        ? req.body.childFlowIds.map((item: unknown) => String(item ?? ""))
-        : undefined,
-      steps: req.body?.steps,
-      isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
-    });
-    res.json({ ok: true, data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo guardar el flujo";
-    res.status(flowStatus(message)).json({ ok: false, message });
-  }
-});
-
-router.delete("/flows/:id", async (req, res) => {
-  try {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    await deleteWhatsappFlow(String(id ?? ""));
-    res.json({ ok: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo eliminar el flujo";
-    res.status(flowStatus(message)).json({ ok: false, message });
-  }
-});
-
-function profileFieldStatus(message: string): number {
-  if (message.includes("no encontrad")) return 404;
-  if (
-    message.includes("clave") ||
-    message.includes("etiqueta") ||
-    message.includes("Tipo") ||
-    message.includes("Alcance") ||
-    message.includes("enum") ||
-    message.includes("Ya existe")
-  ) {
-    return 400;
-  }
-  return 500;
-}
-
-router.get("/profile-fields", async (_req, res) => {
-  try {
-    const data = await ensureWhatsappProfileSchemaDefaults();
-    res.json({ ok: true, data });
-  } catch (error) {
-    sendError(res, error, "No se pudieron listar los campos de perfil");
-  }
-});
-
-router.post("/profile-fields", async (req, res) => {
-  try {
-    const data = await createWhatsappProfileField({
-      key: String(req.body?.key ?? ""),
-      label: String(req.body?.label ?? ""),
-      description: req.body?.description != null ? String(req.body.description) : null,
-      type: String(req.body?.type ?? "text"),
-      scope: req.body?.scope != null ? String(req.body.scope) : undefined,
-      options: Array.isArray(req.body?.options)
-        ? req.body.options.map((item: unknown) => String(item ?? ""))
-        : undefined,
-      group: req.body?.group != null ? String(req.body.group) : undefined,
-      askPrompt: req.body?.askPrompt != null ? String(req.body.askPrompt) : null,
-      confirmPrompt: req.body?.confirmPrompt != null ? String(req.body.confirmPrompt) : null,
-      isActive: req.body?.isActive !== false,
-    });
-    res.json({ ok: true, data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo crear el campo";
-    res.status(profileFieldStatus(message)).json({ ok: false, message });
-  }
-});
-
-router.patch("/profile-fields/:id", async (req, res) => {
-  try {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const data = await updateWhatsappProfileField(String(id ?? ""), {
-      key: req.body?.key != null ? String(req.body.key) : undefined,
-      label: req.body?.label != null ? String(req.body.label) : undefined,
-      description:
-        req.body?.description !== undefined
-          ? req.body.description == null
-            ? null
-            : String(req.body.description)
-          : undefined,
-      type: req.body?.type != null ? String(req.body.type) : undefined,
-      scope: req.body?.scope != null ? String(req.body.scope) : undefined,
-      options: Array.isArray(req.body?.options)
-        ? req.body.options.map((item: unknown) => String(item ?? ""))
-        : undefined,
-      group: req.body?.group != null ? String(req.body.group) : undefined,
-      askPrompt:
-        req.body?.askPrompt !== undefined
-          ? req.body.askPrompt == null
-            ? null
-            : String(req.body.askPrompt)
-          : undefined,
-      confirmPrompt:
-        req.body?.confirmPrompt !== undefined
-          ? req.body.confirmPrompt == null
-            ? null
-            : String(req.body.confirmPrompt)
-          : undefined,
-      isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
-    });
-    res.json({ ok: true, data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo guardar el campo";
-    res.status(profileFieldStatus(message)).json({ ok: false, message });
-  }
-});
-
-router.delete("/profile-fields/:id", async (req, res) => {
-  try {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    await deleteWhatsappProfileField(String(id ?? ""));
-    res.json({ ok: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo eliminar el campo";
-    res.status(profileFieldStatus(message)).json({ ok: false, message });
   }
 });
 
@@ -886,6 +699,139 @@ router.get("/messages/:id/media", async (req, res) => {
     createReadStream(absolute).pipe(res);
   } catch (error) {
     sendError(res, error);
+  }
+});
+
+router.get("/bot-config", async (_req, res) => {
+  try {
+    const doc = await getWhatsappBotConfig();
+    res.json({
+      ok: true,
+      data: doc?.data ?? null,
+      updatedAt: doc?.updatedAt ?? null,
+    });
+  } catch (error) {
+    sendError(res, error, "No se pudo leer la configuración del bot");
+  }
+});
+
+router.put("/bot-config", async (req, res) => {
+  try {
+    const body = req.body as { data?: unknown; json?: unknown };
+    const hasJson = typeof body?.json === "string" && body.json.trim().length > 0;
+    const hasData = !!body?.data && typeof body.data === "object" && !Array.isArray(body.data);
+    if (!hasJson && !hasData) {
+      res.status(400).json({ ok: false, message: "Enviá un objeto JSON en data o json" });
+      return;
+    }
+    const saved = await saveWhatsappBotConfig({
+      data: hasData ? (body.data as Record<string, unknown>) : undefined,
+      json: hasJson ? String(body.json) : undefined,
+    });
+    res.json({
+      ok: true,
+      data: saved.data,
+      json: saved.json,
+      updatedAt: saved.updatedAt,
+    });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar la configuración del bot");
+  }
+});
+
+function intencionStatus(message: string): number {
+  if (message.includes("no encontrada")) return 404;
+  if (
+    message.includes("nombre") ||
+    message.includes("clave") ||
+    message.includes("mensaje de riesgo") ||
+    message.includes("Ya existe")
+  ) {
+    return 400;
+  }
+  return 500;
+}
+
+router.get("/intenciones", async (_req, res) => {
+  try {
+    const data = await listIntenciones();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron listar las intenciones");
+  }
+});
+
+router.post("/intenciones", async (req, res) => {
+  try {
+    const data = await createIntencion({
+      nombre: String(req.body?.nombre ?? ""),
+      clave: req.body?.clave != null ? String(req.body.clave) : undefined,
+      descripcion: req.body?.descripcion != null ? String(req.body.descripcion) : "",
+      esRiesgo: req.body?.esRiesgo === true,
+      mensajeRiesgo: req.body?.mensajeRiesgo != null ? String(req.body.mensajeRiesgo) : "",
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo crear la intención";
+    res.status(intencionStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.patch("/intenciones/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const data = await updateIntencion(String(id ?? ""), {
+      nombre: req.body?.nombre != null ? String(req.body.nombre) : undefined,
+      clave: req.body?.clave != null ? String(req.body.clave) : undefined,
+      descripcion:
+        req.body?.descripcion !== undefined ? String(req.body.descripcion ?? "") : undefined,
+      esRiesgo: typeof req.body?.esRiesgo === "boolean" ? req.body.esRiesgo : undefined,
+      mensajeRiesgo:
+        req.body?.mensajeRiesgo !== undefined ? String(req.body.mensajeRiesgo ?? "") : undefined,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo guardar la intención";
+    res.status(intencionStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.delete("/intenciones/:id", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    await deleteIntencion(String(id ?? ""));
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo eliminar la intención";
+    res.status(intencionStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.get("/motor-config", async (_req, res) => {
+  try {
+    const doc = await getWhatsappMotorConfig();
+    res.json({
+      ok: true,
+      data: doc.data,
+      updatedAt: doc.updatedAt || null,
+    });
+  } catch (error) {
+    sendError(res, error, "No se pudo leer la configuración del motor");
+  }
+});
+
+router.put("/motor-config", async (req, res) => {
+  try {
+    const body = req.body as { data?: unknown };
+    const data = body?.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      res.status(400).json({ ok: false, message: "Enviá un objeto en data" });
+      return;
+    }
+    const saved = await saveWhatsappMotorConfig(data);
+    res.json({ ok: true, data: saved.data, updatedAt: saved.updatedAt });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar la configuración del motor");
   }
 });
 

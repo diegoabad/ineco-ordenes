@@ -15,11 +15,10 @@ export type WhatsappSection =
   | "contactos"
   | "operadoras"
   | "etiquetas"
-  | "coberturas"
   | "respuestas-rapidas"
-  | "flujos"
-  | "perfil"
-  | "config";
+  | "config"
+  | "motor"
+  | "intenciones";
 
 export type AccordionModuleId =
   | "ordenes"
@@ -74,11 +73,10 @@ export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "contactos", label: "Contactos" },
   { id: "operadoras", label: "Operadoras" },
   { id: "etiquetas", label: "Etiquetas" },
-  { id: "coberturas", label: "Coberturas" },
   { id: "respuestas-rapidas", label: "Respuestas rápidas" },
-  { id: "flujos", label: "Flujos" },
-  { id: "perfil", label: "Perfil bot" },
-  { id: "config", label: "Configuración" },
+  { id: "config", label: "Bot" },
+  { id: "motor", label: "Motor" },
+  { id: "intenciones", label: "Intenciones" },
 ];
 
 export function isAccordionModule(module: AppModuleId): module is AccordionModuleId {

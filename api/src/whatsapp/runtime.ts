@@ -5,6 +5,7 @@ import { env } from "../config/env.js";
 import { BaileysProvider } from "./baileys.provider.js";
 import {
   createMessage,
+  findMessageByExternalId,
   findOrCreateContact,
   findOrCreateOpenConversation,
   getConversation,
@@ -82,6 +83,11 @@ async function handleIncomingRaw(raw: unknown, _isBackfill: boolean): Promise<vo
     if (contact.isBlocked) return;
 
     const conversation = await findOrCreateOpenConversation(contact.id);
+
+    if (normalized.externalId) {
+      const existing = await findMessageByExternalId(normalized.externalId);
+      if (existing) return;
+    }
 
     let mediaPath: string | null = null;
     let mimeType: string | null = null;

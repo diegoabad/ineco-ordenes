@@ -1,16 +1,16 @@
 import { useCallback, useRef, useState } from "react";
 import { WHATSAPP_SECTIONS, type WhatsappSection } from "../lib/appNav";
 import { IconPlus } from "./Icons";
-import { WhatsAppCoberturasPanel } from "./WhatsAppCoberturasPanel";
 import {
   WhatsAppConversationsPanel,
   type WaConnectionBanner,
 } from "./WhatsAppConversationsPanel";
-import { WhatsAppFlowsPanel } from "./WhatsAppFlowsPanel";
 import { WhatsAppOperatorsPanel } from "./WhatsAppOperatorsPanel";
-import { WhatsAppProfileSchemaPanel } from "./WhatsAppProfileSchemaPanel";
 import { WhatsAppQuickRepliesPanel } from "./WhatsAppQuickRepliesPanel";
 import { WhatsAppTagsPanel, type TagsPanelTab } from "./WhatsAppTagsPanel";
+import { WhatsAppConfigPanel } from "./WhatsAppConfigPanel";
+import { WhatsAppMotorPanel } from "./WhatsAppMotorPanel";
+import { WhatsAppIntencionesPanel } from "./WhatsAppIntencionesPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -25,6 +25,8 @@ export function WhatsAppModule({ section }: Props) {
     label: "Desconectado",
   });
   const [tagsTab, setTagsTab] = useState<TagsPanelTab>("etiquetas");
+  const [configHasData, setConfigHasData] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
   const onConnectionChange = useCallback((status: WaConnectionBanner) => {
     setConnection(status);
   }, []);
@@ -33,12 +35,11 @@ export function WhatsAppModule({ section }: Props) {
   }, []);
   const connectRef = useRef<(() => void) | null>(null);
   const createReplyRef = useRef<(() => void) | null>(null);
-  const createFlowRef = useRef<(() => void) | null>(null);
-  const createProfileFieldRef = useRef<(() => void) | null>(null);
   const createTagRef = useRef<(() => void) | null>(null);
   const createGroupRef = useRef<(() => void) | null>(null);
-  const createCoberturaRef = useRef<(() => void) | null>(null);
   const addOperatorRef = useRef<(() => void) | null>(null);
+  const openConfigJsonRef = useRef<(() => void) | null>(null);
+  const createIntencionRef = useRef<(() => void) | null>(null);
 
   return (
     <div className="app-shell">
@@ -52,20 +53,18 @@ export function WhatsAppModule({ section }: Props) {
               <p>Usuarios a los que se pueden derivar las conversaciones</p>
             ) : section === "respuestas-rapidas" ? (
               <p>Atajos con disparadores tipo /saludo y variables como {"{{nombre}}"}</p>
-            ) : section === "flujos" ? (
-              <p>Objetivo, campos del perfil y subflujos que usa cada conversación guiada</p>
-            ) : section === "perfil" ? (
-              <p>
-                Variables del objeto del bot. El orden de preguntas lo definen los flujos.
-              </p>
             ) : section === "etiquetas" ? (
               <p>
                 {tagsTab === "grupos"
                   ? "Grupos para organizar y colorear las etiquetas"
                   : "Etiquetas para clasificar las conversaciones"}
               </p>
-            ) : section === "coberturas" ? (
-              <p>Obras sociales disponibles según Infanto o Adulto</p>
+            ) : section === "config" ? (
+              <p>Identidad, saludo, tono y cómo se comunica el bot</p>
+            ) : section === "motor" ? (
+              <p>Interpretación, contexto y comportamiento del motor conversacional</p>
+            ) : section === "intenciones" ? (
+              <p>Objetivos que el bot puede reconocer y resolver</p>
             ) : null}
           </div>
         </div>
@@ -123,17 +122,6 @@ export function WhatsAppModule({ section }: Props) {
               </button>
             )}
           </div>
-        ) : section === "coberturas" ? (
-          <div className="app-header__actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => createCoberturaRef.current?.()}
-            >
-              <IconPlus size={16} />
-              Nueva cobertura
-            </button>
-          </div>
         ) : section === "respuestas-rapidas" ? (
           <div className="app-header__actions">
             <button
@@ -145,26 +133,26 @@ export function WhatsAppModule({ section }: Props) {
               Nueva respuesta
             </button>
           </div>
-        ) : section === "flujos" ? (
+        ) : section === "config" ? (
           <div className="app-header__actions">
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => createFlowRef.current?.()}
+              disabled={configSaving}
+              onClick={() => openConfigJsonRef.current?.()}
             >
-              <IconPlus size={16} />
-              Nuevo flujo
+              {configHasData ? "Actualizar configuración" : "Crear configuración"}
             </button>
           </div>
-        ) : section === "perfil" ? (
+        ) : section === "intenciones" ? (
           <div className="app-header__actions">
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => createProfileFieldRef.current?.()}
+              onClick={() => createIntencionRef.current?.()}
             >
               <IconPlus size={16} />
-              Nuevo campo
+              Nueva intención
             </button>
           </div>
         ) : null}
@@ -178,18 +166,24 @@ export function WhatsAppModule({ section }: Props) {
         <WhatsAppOperatorsPanel addRef={addOperatorRef} />
       ) : section === "respuestas-rapidas" ? (
         <WhatsAppQuickRepliesPanel createRef={createReplyRef} />
-      ) : section === "flujos" ? (
-        <WhatsAppFlowsPanel createRef={createFlowRef} />
-      ) : section === "perfil" ? (
-        <WhatsAppProfileSchemaPanel createRef={createProfileFieldRef} />
       ) : section === "etiquetas" ? (
         <WhatsAppTagsPanel
           createRef={createTagRef}
           createGroupRef={createGroupRef}
           onTabChange={onTagsTabChange}
         />
-      ) : section === "coberturas" ? (
-        <WhatsAppCoberturasPanel createRef={createCoberturaRef} />
+      ) : section === "config" ? (
+        <WhatsAppConfigPanel
+          openJsonRef={openConfigJsonRef}
+          onStatusChange={({ hasConfig, saving }) => {
+            setConfigHasData(hasConfig);
+            setConfigSaving(saving);
+          }}
+        />
+      ) : section === "motor" ? (
+        <WhatsAppMotorPanel />
+      ) : section === "intenciones" ? (
+        <WhatsAppIntencionesPanel createRef={createIntencionRef} />
       ) : (
         <div className="fl-table-empty fl-table-empty--fill">
           <p className="fl-table-empty__title">Próximamente</p>

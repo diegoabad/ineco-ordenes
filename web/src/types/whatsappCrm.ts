@@ -77,6 +77,17 @@ export type WaCobertura = {
   gruposEtarios: WaContactGrupoEtario[];
 };
 
+export type WaIntencion = {
+  id: string;
+  nombre: string;
+  clave: string;
+  descripcion: string;
+  esRiesgo?: boolean;
+  mensajeRiesgo?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type WaMessage = {
   id: string;
   conversationId: string;
