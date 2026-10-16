@@ -76,6 +76,18 @@ function parseCreateInput(body: unknown): InicioItemCreateInput {
     recurrencia = raw.recurrencia;
   }
   const sharedWithIds = parseSharedWithIds(raw.sharedWithIds);
+  const whatsappContactId =
+    raw.whatsappContactId === undefined
+      ? undefined
+      : raw.whatsappContactId == null
+        ? null
+        : String(raw.whatsappContactId).trim() || null;
+  const whatsappContactLabel =
+    raw.whatsappContactLabel === undefined
+      ? undefined
+      : raw.whatsappContactLabel == null
+        ? null
+        : String(raw.whatsappContactLabel).trim() || null;
   return {
     tipo: raw.tipo,
     titulo: String(raw.titulo ?? "").trim(),
@@ -95,6 +107,11 @@ function parseCreateInput(body: unknown): InicioItemCreateInput {
         }
       : {}),
     ...(sharedWithIds !== undefined ? { sharedWithIds } : {}),
+    ...(raw.mostrarEnInicio !== undefined
+      ? { mostrarEnInicio: Boolean(raw.mostrarEnInicio) }
+      : {}),
+    ...(whatsappContactId !== undefined ? { whatsappContactId } : {}),
+    ...(whatsappContactLabel !== undefined ? { whatsappContactLabel } : {}),
   };
 }
 
@@ -140,7 +157,14 @@ router.get("/", async (req, res) => {
       res.status(400).json({ ok: false, message: "Tipo inválido" });
       return;
     }
-    const data = await listInicioItems(userId, tipo);
+    const whatsappContactId =
+      typeof req.query.whatsappContactId === "string"
+        ? req.query.whatsappContactId.trim()
+        : undefined;
+    const data = await listInicioItems(userId, {
+      ...(tipo ? { tipo } : {}),
+      ...(whatsappContactId ? { whatsappContactId } : {}),
+    });
     res.json({ ok: true, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error al listar";

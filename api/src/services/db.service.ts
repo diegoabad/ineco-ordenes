@@ -1676,6 +1676,7 @@ function isPedidoSeccion(value: unknown): value is PedidoSistemaSeccion {
     value === "presupuestos" ||
     value === "pami" ||
     value === "busca-turno" ||
+    value === "whatsapp" ||
     value === "nueva"
   );
 }

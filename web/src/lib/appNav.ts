@@ -10,21 +10,39 @@ export type PresupuestosSection =
   | "config";
 export type PamiSection = "historial" | "analisis";
 export type BuscaTurnoSection = "turnos" | "config";
+export type WhatsappSection =
+  | "conversaciones"
+  | "prueba"
+  | "contactos"
+  | "operadoras"
+  | "etiquetas"
+  | "respuestas-rapidas"
+  | "config"
+  | "motor"
+  | "intenciones"
+  | "conocimiento";
 
-export type AccordionModuleId = "ordenes" | "presupuestos" | "pami" | "busca-turno";
+export type AccordionModuleId =
+  | "ordenes"
+  | "presupuestos"
+  | "pami"
+  | "busca-turno"
+  | "whatsapp";
 
 export type AppSection =
   | OrdenesSection
   | PresupuestosSection
   | PamiSection
-  | BuscaTurnoSection;
+  | BuscaTurnoSection
+  | WhatsappSection;
 
 export type AppNavTarget =
   | { module: "inicio" | "pedidos-sistema" | "usuarios"; section?: undefined }
   | { module: "ordenes"; section: OrdenesSection }
   | { module: "presupuestos"; section: PresupuestosSection }
   | { module: "pami"; section: PamiSection }
-  | { module: "busca-turno"; section: BuscaTurnoSection };
+  | { module: "busca-turno"; section: BuscaTurnoSection }
+  | { module: "whatsapp"; section: WhatsappSection };
 
 export const ORDENES_SECTIONS: { id: OrdenesSection; label: string }[] = [
   { id: "pacientes", label: "Pacientes" },
@@ -52,11 +70,25 @@ export const BUSCA_TURNO_SECTIONS: { id: BuscaTurnoSection; label: string }[] = 
   { id: "config", label: "Configuración" },
 ];
 
+export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
+  { id: "conversaciones", label: "Conversaciones" },
+  { id: "prueba", label: "Prueba" },
+  { id: "contactos", label: "Contactos" },
+  { id: "operadoras", label: "Operadoras" },
+  { id: "etiquetas", label: "Etiquetas" },
+  { id: "respuestas-rapidas", label: "Respuestas rápidas" },
+  { id: "config", label: "Bot" },
+  { id: "motor", label: "Motor" },
+  { id: "intenciones", label: "Intenciones" },
+  { id: "conocimiento", label: "Conocimiento" },
+];
+
 export function isAccordionModule(module: AppModuleId): module is AccordionModuleId {
   return (
     module === "ordenes" ||
     module === "presupuestos" ||
     module === "pami" ||
-    module === "busca-turno"
+    module === "busca-turno" ||
+    module === "whatsapp"
   );
 }

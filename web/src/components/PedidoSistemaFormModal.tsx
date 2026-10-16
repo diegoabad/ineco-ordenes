@@ -31,6 +31,7 @@ const SECCIONES: PedidoSistemaSeccion[] = [
   "presupuestos",
   "pami",
   "busca-turno",
+  "whatsapp",
   "nueva",
 ];
 

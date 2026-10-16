@@ -239,6 +239,7 @@ export type PedidoSistemaSeccion =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "whatsapp"
   | "nueva";
 
 export type PedidoSistemaPrioridad = "baja" | "media" | "alta";
@@ -282,6 +283,7 @@ export const PEDIDO_SECCION_LABEL: Record<PedidoSistemaSeccion, string> = {
   presupuestos: "Presupuestos",
   pami: "PAMI",
   "busca-turno": "Busca turno",
+  whatsapp: "WhatsApp",
   nueva: "Nueva sección",
 };
 
@@ -362,6 +364,10 @@ export type InicioItem = {
   origenTareaId: string | null;
   participantIds: string[];
   sharedWith: InicioUserRef[];
+  /** Si false, no aparece en Inicio (p. ej. notas de un contacto WA). */
+  mostrarEnInicio: boolean;
+  whatsappContactId: string | null;
+  whatsappContactLabel: string | null;
   ownerNombre: string;
   userId: string;
   creadoAt: string;
@@ -381,6 +387,9 @@ export type InicioItemCreateInput = {
   pinned?: boolean;
   origenTareaId?: string | null;
   sharedWithIds?: string[];
+  mostrarEnInicio?: boolean;
+  whatsappContactId?: string | null;
+  whatsappContactLabel?: string | null;
 };
 
 export type InicioItemUpdateInput = {

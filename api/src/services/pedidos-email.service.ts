@@ -76,6 +76,7 @@ const SECCION_LABEL: Record<PedidoSistema["seccion"], string> = {
   presupuestos: "Presupuestos",
   pami: "PAMI",
   "busca-turno": "Busca turno",
+  whatsapp: "WhatsApp",
   nueva: "Nueva sección",
 };
 

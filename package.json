@@ -6,6 +6,7 @@
     "dev": "npm run dev --prefix api & npm run dev --prefix web",
     "dev:api": "npm run dev --prefix api",
     "dev:web": "npm run dev --prefix web",
+    "test:bot": "npm run test:bot --prefix api",
     "install:all": "npm install --prefix api && npm install --prefix web",
     "build": "npm run build --prefix api && npm run build --prefix web"
   }

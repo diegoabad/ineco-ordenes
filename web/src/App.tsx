@@ -18,6 +18,7 @@ import {
 } from "./components/Icons";
 import { LoadingBlock } from "./components/InecoMark";
 import { InicioPanel } from "./components/InicioPanel";
+import { InicioRecordatorioWatcher } from "./components/InicioRecordatorioWatcher";
 import {
   EnvioResultadoModal,
   type EnvioResultadoItem,
@@ -30,6 +31,7 @@ import {
   type OrdenesSection,
   type PamiSection,
   type PresupuestosSection,
+  type WhatsappSection,
   ORDENES_SECTIONS,
 } from "./lib/appNav";
 import { EmailConfigPanel } from "./components/EmailConfigPanel";
@@ -45,6 +47,7 @@ import { PacienteFormModal } from "./components/PacienteFormModal";
 import { PresupuestosModule } from "./components/PresupuestosModule";
 import { PamiModule } from "./components/PamiModule";
 import { BuscaTurnoModule } from "./components/BuscaTurnoModule";
+import { WhatsAppModule } from "./components/WhatsAppModule";
 import { UsuariosPanel } from "./components/UsuariosPanel";
 import { PedidosSistemaPanel } from "./components/PedidosSistemaPanel";
 import { TablePagination } from "./components/TablePagination";
@@ -107,6 +110,7 @@ function firstAllowedModule(
 ): AppModule {
   const order: AppModule[] = [
     "inicio",
+    "whatsapp",
     "busca-turno",
     "ordenes",
     "presupuestos",
@@ -122,6 +126,7 @@ export default function App() {
   const allowedModules = useMemo(() => {
     const all: AppModule[] = [
       "inicio",
+      "whatsapp",
       "busca-turno",
       "ordenes",
       "presupuestos",
@@ -138,6 +143,8 @@ export default function App() {
     useState<PresupuestosSection>("presupuestos");
   const [pamiSection, setPamiSection] = useState<PamiSection>("historial");
   const [buscaTurnoSection, setBuscaTurnoSection] = useState<BuscaTurnoSection>("turnos");
+  const [whatsappSection, setWhatsappSection] =
+    useState<WhatsappSection>("conversaciones");
   const skipModulePersist = useRef(false);
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [medicos, setMedicos] = useState<Medico[]>([]);
@@ -211,6 +218,9 @@ export default function App() {
     } else if (nextModule === "busca-turno") {
       if (nextSection) setBuscaTurnoSection(nextSection as BuscaTurnoSection);
       else nextSection = buscaTurnoSection;
+    } else if (nextModule === "whatsapp") {
+      if (nextSection) setWhatsappSection(nextSection as WhatsappSection);
+      else nextSection = whatsappSection;
     } else {
       nextSection = undefined;
     }
@@ -239,7 +249,9 @@ export default function App() {
               ? pamiSection
               : module === "busca-turno"
                 ? buscaTurnoSection
-                : undefined,
+                : module === "whatsapp"
+                  ? whatsappSection
+                  : undefined,
     });
   }, [
     user,
@@ -248,6 +260,7 @@ export default function App() {
     presupuestosSection,
     pamiSection,
     buscaTurnoSection,
+    whatsappSection,
     canAccessModule,
   ]);
 
@@ -897,6 +910,8 @@ export default function App() {
       setPamiSection(target.section);
     } else if (target.module === "busca-turno") {
       setBuscaTurnoSection(target.section);
+    } else if (target.module === "whatsapp") {
+      setWhatsappSection(target.section);
     }
   }
 
@@ -909,7 +924,9 @@ export default function App() {
           ? pamiSection
           : module === "busca-turno"
             ? buscaTurnoSection
-            : null;
+            : module === "whatsapp"
+              ? whatsappSection
+              : null;
 
   const sidebar = (
     <AppSidebar
@@ -939,6 +956,7 @@ export default function App() {
     return (
       <div className="app-layout">
         {sidebar}
+        <InicioRecordatorioWatcher />
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
@@ -954,6 +972,7 @@ export default function App() {
     return (
       <div className="app-layout">
         {sidebar}
+        <InicioRecordatorioWatcher />
         <div className="app-main">
           <div className="app-shell">
             <div className="fl-table-empty">
@@ -972,9 +991,13 @@ export default function App() {
   return (
     <div className="app-layout">
       {sidebar}
+      <InicioRecordatorioWatcher />
       <div className="app-main">
         {module === "inicio" ? (
-          <InicioPanel userName={formatNombrePersona(user?.nombre ?? "") || undefined} />
+          <InicioPanel
+            userName={formatNombrePersona(user?.nombre ?? "") || undefined}
+            onNavigate={handleNavigate}
+          />
         ) : module === "presupuestos" ? (
           <PresupuestosModule
             section={presupuestosSection}
@@ -987,6 +1010,8 @@ export default function App() {
             section={buscaTurnoSection}
             onSectionChange={setBuscaTurnoSection}
           />
+        ) : module === "whatsapp" ? (
+          <WhatsAppModule section={whatsappSection} />
         ) : module === "pedidos-sistema" ? (
           <PedidosSistemaPanel />
         ) : module === "usuarios" ? (

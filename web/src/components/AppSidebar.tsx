@@ -10,6 +10,7 @@ import {
   ORDENES_SECTIONS,
   PAMI_SECTIONS,
   PRESUPUESTOS_SECTIONS,
+  WHATSAPP_SECTIONS,
   isAccordionModule,
   type AccordionModuleId,
   type AppNavTarget,
@@ -24,6 +25,7 @@ import {
   IconPedidos,
   IconPresupuesto,
   IconUsers,
+  IconWhatsapp,
 } from "./Icons";
 
 export type AppModule = AppModuleId;
@@ -152,6 +154,7 @@ export function AppSidebar({
   const showPresupuestos = allowedModules.includes("presupuestos");
   const showPami = allowedModules.includes("pami");
   const showBuscaTurno = allowedModules.includes("busca-turno");
+  const showWhatsapp = allowedModules.includes("whatsapp");
   const top = TOP_ITEMS.filter((item) => allowedModules.includes(item.id));
   const config = [
     ...CONFIG_ITEMS.filter((item) => allowedModules.includes(item.id)),
@@ -189,11 +192,38 @@ export function AppSidebar({
       <div className="app-sidebar__brand">
         <img className="app-sidebar__logo" src={LOGO_INECO_DATA_URL} alt="Ineco" />
       </div>
-      <nav className="app-sidebar__nav" aria-label="Módulos">
+      <div className="app-sidebar__menu">
         {top.length > 0 ? (
-          <div className="app-sidebar__nav-top">
+          <nav className="app-sidebar__nav-top" aria-label="Inicio">
             <FlatNavButtons items={top} module={module} onNavigate={navigateFlat} />
-          </div>
+          </nav>
+        ) : null}
+
+        <nav className="app-sidebar__nav" aria-label="Módulos">
+        {showWhatsapp ? (
+          <AccordionGroup
+            id="whatsapp"
+            label="WhatsApp"
+            Icon={IconWhatsapp}
+            open={expanded === "whatsapp"}
+            active={module === "whatsapp"}
+            onToggle={() => toggleGroup("whatsapp")}
+          >
+            {WHATSAPP_SECTIONS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`app-sidebar__subbtn${
+                  module === "whatsapp" && section === item.id ? " is-active" : ""
+                }`}
+                onClick={() =>
+                  navigateSection({ module: "whatsapp", section: item.id })
+                }
+              >
+                {item.label}
+              </button>
+            ))}
+          </AccordionGroup>
         ) : null}
 
         {showBuscaTurno ? (
@@ -295,7 +325,8 @@ export function AppSidebar({
             ))}
           </AccordionGroup>
         ) : null}
-      </nav>
+        </nav>
+      </div>
 
       <div className="app-sidebar__bottom">
         {config.length > 0 ? (
