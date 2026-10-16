@@ -13,6 +13,7 @@ import {
   getMessage,
   listConversations,
   listMessagesByConversation,
+  listRecentMessagesByConversation,
   markConversationRead,
   setConversationAssignee,
   setConversationTags,
@@ -160,12 +161,32 @@ export async function logoutWhatsapp(): Promise<WaStatusSnapshot> {
   return getWhatsappStatus();
 }
 
+async function resumeUnansweredTurns(): Promise<void> {
+  const [pruebas, reales] = await Promise.all([
+    listConversations({ status: "OPEN", prueba: true, limit: 20 }),
+    listConversations({ status: "OPEN", prueba: false, limit: 20 }),
+  ]);
+  const ahora = Date.now();
+  for (const conv of [...pruebas.items, ...reales.items]) {
+    if (conv.assigneeKind === "user" || conv.contact?.isBlocked) continue;
+    const at = conv.lastMessageAt ? Date.parse(conv.lastMessageAt) : 0;
+    if (!at || ahora - at > 45 * 60 * 1000) continue;
+    const messages = await listRecentMessagesByConversation(conv.id, 5);
+    const last = messages[messages.length - 1];
+    if (!last || last.direction !== "INBOUND" || !last.text.trim()) continue;
+    scheduleBotTurn(conv.id, { immediate: true });
+  }
+}
+
 export async function bootstrapWhatsapp(): Promise<void> {
   if (bootstrapped) return;
   bootstrapped = true;
   await mediaStorage.ensureDirectory();
   await sessionStore.ensureDirectory();
   await provider.restoreIfPossible();
+  void resumeUnansweredTurns().catch((error) => {
+    console.error("[whatsapp] No se pudieron retomar los mensajes sin respuesta", error);
+  });
 }
 
 export async function sendConversationText(

@@ -46,7 +46,7 @@ import {
   IconCheckSquare,
   IconClock,
   IconX,
-  IconChevronDown,
+  IconChevronLeft,
   IconFilter,
   IconGrip,
   IconLink,
@@ -412,7 +412,7 @@ export function WhatsAppConversationsPanel({
   const dragPinnedIdRef = useRef<string | null>(null);
   const pinnedDropIndexRef = useRef<number | null>(null);
   const [quickTagQuery, setQuickTagQuery] = useState("");
-  const [allTagsOpen, setAllTagsOpen] = useState(false);
+  const [quickPanelOpen, setQuickPanelOpen] = useState(false);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
   const [tagsModalOpen, setTagsModalOpen] = useState(false);
   const [tagsModalGroupId, setTagsModalGroupId] = useState("");
@@ -441,6 +441,8 @@ export function WhatsAppConversationsPanel({
   const esperaMsRef = useRef(40_000);
   const typingAtRef = useRef<number | null>(null);
   const waitingReplyRef = useRef(false);
+  const esperaDesdeRef = useRef<number | null>(null);
+  const avisoFalloRef = useRef(false);
   const typingTimersRef = useRef<number[]>([]);
   const colaRef = useRef<string[]>([]);
   const pumpingRef = useRef(false);
@@ -736,6 +738,8 @@ export function WhatsAppConversationsPanel({
     ultimoBotRef.current = 0;
     waitingReplyRef.current = false;
     typingAtRef.current = null;
+    esperaDesdeRef.current = null;
+    avisoFalloRef.current = false;
     for (const id of typingTimersRef.current) window.clearTimeout(id);
     typingTimersRef.current = [];
     colaRef.current = [];
@@ -752,8 +756,50 @@ export function WhatsAppConversationsPanel({
     if (!pruebaMode) return;
     const id = window.setInterval(() => {
       if (!waitingReplyRef.current || typingAtRef.current == null) return;
-      if (Date.now() >= typingAtRef.current) setBotTyping(true);
+      const now = Date.now();
+      if (now >= typingAtRef.current) setBotTyping(true);
+      const desde = esperaDesdeRef.current ?? now;
+      if (now < desde + esperaMsRef.current + 120_000 || avisoFalloRef.current) return;
+      avisoFalloRef.current = true;
+      waitingReplyRef.current = false;
+      typingAtRef.current = null;
+      esperaDesdeRef.current = null;
+      setBotTyping(false);
+      toast.error("La respuesta del bot no llegó. Probá mandar el mensaje de nuevo.");
     }, 200);
+    return () => window.clearInterval(id);
+  }, [pruebaMode]);
+
+  useEffect(() => {
+    if (!pruebaMode) return;
+    const id = window.setInterval(() => {
+      if (!waitingReplyRef.current || avisoFalloRef.current) return;
+      const conversationId = pollState.current.selectedId;
+      const desde = esperaDesdeRef.current;
+      if (!conversationId || desde == null) return;
+      void fetchWaLlmUsage(conversationId)
+        .then((items) => {
+          if (!waitingReplyRef.current || avisoFalloRef.current) return;
+          const fallo = [...items].reverse().find((item) => {
+            const at = Date.parse(item.creadoEn ?? "");
+            return item.ok === false && Number.isFinite(at) && at >= desde - 2000;
+          });
+          if (!fallo) return;
+          const falloAt = Date.parse(fallo.creadoEn ?? "");
+          const siguio = items.some((item) => {
+            const at = Date.parse(item.creadoEn ?? "");
+            return item.ok && Number.isFinite(at) && at > falloAt;
+          });
+          if (siguio) return;
+          avisoFalloRef.current = true;
+          waitingReplyRef.current = false;
+          typingAtRef.current = null;
+          esperaDesdeRef.current = null;
+          setBotTyping(false);
+          toast.error("El bot no pudo contestar. Probá mandar el mensaje de nuevo.");
+        })
+        .catch(() => undefined);
+    }, 2000);
     return () => window.clearInterval(id);
   }, [pruebaMode]);
 
@@ -1623,7 +1669,10 @@ export function WhatsAppConversationsPanel({
     pumpingRef.current = false;
     setOcultos([]);
     const espera = esperaMsRef.current;
-    typingAtRef.current = Date.now() + Math.max(0, espera - 10_000);
+    const ahora = Date.now();
+    esperaDesdeRef.current = ahora;
+    avisoFalloRef.current = false;
+    typingAtRef.current = ahora + Math.max(0, espera - 10_000);
     waitingReplyRef.current = true;
     setBotTyping(espera <= 10_000);
   }
@@ -1859,7 +1908,7 @@ export function WhatsAppConversationsPanel({
         onDragEnd={sortable ? endPinnedDrag : undefined}
       >
         {sortable ? (
-          <span className="wa-tags-quick__grip" aria-hidden title="Arrastrar para ordenar">
+          <span className="wa-tags-quick__grip" aria-hidden>
             <IconGrip size={14} />
           </span>
         ) : null}
@@ -1868,7 +1917,7 @@ export function WhatsAppConversationsPanel({
           className="wa-tags-quick__apply"
           disabled={pickable ? false : !selectedId}
           aria-pressed={pickable ? picked : undefined}
-          title={
+          aria-label={
             pickable
               ? picked
                 ? `Quitar ${tag.name} del grupo`
@@ -1887,7 +1936,7 @@ export function WhatsAppConversationsPanel({
           {showGroup ? <span className="wa-tags-quick__group">{tagGroupLabel(tag)}</span> : null}
         </button>
         {clusterColor && !canLeave ? (
-          <span className="wa-tags-quick__link" aria-hidden title="En un grupo">
+          <span className="wa-tags-quick__link" aria-hidden>
             <IconLink size={13} />
           </span>
         ) : null}
@@ -1896,7 +1945,6 @@ export function WhatsAppConversationsPanel({
             type="button"
             className="wa-tags-quick__leave"
             aria-label={`Sacar ${tag.name} del grupo`}
-            title="Sacar del grupo"
             onClick={() => leavePinnedCluster(tag.id)}
           >
             <IconX size={13} />
@@ -1906,7 +1954,6 @@ export function WhatsAppConversationsPanel({
           type="button"
           className={`wa-tags-quick__pin${pinned ? " is-pinned" : ""}`}
           aria-label={pinned ? `Quitar ${tag.name} del acceso rápido` : `Pinear ${tag.name}`}
-          title={pinned ? "Quitar del acceso rápido" : "Pinear"}
           onClick={() => togglePinnedTag(tag.id)}
         >
           <IconPin size={14} filled={pinned} />
@@ -1982,7 +2029,7 @@ export function WhatsAppConversationsPanel({
   }
 
   return (
-    <div className="wa-inbox">
+    <div className={`wa-inbox${pruebaMode ? " wa-inbox--prueba" : ""}`}>
       <aside className="wa-inbox__list" aria-label="Conversaciones">
         <div className="wa-inbox__list-head">
           <div className="wa-inbox__list-tools">
@@ -2014,7 +2061,7 @@ export function WhatsAppConversationsPanel({
               }
               onClick={openFiltersModal}
             >
-              <IconFilter size={16} />
+              <IconFilter size={14} />
               {activeFilterCount > 0 ? (
                 <span className="wa-inbox__filter-badge">{activeFilterCount}</span>
               ) : null}
@@ -2114,22 +2161,36 @@ export function WhatsAppConversationsPanel({
         ) : (
           <>
             <header className="wa-inbox__thread-head">
-              <button
-                type="button"
-                className="wa-inbox__contact-open"
-                onClick={() => {
-                  if (!pruebaMode) setProfileOpen(true);
-                }}
-                title={pruebaMode ? "Datos de la prueba" : "Ver ficha del contacto"}
-              >
-                <h2>{threadHeader.title}</h2>
-                {threadHeader.subtitle ? (
-                  <p className="wa-inbox__thread-rel">{threadHeader.subtitle}</p>
-                ) : null}
-                {selected?.resumen && !pruebaMode ? (
-                  <p className="wa-inbox__thread-resumen">{selected.resumen}</p>
-                ) : null}
-              </button>
+              <div className="wa-inbox__identity">
+                {pruebaMode ? null : (
+                  <button
+                    type="button"
+                    className="wa-inbox__avatar"
+                    disabled={!selected?.contactId}
+                    aria-label="Ver ficha del contacto"
+                    title="Ver ficha del contacto"
+                    onClick={() => setProfileOpen(true)}
+                  >
+                    <IconUsers size={18} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="wa-inbox__contact-open"
+                  onClick={() => {
+                    if (!pruebaMode) setProfileOpen(true);
+                  }}
+                  title={pruebaMode ? "Datos de la prueba" : "Ver ficha del contacto"}
+                >
+                  <h2>{threadHeader.title}</h2>
+                  {threadHeader.subtitle ? (
+                    <p className="wa-inbox__thread-rel">{threadHeader.subtitle}</p>
+                  ) : null}
+                  {selected?.resumen && !pruebaMode ? (
+                    <p className="wa-inbox__thread-resumen">{selected.resumen}</p>
+                  ) : null}
+                </button>
+              </div>
               <div className="wa-inbox__assign">
                 {pruebaMode ? (
                   <>
@@ -2158,91 +2219,80 @@ export function WhatsAppConversationsPanel({
                   </>
                 ) : (
                   <>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tarea"
-                  disabled={!selected?.contactId}
-                  aria-label="Tarea"
-                  onClick={() => {
-                    setFollowUpKind("tarea");
-                    setFollowUpOpen(true);
-                  }}
-                >
-                  <IconCheckSquare size={16} />
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--rec"
-                  disabled={!selected?.contactId}
-                  aria-label="Recordatorio"
-                  onClick={() => {
-                    setFollowUpKind("recordatorio");
-                    setFollowUpOpen(true);
-                  }}
-                >
-                  <IconClock size={16} />
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--nota"
-                  disabled={!selected?.contactId}
-                  aria-label="Notas"
-                  onClick={() => {
-                    setFollowUpKind("nota");
-                    setFollowUpOpen(true);
-                  }}
-                >
-                  <IconNote size={16} />
-                </button>
-                {tags.length > 0 ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tag"
-                    aria-label="Etiquetas"
-                    onClick={() => {
-                      setTagsModalGroupId("");
-                      setTagsModalOpen(true);
-                    }}
-                  >
-                    <IconTag size={16} />
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--contacto"
-                  disabled={!selected?.contactId}
-                  aria-label="Agendar contacto"
-                  onClick={() => {
-                    setFollowUpKind("agendar");
-                    setFollowUpOpen(true);
-                  }}
-                >
-                  <IconUsers size={16} />
-                </button>
-                <select
-                  className="ui-select"
-                  aria-label="Asignar operadora"
-                  title={
-                    selected?.assigneeKind === "bot"
-                      ? "Bot"
-                      : selected?.assigneeKind === "user"
-                        ? selected.assigneeName || "Asignado"
-                        : "Sin asignar"
-                  }
-                  value={currentAssigneeSelectValue()}
-                  disabled={assigning || pendingAssignee !== null}
-                  onChange={(event) => {
-                    requestAssigneeChange(event.target.value);
-                  }}
-                >
-                  <option value="">Sin asignar</option>
-                  <option value="bot">Bot</option>
-                  {operators.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.nombre}
-                    </option>
-                  ))}
-                </select>
+                    <select
+                      className="ui-select"
+                      aria-label="Asignar operadora"
+                      title={
+                        selected?.assigneeKind === "bot"
+                          ? "Bot"
+                          : selected?.assigneeKind === "user"
+                            ? selected.assigneeName || "Asignado"
+                            : "Sin asignar"
+                      }
+                      value={currentAssigneeSelectValue()}
+                      disabled={assigning || pendingAssignee !== null}
+                      onChange={(event) => {
+                        requestAssigneeChange(event.target.value);
+                      }}
+                    >
+                      <option value="">Sin asignar</option>
+                      <option value="bot">Bot</option>
+                      {operators.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.nombre}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tarea"
+                      disabled={!selected?.contactId}
+                      aria-label="Tarea"
+                      onClick={() => {
+                        setFollowUpKind("tarea");
+                        setFollowUpOpen(true);
+                      }}
+                    >
+                      <IconCheckSquare size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--rec"
+                      disabled={!selected?.contactId}
+                      aria-label="Recordatorio"
+                      onClick={() => {
+                        setFollowUpKind("recordatorio");
+                        setFollowUpOpen(true);
+                      }}
+                    >
+                      <IconClock size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--nota"
+                      disabled={!selected?.contactId}
+                      aria-label="Notas"
+                      onClick={() => {
+                        setFollowUpKind("nota");
+                        setFollowUpOpen(true);
+                      }}
+                    >
+                      <IconNote size={16} />
+                    </button>
+                    {tags.length > 0 ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tag"
+                        aria-label="Etiquetas"
+                        title="Etiquetas"
+                        onClick={() => {
+                          setTagsModalGroupId("");
+                          setTagsModalOpen(true);
+                        }}
+                      >
+                        <IconTag size={16} />
+                      </button>
+                    ) : null}
                   </>
                 )}
                 <button
@@ -2814,7 +2864,16 @@ export function WhatsAppConversationsPanel({
           )}
         </aside>
       ) : (
-        <aside className="wa-tags-panel" aria-label="Etiquetas rápidas">
+        <div
+          className={`wa-tags-hover${quickPanelOpen ? " is-open" : ""}`}
+          onMouseEnter={() => setQuickPanelOpen(true)}
+          onMouseLeave={() => setQuickPanelOpen(false)}
+        >
+          <span className="wa-tags-hover__tab" aria-hidden>
+            <IconChevronLeft size={16} />
+          </span>
+          <aside className="wa-tags-pop" aria-label="Etiquetas rápidas">
+          <div className="wa-tags-panel wa-tags-panel--float">
           <div className="table-search wa-tags-panel__search">
             <span className="table-search__icon" aria-hidden>
               <IconSearch size={16} />
@@ -2838,6 +2897,7 @@ export function WhatsAppConversationsPanel({
               </button>
             ) : null}
           </div>
+          <div className="wa-tags-panel__scroll">
           {quickTagQuery.trim() ? (
             tags.length === 0 ? (
               <p>Todavía no hay etiquetas.</p>
@@ -3004,30 +3064,23 @@ export function WhatsAppConversationsPanel({
                 )}
               </section>
               <section className="wa-tags-panel__fold">
-                <button
-                  type="button"
-                  className="wa-tags-panel__fold-btn"
-                  aria-expanded={allTagsOpen}
-                  onClick={() => setAllTagsOpen((open) => !open)}
-                >
-                  <span>Todas</span>
-                  <IconChevronDown size={14} />
-                </button>
-                {allTagsOpen ? (
-                  tags.length === 0 ? (
-                    <p>Todavía no hay etiquetas.</p>
-                  ) : quickTagResults.length === 0 ? (
-                    <p>Ninguna etiqueta coincide.</p>
-                  ) : (
-                    <div className="wa-tags-quick-list">
-                      {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
-                    </div>
-                  )
-                ) : null}
+                <h3>Todas</h3>
+                {tags.length === 0 ? (
+                  <p>Todavía no hay etiquetas.</p>
+                ) : quickTagResults.length === 0 ? (
+                  <p>Ninguna etiqueta coincide.</p>
+                ) : (
+                  <div className="wa-tags-quick-list">
+                    {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+                  </div>
+                )}
               </section>
             </>
           )}
-        </aside>
+          </div>
+          </div>
+          </aside>
+        </div>
       )}
 
       <Modal

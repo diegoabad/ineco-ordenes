@@ -67,12 +67,13 @@ async function waitMs(): Promise<number> {
   return clampWait(mensajeria.tiempoEsperaEntreMensajes, motor.data.mensajeria.agruparMensajes);
 }
 
-export function scheduleBotTurn(conversationId: string): void {
+export function scheduleBotTurn(conversationId: string, options?: { immediate?: boolean }): void {
   const ticket = (tickets.get(conversationId) ?? 0) + 1;
   tickets.set(conversationId, ticket);
   const previous = timers.get(conversationId);
   if (previous) clearTimeout(previous);
-  void waitMs().then((ms) => {
+  const wait = options?.immediate ? Promise.resolve(0) : waitMs();
+  void wait.then((ms) => {
     if (tickets.get(conversationId) !== ticket) return;
     const timer = setTimeout(() => {
       timers.delete(conversationId);
@@ -492,10 +493,13 @@ const respuestaSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    texto: { type: "string" },
+    partes: {
+      type: "array",
+      items: { type: "string" },
+    },
     pregunta: { type: "string" },
   },
-  required: ["texto", "pregunta"],
+  required: ["partes", "pregunta"],
 } as Record<string, unknown>;
 
 function separarPregunta(texto: string, pregunta: string): { cuerpo: string; pregunta: string } {
@@ -866,7 +870,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     bot.conversacion && typeof bot.conversacion === "object"
       ? stringField(bot.conversacion as Record<string, unknown>, "estiloRespuesta")
       : "";
-  const reply = await completeStructured<{ texto: string; pregunta?: string }>({
+  const reply = await completeStructured<{ partes?: string[]; pregunta?: string }>({
     conversacionId: conversationId,
     paso: "responder",
     modelo: models.responder,
@@ -876,9 +880,12 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     schema: respuestaSchema,
     onUsage: io?.onUsage,
     instructions: [
-      "Redactá un mensaje corto de WhatsApp, en español de Argentina, en texto plano. Sin HTML, sin markdown y sin asteriscos.",
-      "Si nombrás varias sedes, precios, profesionales o pasos, poné una frase corta y después cada ítem en su propio renglón, uno debajo del otro. No los encadenes con comas en un solo párrafo.",
-      "texto es la información. pregunta es la única pregunta, o vacía si no hay que preguntar. Una oferta como si quiere un turno, cuál sede, o un dato que falta, también va en pregunta. No la dejes al final de texto.",
+      "Redactá en español de Argentina, en texto plano. Sin HTML.",
+      "La forma de la respuesta es fija: partes es un array de mensajes y cada string sale como un globo distinto. pregunta es otro globo, con una sola pregunta, o vacío. Cómo partir los temas, cuánto espacio dejar, qué resaltar y con qué tono preguntar lo marcan el estilo y las instrucciones de la configuración. Seguilas al pie de la letra.",
+      estilo
+        ? `Estilo de redacción:\n${estilo}`
+        : "No hay estilo cargado. Usá una sola parte corta y, si hace falta preguntar, hacelo en pregunta.",
+      instrucciones.length ? `Instrucciones de redacción:\n${instrucciones.join("\n")}` : "",
       "Usá solo el texto de la base. No inventes precios, profesionales, coberturas ni direcciones. No respondas cultura general, clima, deportes, tareas ni ningún tema que no sea de INECO.",
       "Si un dato dice no informado o en confirmación, no lo completes: pedí los datos y decí que el equipo informa.",
       "Si hay dos precios, decí los dos.",
@@ -889,7 +896,6 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       stringField(plazos, "seInforma") ? `Sí se puede informar: ${stringField(plazos, "seInforma")}` : "",
       stringField(plazos, "noSeInforma") ? `No se informa: ${stringField(plazos, "noSeInforma")}` : "",
       objetivo ? `Objetivo: ${objetivo}` : "",
-      estilo ? `Estilo: ${estilo}.` : "",
       fase === "inicio"
         ? "La charla recién empieza. No saludes ni te presentes: el saludo ya sale en otro mensaje. Respondé el pedido. No agregues la pregunta de en qué podés ayudar si ya vas a hacer otra pregunta."
         : "La charla ya empezó. No saludes, no te presentes y no repitas tu nombre.",
@@ -904,14 +910,13 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       conflicto
         ? ""
         : pedido
-          ? `Para la intención principal falta un solo dato. La información va en texto. En pregunta pedí únicamente: ${pedido}. No pidas ningún dato que ya figure en la ficha.`
+          ? `Para la intención principal falta un solo dato. La información va en partes. En pregunta pedí únicamente: ${pedido}. No pidas ningún dato que ya figure en la ficha.`
           : esInfo
             ? fichaActual.esPaciente
               ? "Ya pasaste la información pedida. Esa consulta queda cerrada. No pidas nombre, edad, DNI ni ningún otro dato. En pregunta ofrecé una sola frase: si lo podés ayudar en algo más, o si le gustaría sacar un turno."
-              : "Ya pasaste la información pedida. Esa consulta queda cerrada. No pidas nombre, edad, DNI ni ningún otro dato. En pregunta preguntá solo si ya es paciente de INECO o no."
+              : "Ya pasaste la información pedida. Esa consulta queda cerrada. No pidas nombre, edad, DNI ni ningún otro dato. En pregunta preguntá si ya es paciente de INECO, con la forma que indique el estilo."
             : "La ficha ya tiene los datos que esta intención necesita. No pidas nombre, apellido, DNI, edad ni ningún otro dato.",
       identidad.texto,
-      ...instrucciones,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -933,7 +938,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
         : esInfo && faltan.length === 0
           ? fichaActual.esPaciente
             ? "La información ya se respondió. No pidas datos. En la pregunta ofrecé ayudar en algo más o sacar un turno."
-            : "La información ya se respondió. No pidas datos. En la pregunta preguntá solo si ya es paciente de INECO o no."
+            : "La información ya se respondió. No pidas datos. En la pregunta preguntá si ya es paciente de INECO, con la forma que indique el estilo."
           : faltan.length
           ? `Falta para la intención principal: ${faltan.join(", ")}. Pedí solo el primero.`
           : "No falta ningún dato para esta intención.",
@@ -952,14 +957,23 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   });
   if (io?.trace) io.trace.lunaLlamada = true;
 
-  const partes = separarPregunta(reply.texto ?? "", reply.pregunta ?? "");
-  let cuerpo = partes.cuerpo;
-  if (fase === "inicio" && charla.saludo) {
-    await send(conversationId, charla.saludo);
-    if (cuerpo.startsWith(charla.saludo)) cuerpo = cuerpo.slice(charla.saludo.length).trim();
+  let bloques = (Array.isArray(reply.partes) ? reply.partes : [])
+    .map((parte) => parte.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  let pregunta = (reply.pregunta ?? "").trim();
+  if (!pregunta && bloques.length) {
+    const suelta = separarPregunta(bloques[bloques.length - 1] ?? "", "");
+    if (suelta.pregunta) {
+      pregunta = suelta.pregunta;
+      bloques = suelta.cuerpo
+        ? [...bloques.slice(0, -1), suelta.cuerpo]
+        : bloques.slice(0, -1);
+    }
   }
-  if (cuerpo) await send(conversationId, cuerpo.slice(0, 1500));
-  if (partes.pregunta) await send(conversationId, partes.pregunta.slice(0, 500));
+  if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+  for (const parte of bloques) await send(conversationId, parte.slice(0, 700));
+  if (pregunta) await send(conversationId, pregunta.slice(0, 500));
   await saveIntencion(conversationId, estadoSiguiente);
   if (conversation.assigneeKind === "none") {
     await saveAssignee(conversationId, { kind: "bot", name: identidad.nombre });

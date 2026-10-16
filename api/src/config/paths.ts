@@ -6,19 +6,12 @@ import { env } from "./env.js";
 export const API_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /**
- * UPLOADS_DIR apunta a la carpeta de firmas (`.../uploads/firmas`).
- * La raíz de uploads (volumen Docker `./uploads`) es el padre de esa carpeta.
+ * UPLOADS_DIR es la carpeta que el servidor monta y conserva (`data/firmas`).
+ * Firmas, pedidos, PDFs de órdenes y presupuestos viven ahí: las firmas sueltas
+ * y el resto en subcarpetas. El padre de esa carpeta no está en el volumen.
  */
 export function uploadsRootDir(): string {
-  const firmasOrRoot = path.isAbsolute(env.uploadsDir)
-    ? env.uploadsDir
-    : path.join(API_ROOT, env.uploadsDir);
-
-  if (path.basename(firmasOrRoot).toLowerCase() === "firmas") {
-    return path.dirname(firmasOrRoot);
-  }
-  // Si alguien configuró UPLOADS_DIR como la raíz `uploads`, usarla directo.
-  return firmasOrRoot;
+  return uploadsFirmasDir();
 }
 
 export function uploadsFirmasDir(): string {

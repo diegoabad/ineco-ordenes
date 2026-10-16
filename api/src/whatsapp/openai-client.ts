@@ -87,6 +87,7 @@ export async function completeStructured<T>(input: {
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
+      signal: AbortSignal.timeout(90_000),
       headers: {
         Authorization: `Bearer ${env.openai.apiKey}`,
         "Content-Type": "application/json",

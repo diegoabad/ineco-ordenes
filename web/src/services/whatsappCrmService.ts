@@ -385,6 +385,8 @@ export type WaLlmUsage = {
   tokensCache: number;
   tokensRazonamiento: number;
   ok: boolean;
+  error?: string;
+  creadoEn?: string;
 };
 
 export async function fetchWaLlmUsage(conversationId: string): Promise<WaLlmUsage[]> {

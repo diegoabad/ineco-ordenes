@@ -572,7 +572,9 @@ export function PedidosSistemaPanel() {
       <PedidoSistemaFormModal
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onCreated={(pedido) => setItems((prev) => [pedido, ...prev])}
+        onCreated={(pedido) =>
+          setItems((prev) => (prev.some((item) => item.id === pedido.id) ? prev : [pedido, ...prev]))
+        }
       />
 
       <Modal
