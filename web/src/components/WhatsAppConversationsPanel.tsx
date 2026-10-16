@@ -1819,6 +1819,7 @@ export function WhatsAppConversationsPanel({
     clusterColor?: string,
     groupEnd = false,
     canLeave = false,
+    showGroup = true,
   ) {
     const assigned = (selected?.tagIds ?? []).includes(tag.id);
     const picked = pickable && groupPick.includes(tag.id);
@@ -1875,7 +1876,7 @@ export function WhatsAppConversationsPanel({
           onClick={() => (pickable ? toggleGroupPick(tag.id) : toggleConversationTag(tag.id))}
         >
           <span className="wa-tags-quick__name">{tag.name}</span>
-          <span className="wa-tags-quick__group">{tagGroupLabel(tag)}</span>
+          {showGroup ? <span className="wa-tags-quick__group">{tagGroupLabel(tag)}</span> : null}
         </button>
         {clusterColor && !canLeave ? (
           <span className="wa-tags-quick__link" aria-hidden title="En un grupo">
@@ -1961,6 +1962,7 @@ export function WhatsAppConversationsPanel({
       clusterColor,
       groupEnd,
       Boolean(clusterColor) && editingGroups,
+      false,
     );
   }
 
