@@ -55,6 +55,7 @@ export type WaConversation = {
   pruebaResultado?: "correcta" | "incorrecta" | null;
   pruebaNota?: string | null;
   pruebaNotaEn?: string | null;
+  pruebaAclaraciones?: { messageId: string; texto: string }[];
   auditoria?: {
     en: string;
     intencion: string;
@@ -64,6 +65,7 @@ export type WaConversation = {
     peligro: boolean;
     duda: boolean;
     cortesia: "" | "saludo" | "cierre";
+    hecho?: string;
     resumen: string;
     etiquetas: string[];
   }[];

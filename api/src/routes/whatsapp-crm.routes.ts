@@ -531,8 +531,8 @@ router.post("/pruebas/:id/nota", async (req, res) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const resultado = req.body?.resultado === "correcta" ? "correcta" : "incorrecta";
-    const texto = typeof req.body?.texto === "string" ? req.body.texto : "";
-    const data = await setPruebaNota(String(id ?? ""), resultado, texto);
+    const aclaraciones = Array.isArray(req.body?.aclaraciones) ? req.body.aclaraciones : [];
+    const data = await setPruebaNota(String(id ?? ""), resultado, aclaraciones);
     res.json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudo guardar la nota");

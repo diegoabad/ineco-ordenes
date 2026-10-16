@@ -421,13 +421,13 @@ export async function sendWaPruebaMessage(
 export async function saveWaPruebaNota(
   conversationId: string,
   resultado: "correcta" | "incorrecta",
-  texto = "",
+  aclaraciones: { messageId: string; texto: string }[] = [],
 ): Promise<WaConversation> {
   const res = await apiFetch<{ ok: boolean; data: WaConversation }>(
     `/api/whatsapp-crm/pruebas/${encodeURIComponent(conversationId)}/nota`,
     {
       method: "POST",
-      body: JSON.stringify({ resultado, texto }),
+      body: JSON.stringify({ resultado, aclaraciones }),
     },
   );
   return res.data;

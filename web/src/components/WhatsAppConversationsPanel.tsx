@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MutableRefObject } from "react";
 import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
 import { formatFechaHora, fechaHoyIso } from "../lib/fechas";
@@ -25,7 +25,9 @@ import {
   type WaLlmUsage,
   fetchQuickReplies,
   fetchWaTagCatalog,
+  fetchWhatsappBotConfig,
   fetchWhatsappCrmHealth,
+  fetchWhatsappMotorConfig,
   fetchWhatsappStatus,
   markWaConversationRead,
   createWaPrueba,
@@ -40,11 +42,17 @@ import type { WaConversation, WaMessage, WaOperator, WaTag, WaTagGroup } from ".
 import { waAssigneeLabel, waContactLabel, waContactThreadHeader } from "../types/whatsappCrm";
 import { DatePicker } from "./DatePicker";
 import {
+  IconCheck,
   IconCheckSquare,
   IconClock,
+  IconX,
+  IconChevronDown,
   IconFilter,
+  IconGrip,
+  IconLink,
   IconMinus,
   IconNote,
+  IconPin,
   IconPlus,
   IconSearch,
   IconTag,
@@ -59,6 +67,28 @@ import {
 import { WhatsAppContactProfileModal } from "./WhatsAppContactProfileModal";
 
 const CONVERSATIONS_PAGE_SIZE = 40;
+
+function mergeMensajesServidor(prev: WaMessage[], server: WaMessage[]): WaMessage[] {
+  const locales = prev.filter((item) => item.id.startsWith("local-"));
+  if (!locales.length) return server;
+  const usados = new Set<string>();
+  const pendientes = locales.filter((local) => {
+    const match = server.find((msg) => {
+      if (usados.has(msg.id)) return false;
+      if (msg.direction !== local.direction) return false;
+      if ((msg.text ?? "").trim() !== (local.text ?? "").trim()) return false;
+      const delta = Math.abs(Date.parse(msg.createdAt) - Date.parse(local.createdAt));
+      return Number.isFinite(delta) && delta < 20_000;
+    });
+    if (!match) return true;
+    usados.add(match.id);
+    return false;
+  });
+  if (!pendientes.length) return server;
+  return [...server, ...pendientes].sort(
+    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+  );
+}
 
 type WaInboxFilters = {
   assignee: string;
@@ -221,6 +251,117 @@ type Props = {
   createPruebaRef?: MutableRefObject<(() => void) | null>;
 };
 
+const PINNED_WA_TAGS_KEY = "wa-inbox-pinned-tag-ids";
+const PINNED_CLUSTERS_KEY = "wa-inbox-pinned-tag-clusters";
+const CLUSTER_MIN = 2;
+const CLUSTER_COLORS = [
+  "#a61948",
+  "#64748b",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#06b6d4",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+];
+
+type PinnedCluster = {
+  id: string;
+  color: string;
+  tagIds: string[];
+};
+
+function readPinnedTagIds(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_WA_TAGS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((id) => String(id ?? "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function newClusterId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `cluster-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function readPinnedClusters(): PinnedCluster[] {
+  try {
+    const raw = localStorage.getItem(PINNED_CLUSTERS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const used = new Set<string>();
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as { id?: unknown; color?: unknown; tagIds?: unknown };
+      const id = String(row.id ?? "").trim();
+      const color = String(row.color ?? "").trim().toLowerCase();
+      const tagIds = Array.isArray(row.tagIds)
+        ? row.tagIds
+            .map((tagId) => String(tagId ?? "").trim())
+            .filter((tagId) => tagId && !used.has(tagId) && used.add(tagId))
+        : [];
+      if (!id || !/^#[0-9a-f]{6}$/.test(color) || tagIds.length < CLUSTER_MIN) return [];
+      return [{ id, color, tagIds }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function normalizeClusters(order: string[], clusters: PinnedCluster[]): PinnedCluster[] {
+  const used = new Set<string>();
+  const next: PinnedCluster[] = [];
+  for (const cluster of clusters) {
+    const indexes = [...new Set(cluster.tagIds.map((id) => order.indexOf(id)).filter((index) => index >= 0))].sort(
+      (a, b) => a - b,
+    );
+    if (indexes.length < CLUSTER_MIN) continue;
+    const runs: number[][] = [];
+    let run: number[] = [indexes[0]!];
+    for (let i = 1; i < indexes.length; i++) {
+      const index = indexes[i]!;
+      if (index === run[run.length - 1]! + 1) run.push(index);
+      else {
+        runs.push(run);
+        run = [index];
+      }
+    }
+    runs.push(run);
+    let reused = false;
+    for (const segment of runs) {
+      const tagIds = segment
+        .map((index) => order[index]!)
+        .filter((id) => !used.has(id));
+      if (tagIds.length < CLUSTER_MIN) continue;
+      for (const id of tagIds) used.add(id);
+      next.push({
+        id: reused ? `${cluster.id}-${segment[0]}` : cluster.id,
+        color: cluster.color,
+        tagIds,
+      });
+      reused = true;
+    }
+  }
+  return next;
+}
+
+function sameClusters(a: PinnedCluster[], b: PinnedCluster[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((cluster, index) => {
+    const other = b[index];
+    return (
+      !!other &&
+      cluster.id === other.id &&
+      cluster.color === other.color &&
+      cluster.tagIds.join("|") === other.tagIds.join("|")
+    );
+  });
+}
+
 export function WhatsAppConversationsPanel({
   onConnectionChange,
   connectRef,
@@ -248,8 +389,11 @@ export function WhatsAppConversationsPanel({
   const [tagFilterSuggestOpen, setTagFilterSuggestOpen] = useState(false);
   const tagFilterWrapRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creatingPrueba, setCreatingPrueba] = useState(false);
   const [selected, setSelected] = useState<WaConversation | null>(null);
   const [messages, setMessages] = useState<WaMessage[]>([]);
+  const [botTyping, setBotTyping] = useState(false);
+  const [ocultos, setOcultos] = useState<string[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -257,6 +401,18 @@ export function WhatsAppConversationsPanel({
   const [operators, setOperators] = useState<WaOperator[]>([]);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [tags, setTags] = useState<WaTag[]>([]);
+  const [pinnedTagIds, setPinnedTagIds] = useState<string[]>(readPinnedTagIds);
+  const [pinnedClusters, setPinnedClusters] = useState<PinnedCluster[]>(readPinnedClusters);
+  const [groupingTags, setGroupingTags] = useState(false);
+  const [editingGroups, setEditingGroups] = useState(false);
+  const [groupPick, setGroupPick] = useState<string[]>([]);
+  const [groupColor, setGroupColor] = useState(CLUSTER_COLORS[0]!);
+  const [dragPinnedId, setDragPinnedId] = useState<string | null>(null);
+  const [pinnedDropIndex, setPinnedDropIndex] = useState<number | null>(null);
+  const dragPinnedIdRef = useRef<string | null>(null);
+  const pinnedDropIndexRef = useRef<number | null>(null);
+  const [quickTagQuery, setQuickTagQuery] = useState("");
+  const [allTagsOpen, setAllTagsOpen] = useState(false);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
   const [tagsModalOpen, setTagsModalOpen] = useState(false);
   const [tagsModalGroupId, setTagsModalGroupId] = useState("");
@@ -269,7 +425,9 @@ export function WhatsAppConversationsPanel({
   const [followUpKind, setFollowUpKind] = useState<WaFollowUpKind>("tarea");
   const [profileOpen, setProfileOpen] = useState(false);
   const [notaOpen, setNotaOpen] = useState(false);
-  const [notaTexto, setNotaTexto] = useState("");
+  const [eligiendoRechazo, setEligiendoRechazo] = useState(false);
+  const [rechazoIds, setRechazoIds] = useState<string[]>([]);
+  const [aclaraciones, setAclaraciones] = useState<Record<string, string>>({});
   const [notaSaving, setNotaSaving] = useState(false);
   const [pruebaTab, setPruebaTab] = useState<"paciente" | "modulo" | "intenciones">("paciente");
   const tagWatch = useRef<{ id: string; tags: string[] }>({ id: "", tags: [] });
@@ -280,11 +438,23 @@ export function WhatsAppConversationsPanel({
   const [slashIndex, setSlashIndex] = useState(0);
   const [assigning, setAssigning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const esperaMsRef = useRef(40_000);
+  const typingAtRef = useRef<number | null>(null);
+  const waitingReplyRef = useRef(false);
+  const typingTimersRef = useRef<number[]>([]);
+  const colaRef = useRef<string[]>([]);
+  const pumpingRef = useRef(false);
+  const vistosRef = useRef<Set<string>>(new Set());
+  const abrirRef = useRef<string | null>(null);
+  const vioCargaRef = useRef(false);
+  const ultimoBotRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const listBodyRef = useRef<HTMLDivElement | null>(null);
   const tagsGroupPickerRef = useRef<HTMLDivElement | null>(null);
   const searchTimer = useRef<number | null>(null);
   const loadingMoreRef = useRef(false);
+  const skipThreadLoad = useRef<string | null>(null);
+  const creatingPruebaRef = useRef(false);
   const pollState = useRef({
     search: "",
     selectedId: null as string | null,
@@ -475,13 +645,7 @@ export function WhatsAppConversationsPanel({
           tasks.push(
             fetchWaMessages(snap.selectedId)
               .then((msgs) => {
-                setMessages((prev) => {
-                  const pendingLocal = prev.filter((item) => item.id.startsWith("local-"));
-                  if (!pendingLocal.length) return msgs;
-                  return [...msgs, ...pendingLocal].sort(
-                    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
-                  );
-                });
+                setMessages((prev) => mergeMensajesServidor(prev, msgs));
               })
               .catch(() => undefined),
           );
@@ -498,6 +662,10 @@ export function WhatsAppConversationsPanel({
     if (!selectedId) {
       setSelected(null);
       setMessages([]);
+      return;
+    }
+    if (skipThreadLoad.current === selectedId) {
+      skipThreadLoad.current = null;
       return;
     }
     setMessages([]);
@@ -537,7 +705,122 @@ export function WhatsAppConversationsPanel({
       block: "nearest",
       inline: "nearest",
     });
-  }, [messages]);
+  }, [messages, botTyping, ocultos]);
+
+  useEffect(() => {
+    if (!pruebaMode) return;
+    let cancelled = false;
+    void Promise.all([fetchWhatsappBotConfig(), fetchWhatsappMotorConfig()])
+      .then(([bot, motor]) => {
+        if (cancelled) return;
+        const agrupar = motor.data.mensajeria.agruparMensajes !== false;
+        const mensajeria = bot.data?.mensajeria;
+        const raw =
+          mensajeria && typeof mensajeria === "object"
+            ? (mensajeria as Record<string, unknown>).tiempoEsperaEntreMensajes
+            : 40;
+        const n = Number(raw ?? 40);
+        const segundos = !agrupar || !Number.isFinite(n) ? 0 : Math.min(120, Math.max(0, Math.round(n)));
+        esperaMsRef.current = segundos * 1000;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [pruebaMode]);
+
+  useEffect(() => {
+    abrirRef.current = selectedId;
+    vioCargaRef.current = false;
+    vistosRef.current = new Set();
+    ultimoBotRef.current = 0;
+    waitingReplyRef.current = false;
+    typingAtRef.current = null;
+    for (const id of typingTimersRef.current) window.clearTimeout(id);
+    typingTimersRef.current = [];
+    colaRef.current = [];
+    pumpingRef.current = false;
+    setOcultos([]);
+    setBotTyping(false);
+    return () => {
+      for (const id of typingTimersRef.current) window.clearTimeout(id);
+      typingTimersRef.current = [];
+    };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!pruebaMode) return;
+    const id = window.setInterval(() => {
+      if (!waitingReplyRef.current || typingAtRef.current == null) return;
+      if (Date.now() >= typingAtRef.current) setBotTyping(true);
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [pruebaMode]);
+
+  useEffect(() => {
+    if (!pruebaMode || !selectedId) return;
+    if (abrirRef.current === selectedId) {
+      if (messages.some((item) => item.conversationId !== selectedId)) return;
+      if (loadingMessages) {
+        vioCargaRef.current = true;
+        return;
+      }
+      if (!vioCargaRef.current) return;
+      for (const item of messages) vistosRef.current.add(item.id);
+      abrirRef.current = null;
+      return;
+    }
+    const nuevos = messages.filter(
+      (item) => item.direction === "OUTBOUND" && !item.isDeleted && !vistosRef.current.has(item.id),
+    );
+    if (!nuevos.length) return;
+    for (const item of nuevos) vistosRef.current.add(item.id);
+    waitingReplyRef.current = false;
+    typingAtRef.current = null;
+
+    const reciente = ultimoBotRef.current > 0 && Date.now() - ultimoBotRef.current < 4000;
+    const encolar =
+      reciente && colaRef.current.length === 0 ? nuevos.map((item) => item.id) : nuevos.slice(1).map((item) => item.id);
+    if (!encolar.length) {
+      ultimoBotRef.current = Date.now();
+      setBotTyping(false);
+      return;
+    }
+    colaRef.current = [...colaRef.current, ...encolar];
+    setOcultos([...colaRef.current]);
+    setBotTyping(false);
+    if (!pumpingRef.current) {
+      const sigue = reciente && encolar.length === nuevos.length;
+      if (sigue) programarSiguiente();
+      else {
+        const gap = window.setTimeout(() => programarSiguiente(), 400);
+        typingTimersRef.current.push(gap);
+      }
+    }
+
+    function programarSiguiente() {
+      if (!colaRef.current.length) {
+        pumpingRef.current = false;
+        setBotTyping(false);
+        return;
+      }
+      pumpingRef.current = true;
+      setBotTyping(true);
+      const timer = window.setTimeout(() => {
+        colaRef.current = colaRef.current.slice(1);
+        setOcultos([...colaRef.current]);
+        ultimoBotRef.current = Date.now();
+        setBotTyping(false);
+        if (!colaRef.current.length) {
+          pumpingRef.current = false;
+          return;
+        }
+        const gap = window.setTimeout(() => programarSiguiente(), 400);
+        typingTimersRef.current.push(gap);
+      }, 1100);
+      typingTimersRef.current.push(timer);
+    }
+  }, [messages, pruebaMode, selectedId, loadingMessages]);
 
   useEffect(() => {
     if (!qrModalOpen || waStatus !== "CONNECTED") return;
@@ -557,6 +840,8 @@ export function WhatsAppConversationsPanel({
   useEffect(() => {
     setTagsModalOpen(false);
     setTagsModalGroupId("");
+    setEligiendoRechazo(false);
+    setNotaOpen(false);
   }, [selectedId]);
 
   useEffect(() => {
@@ -692,6 +977,95 @@ export function WhatsAppConversationsPanel({
     () => tags.filter((tag) => (selected?.tagIds ?? []).includes(tag.id)),
     [tags, selected?.tagIds],
   );
+
+  useEffect(() => {
+    localStorage.setItem(PINNED_WA_TAGS_KEY, JSON.stringify(pinnedTagIds));
+  }, [pinnedTagIds]);
+
+  const pinnedTags = useMemo(
+    () =>
+      pinnedTagIds
+        .map((id) => tags.find((tag) => tag.id === id))
+        .filter((tag): tag is WaTag => Boolean(tag)),
+    [pinnedTagIds, tags],
+  );
+
+  const pinnedOrderKey = pinnedTags.map((tag) => tag.id).join("|");
+  const activeClusters = useMemo(() => {
+    if (tags.length === 0) return pinnedClusters;
+    return normalizeClusters(
+      pinnedTags.map((tag) => tag.id),
+      pinnedClusters,
+    );
+  }, [pinnedOrderKey, pinnedClusters, pinnedTags, tags.length]);
+
+  useEffect(() => {
+    if (!sameClusters(activeClusters, pinnedClusters)) setPinnedClusters(activeClusters);
+  }, [activeClusters, pinnedClusters]);
+
+  useEffect(() => {
+    setPinnedTagIds((prev) => {
+      const next = withGroupsFirst(prev, activeClusters);
+      return next.join("|") === prev.join("|") ? prev : next;
+    });
+  }, [activeClusters, pinnedOrderKey]);
+
+  useEffect(() => {
+    localStorage.setItem(PINNED_CLUSTERS_KEY, JSON.stringify(pinnedClusters));
+  }, [pinnedClusters]);
+
+  useEffect(() => {
+    if (groupingTags && pinnedTags.length < CLUSTER_MIN) {
+      setGroupingTags(false);
+      setEditingGroups(false);
+      setGroupPick([]);
+    }
+  }, [groupingTags, pinnedTags.length]);
+
+  const pinnedBlocks = useMemo(() => {
+    const byTag = new Map<string, PinnedCluster>();
+    for (const cluster of activeClusters) {
+      for (const id of cluster.tagIds) byTag.set(id, cluster);
+    }
+    const seen = new Set<string>();
+    const blocks: Array<
+      | { kind: "single"; tag: WaTag; index: number }
+      | { kind: "cluster"; cluster: PinnedCluster; items: { tag: WaTag; index: number }[] }
+    > = [];
+    pinnedTags.forEach((tag, index) => {
+      const cluster = byTag.get(tag.id);
+      if (!cluster) {
+        blocks.push({ kind: "single", tag, index });
+        return;
+      }
+      if (seen.has(cluster.id)) return;
+      const items = pinnedTags
+        .map((item, itemIndex) => ({ tag: item, index: itemIndex }))
+        .filter((item) => cluster.tagIds.includes(item.tag.id));
+      if (items.length < CLUSTER_MIN) {
+        blocks.push({ kind: "single", tag, index });
+        return;
+      }
+      seen.add(cluster.id);
+      blocks.push({ kind: "cluster", cluster, items });
+    });
+    return blocks;
+  }, [pinnedTags, activeClusters]);
+
+  const freePinnedCount = pinnedTags.filter(
+    (tag) => !activeClusters.some((cluster) => cluster.tagIds.includes(tag.id)),
+  ).length;
+
+  const quickTagResults = useMemo(() => {
+    const q = quickTagQuery.trim().toLowerCase();
+    const pinned = new Set(pinnedTagIds);
+    return tags.filter((tag) => {
+      if (!q && pinned.has(tag.id)) return false;
+      if (!q) return true;
+      const groupName = tagGroups.find((group) => group.id === tag.groupId)?.name?.toLowerCase() ?? "";
+      return tag.name.toLowerCase().includes(q) || groupName.includes(q);
+    });
+  }, [tags, quickTagQuery, pinnedTagIds, tagGroups]);
   const usoPorModelo = useMemo(() => {
     return PASOS_BOT.map((paso) => {
       const items = uso.filter((item) => item.paso === paso.paso);
@@ -915,6 +1289,135 @@ export function WhatsAppConversationsPanel({
     void applyTags(next);
   }
 
+  function togglePinnedTag(tagId: string) {
+    setPinnedTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId],
+    );
+    setGroupPick((prev) => prev.filter((id) => id !== tagId));
+  }
+
+  function toggleGroupPick(tagId: string) {
+    setGroupPick((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId],
+    );
+  }
+
+  function commitPinnedGroup() {
+    const pick = new Set(groupPick);
+    const orderedPick = pinnedTags.map((tag) => tag.id).filter((id) => pick.has(id));
+    if (orderedPick.length < CLUSTER_MIN) return;
+    const picked = new Set(orderedPick);
+    setPinnedTagIds((prev) => {
+      const known = new Set(tags.map((tag) => tag.id));
+      const visible = prev.filter((id) => known.has(id));
+      const hidden = prev.filter((id) => !known.has(id));
+      const selected = visible.filter((id) => picked.has(id));
+      if (selected.length < CLUSTER_MIN) return prev;
+      const first = visible.findIndex((id) => picked.has(id));
+      const before = visible.slice(0, first).filter((id) => !picked.has(id)).length;
+      const rest = visible.filter((id) => !picked.has(id));
+      return [...rest.slice(0, before), ...selected, ...rest.slice(before), ...hidden];
+    });
+    setPinnedClusters((prev) => [
+      ...prev
+        .map((cluster) => ({
+          ...cluster,
+          tagIds: cluster.tagIds.filter((id) => !picked.has(id)),
+        }))
+        .filter((cluster) => cluster.tagIds.length >= CLUSTER_MIN),
+      { id: newClusterId(), color: groupColor, tagIds: orderedPick },
+    ]);
+    setGroupingTags(false);
+    setEditingGroups(false);
+    setGroupPick([]);
+  }
+
+  function beginPinnedDrag(tagId: string) {
+    dragPinnedIdRef.current = tagId;
+    pinnedDropIndexRef.current = null;
+    setDragPinnedId(tagId);
+    setPinnedDropIndex(null);
+  }
+
+  function movePinnedDrop(index: number) {
+    if (pinnedDropIndexRef.current === index) return;
+    pinnedDropIndexRef.current = index;
+    setPinnedDropIndex(index);
+  }
+
+  function endPinnedDrag() {
+    dragPinnedIdRef.current = null;
+    pinnedDropIndexRef.current = null;
+    setDragPinnedId(null);
+    setPinnedDropIndex(null);
+  }
+
+  function clusterSpan(tagId: string): { start: number; end: number } | null {
+    const cluster = activeClusters.find((item) => item.tagIds.includes(tagId));
+    if (!cluster) return null;
+    const indexes = pinnedTags
+      .map((tag, index) => (cluster.tagIds.includes(tag.id) ? index : -1))
+      .filter((index) => index >= 0);
+    if (indexes.length < CLUSTER_MIN) return null;
+    return { start: indexes[0]!, end: indexes[indexes.length - 1]! };
+  }
+
+  function dropInsideGroup(tagId: string, insertAt: number): boolean {
+    const own = clusterSpan(tagId);
+    if (own) return insertAt >= own.start && insertAt <= own.end + 1;
+    const grouped = new Set(activeClusters.flatMap((cluster) => cluster.tagIds));
+    const firstFree = pinnedTags.findIndex((tag) => !grouped.has(tag.id));
+    const min = firstFree < 0 ? pinnedTags.length : firstFree;
+    return insertAt >= min;
+  }
+
+  function reorderPinnedTags(tagId: string, insertAt: number) {
+    if (!dropInsideGroup(tagId, insertAt)) return;
+    setPinnedTagIds((prev) => {
+      const known = new Set(tags.map((tag) => tag.id));
+      const visible = prev.filter((id) => known.has(id));
+      const hidden = prev.filter((id) => !known.has(id));
+      const fromIndex = visible.indexOf(tagId);
+      if (fromIndex < 0) return prev;
+      let target = Math.max(0, Math.min(insertAt, visible.length));
+      const next = [...visible];
+      const [moved] = next.splice(fromIndex, 1);
+      if (!moved) return prev;
+      if (target > fromIndex) target -= 1;
+      if (target === fromIndex) return prev;
+      next.splice(target, 0, moved);
+      return [...next, ...hidden];
+    });
+  }
+
+  function handlePinnedDragOver(event: DragEvent, index: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    const tagId = dragPinnedIdRef.current;
+    if (!tagId) return;
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const nextIndex = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
+    if (!dropInsideGroup(tagId, nextIndex)) {
+      event.dataTransfer.dropEffect = "none";
+      if (pinnedDropIndexRef.current != null) {
+        pinnedDropIndexRef.current = null;
+        setPinnedDropIndex(null);
+      }
+      return;
+    }
+    movePinnedDrop(nextIndex);
+  }
+
+  function handlePinnedDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    const tagId = dragPinnedIdRef.current;
+    const index = pinnedDropIndexRef.current;
+    if (tagId && index != null) reorderPinnedTags(tagId, index);
+    endPinnedDrag();
+  }
+
   async function applyAssignee(kind: "none" | "bot" | "user", userId?: string): Promise<boolean> {
     if (!selectedId || assigning) return false;
     setAssigning(true);
@@ -995,16 +1498,26 @@ export function WhatsAppConversationsPanel({
   }
 
   async function handleCreatePrueba() {
+    if (creatingPruebaRef.current) return;
+    creatingPruebaRef.current = true;
+    setCreatingPrueba(true);
+    setSelectedId(null);
+    setSelected(null);
+    setMessages([]);
+    setDraft("");
+    setAttachment(null);
     try {
       const created = await createWaPrueba();
+      skipThreadLoad.current = created.id;
       setConversations((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
-      setSelectedId(created.id);
       setSelected(created);
       setMessages([]);
-      setDraft("");
-      setAttachment(null);
+      setSelectedId(created.id);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo crear la prueba");
+    } finally {
+      creatingPruebaRef.current = false;
+      setCreatingPrueba(false);
     }
   }
 
@@ -1015,7 +1528,29 @@ export function WhatsAppConversationsPanel({
   }
 
   function openNotaIncorrecta() {
-    setNotaTexto(selected?.pruebaResultado === "incorrecta" ? selected.pruebaNota ?? "" : "");
+    const enviados = messages.filter((item) => item.direction === "OUTBOUND" && !item.isDeleted);
+    if (enviados.length === 0) {
+      toast.error("No hay respuestas de la IA para marcar");
+      return;
+    }
+    const prev = selected?.pruebaAclaraciones ?? [];
+    const validos = new Set(enviados.map((item) => item.id));
+    setRechazoIds(prev.map((item) => item.messageId).filter((id) => validos.has(id)));
+    setAclaraciones(Object.fromEntries(prev.map((item) => [item.messageId, item.texto])));
+    setEligiendoRechazo(true);
+  }
+
+  function toggleRechazoMensaje(messageId: string) {
+    setRechazoIds((prev) =>
+      prev.includes(messageId) ? prev.filter((id) => id !== messageId) : [...prev, messageId],
+    );
+  }
+
+  function abrirAclaraciones() {
+    if (rechazoIds.length === 0) {
+      toast.error("Elegí al menos un mensaje");
+      return;
+    }
     setNotaOpen(true);
   }
 
@@ -1044,19 +1579,48 @@ export function WhatsAppConversationsPanel({
 
   async function saveNotaIncorrecta() {
     if (!selectedId || notaSaving) return;
-    if (!notaTexto.trim()) {
-      toast.error("Contá qué pasó");
+    const elegidos = messages.filter(
+      (item) => item.direction === "OUTBOUND" && rechazoIds.includes(item.id),
+    );
+    if (elegidos.length === 0) {
+      toast.error("Elegí al menos un mensaje");
+      return;
+    }
+    if (elegidos.some((item) => !String(aclaraciones[item.id] ?? "").trim())) {
+      toast.error("Escribí una aclaración en cada mensaje elegido");
       return;
     }
     setNotaSaving(true);
     try {
-      aplicarResultado(await saveWaPruebaNota(selectedId, "incorrecta", notaTexto));
+      aplicarResultado(
+        await saveWaPruebaNota(
+          selectedId,
+          "incorrecta",
+          elegidos.map((item) => ({
+            messageId: item.id,
+            texto: String(aclaraciones[item.id] ?? "").trim(),
+          })),
+        ),
+      );
       setNotaOpen(false);
+      setEligiendoRechazo(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo guardar la nota");
     } finally {
       setNotaSaving(false);
     }
+  }
+
+  function armarEsperaIa() {
+    for (const id of typingTimersRef.current) window.clearTimeout(id);
+    typingTimersRef.current = [];
+    colaRef.current = [];
+    pumpingRef.current = false;
+    setOcultos([]);
+    const espera = esperaMsRef.current;
+    typingAtRef.current = Date.now() + Math.max(0, espera - 10_000);
+    waitingReplyRef.current = true;
+    setBotTyping(espera <= 10_000);
   }
 
   async function handleSend(e: FormEvent) {
@@ -1082,6 +1646,7 @@ export function WhatsAppConversationsPanel({
     if (pruebaMode) {
       const tempId = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       setDraft("");
+      armarEsperaIa();
       setMessages((prev) => [
         ...prev,
         {
@@ -1101,17 +1666,17 @@ export function WhatsAppConversationsPanel({
       ]);
       try {
         const result = await sendWaPruebaMessage(conversationId, text);
-        setMessages((prev) => {
-          const server = result.messages;
-          const pendingLocal = prev.filter(
-            (item) => item.id.startsWith("local-") && item.id !== tempId,
-          );
-          return [...server, ...pendingLocal].sort(
-            (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
-          );
-        });
+        setMessages((prev) =>
+          mergeMensajesServidor(
+            prev.filter((item) => item.id !== tempId),
+            result.messages,
+          ),
+        );
         if (result.conversation) setSelected(result.conversation);
       } catch (error) {
+        waitingReplyRef.current = false;
+        typingAtRef.current = null;
+        setBotTyping(false);
         setMessages((prev) => prev.filter((item) => item.id !== tempId));
         toast.error(error instanceof Error ? error.message : "No se pudo enviar el mensaje");
       }
@@ -1245,6 +1810,160 @@ export function WhatsAppConversationsPanel({
     );
   })();
 
+  function renderQuickTag(
+    tag: WaTag,
+    pinned: boolean,
+    sortIndex?: number,
+    showDropBefore = false,
+    pickable = false,
+    clusterColor?: string,
+    groupEnd = false,
+    canLeave = false,
+  ) {
+    const assigned = (selected?.tagIds ?? []).includes(tag.id);
+    const picked = pickable && groupPick.includes(tag.id);
+    const sortable = sortIndex != null && !pickable;
+    const tone = clusterColor ?? (picked ? groupColor : tagColor(tag));
+    return (
+      <div
+        key={tag.id}
+        className={`wa-tags-quick${assigned ? " is-on" : ""}${sortable ? " is-sortable" : ""}${
+          dragPinnedId === tag.id ? " is-dragging" : ""
+        }${showDropBefore ? " has-drop-before" : ""}${picked ? " is-picked" : ""}${
+          groupEnd ? " is-group-end" : ""
+        }`}
+        style={{ "--tag": tone } as CSSProperties}
+        draggable={sortable}
+        onDragStart={
+          sortable
+            ? (event) => {
+                if ((event.target as HTMLElement).closest("button")) {
+                  event.preventDefault();
+                  return;
+                }
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", tag.id);
+                beginPinnedDrag(tag.id);
+              }
+            : undefined
+        }
+        onDragOver={sortable ? (event) => handlePinnedDragOver(event, sortIndex) : undefined}
+        onDrop={sortable ? handlePinnedDrop : undefined}
+        onDragEnd={sortable ? endPinnedDrag : undefined}
+      >
+        {sortable ? (
+          <span className="wa-tags-quick__grip" aria-hidden title="Arrastrar para ordenar">
+            <IconGrip size={14} />
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className="wa-tags-quick__apply"
+          disabled={pickable ? false : !selectedId}
+          aria-pressed={pickable ? picked : undefined}
+          title={
+            pickable
+              ? picked
+                ? `Quitar ${tag.name} del grupo`
+                : `Sumar ${tag.name} al grupo`
+              : selectedId
+                ? assigned
+                  ? `Quitar ${tag.name}`
+                  : `Etiquetar ${tag.name}`
+                : "Elegí una conversación"
+          }
+          onClick={() => (pickable ? toggleGroupPick(tag.id) : toggleConversationTag(tag.id))}
+        >
+          <span className="wa-tags-quick__name">{tag.name}</span>
+          <span className="wa-tags-quick__group">{tagGroupLabel(tag)}</span>
+        </button>
+        {clusterColor && !canLeave ? (
+          <span className="wa-tags-quick__link" aria-hidden title="En un grupo">
+            <IconLink size={13} />
+          </span>
+        ) : null}
+        {canLeave ? (
+          <button
+            type="button"
+            className="wa-tags-quick__leave"
+            aria-label={`Sacar ${tag.name} del grupo`}
+            title="Sacar del grupo"
+            onClick={() => leavePinnedCluster(tag.id)}
+          >
+            <IconX size={13} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`wa-tags-quick__pin${pinned ? " is-pinned" : ""}`}
+          aria-label={pinned ? `Quitar ${tag.name} del acceso rápido` : `Pinear ${tag.name}`}
+          title={pinned ? "Quitar del acceso rápido" : "Pinear"}
+          onClick={() => togglePinnedTag(tag.id)}
+        >
+          <IconPin size={14} filled={pinned} />
+        </button>
+      </div>
+    );
+  }
+
+  function recolorPinnedCluster(clusterId: string, color: string) {
+    setPinnedClusters((prev) =>
+      prev.map((cluster) => (cluster.id === clusterId ? { ...cluster, color } : cluster)),
+    );
+  }
+
+  function withGroupsFirst(tagIds: string[], clusters: PinnedCluster[]): string[] {
+    const known = new Set(tags.map((tag) => tag.id));
+    const visible = tagIds.filter((id) => known.has(id));
+    const hidden = tagIds.filter((id) => !known.has(id));
+    const grouped = new Set(clusters.flatMap((cluster) => cluster.tagIds));
+    return [
+      ...visible.filter((id) => grouped.has(id)),
+      ...visible.filter((id) => !grouped.has(id)),
+      ...hidden,
+    ];
+  }
+
+  function dissolvePinnedCluster(clusterId: string) {
+    const next = pinnedClusters.filter((cluster) => cluster.id !== clusterId);
+    setPinnedClusters(next);
+    setPinnedTagIds((prev) => withGroupsFirst(prev, next));
+  }
+
+  function leavePinnedCluster(tagId: string) {
+    const next = pinnedClusters
+      .map((cluster) =>
+        cluster.tagIds.includes(tagId)
+          ? { ...cluster, tagIds: cluster.tagIds.filter((id) => id !== tagId) }
+          : cluster,
+      )
+      .filter((cluster) => cluster.tagIds.length >= CLUSTER_MIN);
+    setPinnedClusters(next);
+    setPinnedTagIds((prev) => withGroupsFirst(prev, next));
+  }
+
+  function renderPinnedItem(tag: WaTag, index: number, clusterColor?: string, groupEnd = false) {
+    const fromIndex = dragPinnedId
+      ? pinnedTags.findIndex((item) => item.id === dragPinnedId)
+      : -1;
+    const showDropBefore =
+      !groupingTags &&
+      dragPinnedId != null &&
+      pinnedDropIndex === index &&
+      pinnedDropIndex !== fromIndex &&
+      pinnedDropIndex !== fromIndex + 1;
+    return renderQuickTag(
+      tag,
+      true,
+      groupingTags ? undefined : index,
+      showDropBefore,
+      groupingTags,
+      clusterColor,
+      groupEnd,
+      Boolean(clusterColor) && editingGroups,
+    );
+  }
+
   return (
     <div className="wa-inbox">
       <aside className="wa-inbox__list" aria-label="Conversaciones">
@@ -1373,7 +2092,7 @@ export function WhatsAppConversationsPanel({
       <section className="wa-inbox__thread" aria-label="Mensajes">
         {!selectedId ? (
           <div className="wa-inbox__placeholder">
-            <p>Seleccioná una conversación</p>
+            <p>{creatingPrueba ? "Creando prueba…" : "Seleccioná una conversación"}</p>
           </div>
         ) : (
           <>
@@ -1399,19 +2118,25 @@ export function WhatsAppConversationsPanel({
                   <>
                     <button
                       type="button"
-                      className={`btn btn-sm wa-prueba-btn wa-prueba-btn--ok${selected?.pruebaResultado === "correcta" ? " is-on" : ""}`}
+                      className={`btn btn-secondary btn-sm wa-inbox__icon-btn wa-prueba-btn wa-prueba-btn--ok${selected?.pruebaResultado === "correcta" ? " is-on" : ""}`}
                       disabled={notaSaving}
+                      aria-label="Marcar como correcta"
+                      title="Marcar como correcta"
                       onClick={() => void marcarCorrecta()}
                     >
-                      Marcar como correcta
+                      <IconCheck size={15} />
+                      Correcta
                     </button>
                     <button
                       type="button"
-                      className={`btn btn-sm wa-prueba-btn wa-prueba-btn--bad${selected?.pruebaResultado === "incorrecta" ? " is-on" : ""}`}
+                      className={`btn btn-secondary btn-sm wa-inbox__icon-btn wa-prueba-btn wa-prueba-btn--bad${selected?.pruebaResultado === "incorrecta" ? " is-on" : ""}`}
                       disabled={notaSaving}
+                      aria-label="Marcar como incorrecta"
+                      title="Marcar como incorrecta"
                       onClick={openNotaIncorrecta}
                     >
-                      Marcar como incorrecta
+                      <IconX size={15} />
+                      Incorrecta
                     </button>
                   </>
                 ) : (
@@ -1480,6 +2205,13 @@ export function WhatsAppConversationsPanel({
                 <select
                   className="ui-select"
                   aria-label="Asignar operadora"
+                  title={
+                    selected?.assigneeKind === "bot"
+                      ? "Bot"
+                      : selected?.assigneeKind === "user"
+                        ? selected.assigneeName || "Asignado"
+                        : "Sin asignar"
+                  }
                   value={currentAssigneeSelectValue()}
                   disabled={assigning || pendingAssignee !== null}
                   onChange={(event) => {
@@ -1498,10 +2230,12 @@ export function WhatsAppConversationsPanel({
                 )}
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm wa-inbox__close-btn"
+                  className="btn btn-secondary btn-sm wa-inbox__icon-btn"
+                  aria-label="Cerrar"
+                  title="Cerrar"
                   onClick={closeSelectedConversation}
                 >
-                  Cerrar
+                  <IconX size={16} />
                 </button>
               </div>
             </header>
@@ -1532,13 +2266,30 @@ export function WhatsAppConversationsPanel({
               ) : messages.length === 0 ? (
                 <p className="wa-inbox__empty">Todavía no hay mensajes en este chat.</p>
               ) : (
-                messages.map((m) => {
+                messages.filter((m) => !ocultos.includes(m.id)).map((m) => {
                   const outbound = m.direction === "OUTBOUND";
+                  const deIa = pruebaMode && outbound && !m.isDeleted;
+                  const elegido = rechazoIds.includes(m.id);
+                  const mostrarCheck = deIa && eligiendoRechazo;
                   return (
                     <div
                       key={m.id}
-                      className={`wa-bubble${outbound ? " is-out" : " is-in"}`}
+                      className={`wa-bubble-row${outbound ? " is-out" : ""}${deIa ? " is-pick" : ""}`}
                     >
+                      {deIa ? (
+                        <label className={`wa-bubble-check${mostrarCheck ? "" : " is-reserved"}`}>
+                          <input
+                            type="checkbox"
+                            checked={elegido}
+                            disabled={!mostrarCheck}
+                            tabIndex={mostrarCheck ? 0 : -1}
+                            aria-hidden={!mostrarCheck}
+                            aria-label="Marcar esta respuesta de la IA"
+                            onChange={() => toggleRechazoMensaje(m.id)}
+                          />
+                        </label>
+                      ) : null}
+                      <div className={`wa-bubble${outbound ? " is-out" : " is-in"}${elegido && mostrarCheck ? " is-picked" : ""}`}>
                       {m.type === "IMAGE" && !m.isDeleted ? (
                         <img
                           className="wa-bubble__media"
@@ -1573,13 +2324,23 @@ export function WhatsAppConversationsPanel({
                         {outbound && !pruebaMode ? <MessageTicks status={m.status} /> : null}
                       </span>
                     </div>
+                    </div>
                   );
                 })
               )}
+              {botTyping ? (
+                <div className="wa-bubble-row is-out" aria-label="La IA está escribiendo">
+                  <div className="wa-typing" aria-hidden>
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </div>
+              ) : null}
               <div ref={messagesEndRef} />
             </div>
             <form
-              className={`wa-inbox__composer${composerLocked ? " is-locked" : ""}`}
+              className={`wa-inbox__composer${composerLocked ? " is-locked" : ""}${pruebaDerivada ? " is-derivada" : ""}`}
               onSubmit={(e) => {
                 if (composerLocked) {
                   e.preventDefault();
@@ -1626,8 +2387,27 @@ export function WhatsAppConversationsPanel({
                   </button>
                 </div>
               ) : null}
-              {pruebaDerivada ? (
-                <p className="wa-prueba-derivada">Fuiste derivado a un humano.</p>
+              {eligiendoRechazo ? (
+                <div className="wa-rechazo-bar">
+                  <p>Marcá las respuestas de la IA.</p>
+                  <div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setEligiendoRechazo(false)}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={rechazoIds.length === 0}
+                      onClick={abrirAclaraciones}
+                    >
+                      Continuar
+                    </button>
+                  </div>
+                </div>
               ) : null}
               <div className="wa-inbox__composer-row">
                 <input
@@ -1889,7 +2669,20 @@ export function WhatsAppConversationsPanel({
                           ? "Incorrecta"
                           : "Sin marcar"}
                     </p>
-                    {selected.pruebaResultado === "incorrecta" && selected.pruebaNota ? (
+                    {selected.pruebaResultado === "incorrecta" &&
+                    (selected.pruebaAclaraciones?.length ?? 0) > 0 ? (
+                      <ul className="wa-prueba-aclaraciones">
+                        {selected.pruebaAclaraciones?.map((item) => {
+                          const mensaje = messages.find((entry) => entry.id === item.messageId);
+                          return (
+                            <li key={item.messageId}>
+                              <p>{mensaje?.text || "Mensaje"}</p>
+                              <p>{item.texto}</p>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : selected.pruebaResultado === "incorrecta" && selected.pruebaNota ? (
                       <p>{selected.pruebaNota}</p>
                     ) : null}
                   </section>
@@ -1965,30 +2758,34 @@ export function WhatsAppConversationsPanel({
                     <h3>Detecciones</h3>
                     {(selected.auditoria ?? []).length ? (
                       <ol className="wa-prueba-audit">
-                        {[...(selected.auditoria ?? [])].reverse().map((paso, index) => (
-                          <li key={`${paso.en}-${index}`}>
-                            <strong>
-                              {[paso.intencion || "sin intención", paso.secundaria].filter(Boolean).join(" + ")}
-                            </strong>
-                            <span>
-                              {[
-                                paso.cortesia === "saludo"
-                                  ? "saludo"
-                                  : paso.cortesia === "cierre"
-                                    ? "despedida"
-                                    : "",
-                                paso.peligro ? "peligro" : "",
-                                paso.duda ? "duda" : "",
-                                paso.abierta ? `quedó ${paso.abierta}` : "",
-                                paso.concluida ? "concluida" : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </span>
-                            {paso.resumen ? <p>{paso.resumen}</p> : null}
-                            {paso.etiquetas.length ? <p>Etiquetas: {paso.etiquetas.join(", ")}</p> : null}
-                          </li>
-                        ))}
+                        {[...(selected.auditoria ?? [])].reverse().map((paso, index) => {
+                          const saludo = paso.cortesia === "saludo";
+                          const despedida = paso.cortesia === "cierre";
+                          const titulo =
+                            paso.intencion ||
+                            (saludo ? "Saludo" : despedida ? "Despedida" : "Sin intención");
+                          const dicho = (paso.hecho || paso.resumen || "").trim();
+                          const repiteCortesia =
+                            (saludo || despedida) &&
+                            /^(saludo( inicial)?|hola|despedida|cierre)\.?$/i.test(dicho);
+                          const detalle = repiteCortesia ? "" : dicho;
+                          const notas = [
+                            paso.peligro ? "peligro" : "",
+                            paso.duda ? "duda" : "",
+                            paso.abierta && paso.abierta !== paso.intencion ? `quedó ${paso.abierta}` : "",
+                            paso.concluida ? "concluida" : "",
+                          ].filter(Boolean);
+                          return (
+                            <li key={`${paso.en}-${index}`}>
+                              <strong>
+                                {[titulo, paso.secundaria].filter(Boolean).join(" + ")}
+                              </strong>
+                              {notas.length ? <span>{notas.join(" · ")}</span> : null}
+                              {detalle ? <p>{detalle}</p> : null}
+                              {paso.etiquetas.length ? <p>Etiquetas: {paso.etiquetas.join(", ")}</p> : null}
+                            </li>
+                          );
+                        })}
                       </ol>
                     ) : (
                       <p>Todavía no hay detecciones.</p>
@@ -1999,7 +2796,221 @@ export function WhatsAppConversationsPanel({
             </>
           )}
         </aside>
-      ) : null}
+      ) : (
+        <aside className="wa-tags-panel" aria-label="Etiquetas rápidas">
+          <div className="table-search wa-tags-panel__search">
+            <span className="table-search__icon" aria-hidden>
+              <IconSearch size={16} />
+            </span>
+            <input
+              type="text"
+              value={quickTagQuery}
+              onChange={(e) => setQuickTagQuery(e.target.value)}
+              placeholder="Buscar etiqueta…"
+              aria-label="Buscar etiqueta"
+              autoComplete="off"
+            />
+            {quickTagQuery ? (
+              <button
+                type="button"
+                className="wa-tags-panel__clear"
+                aria-label="Borrar búsqueda"
+                onClick={() => setQuickTagQuery("")}
+              >
+                <IconX size={16} />
+              </button>
+            ) : null}
+          </div>
+          {quickTagQuery.trim() ? (
+            tags.length === 0 ? (
+              <p>Todavía no hay etiquetas.</p>
+            ) : quickTagResults.length === 0 ? (
+              <p>Ninguna etiqueta coincide.</p>
+            ) : (
+              <div className="wa-tags-quick-list">
+                {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+              </div>
+            )
+          ) : (
+            <>
+              <section className="wa-tags-panel__quick">
+                <div className="wa-tags-panel__quick-head">
+                  <h3>Acceso rápido</h3>
+                  {pinnedTags.length >= CLUSTER_MIN ? (
+                    groupingTags ? (
+                      <button
+                        type="button"
+                        className={`wa-tags-panel__group-btn${
+                          groupPick.length >= CLUSTER_MIN ? " is-ready" : " is-on"
+                        }`}
+                        onClick={() => {
+                          if (editingGroups || groupPick.length < CLUSTER_MIN) {
+                            setGroupingTags(false);
+                            setEditingGroups(false);
+                            setGroupPick([]);
+                            return;
+                          }
+                          commitPinnedGroup();
+                        }}
+                      >
+                        {groupPick.length >= CLUSTER_MIN ? "Listo" : "Cancelar"}
+                      </button>
+                    ) : (
+                      <div className="wa-tags-panel__group-actions">
+                        {activeClusters.length ? (
+                          <button
+                            type="button"
+                            className="wa-tags-panel__group-btn"
+                            onClick={() => {
+                              const actual = activeClusters[activeClusters.length - 1];
+                              if (!actual) return;
+                              setGroupColor(actual.color);
+                              setGroupPick([...actual.tagIds]);
+                              setEditingGroups(true);
+                              setGroupingTags(true);
+                            }}
+                          >
+                            Editar
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="wa-tags-panel__group-btn"
+                          disabled={freePinnedCount < CLUSTER_MIN}
+                          title={
+                            freePinnedCount < CLUSTER_MIN
+                              ? "No hay etiquetas libres para agrupar"
+                              : "Agrupar"
+                          }
+                          onClick={() => {
+                            if (freePinnedCount < CLUSTER_MIN) return;
+                            const used = new Set(activeClusters.map((cluster) => cluster.color));
+                            const next =
+                              CLUSTER_COLORS.find((color) => !used.has(color)) ?? CLUSTER_COLORS[0]!;
+                            setGroupColor(next);
+                            setGroupPick([]);
+                            setEditingGroups(false);
+                            setGroupingTags(true);
+                          }}
+                        >
+                          Agrupar
+                        </button>
+                      </div>
+                    )
+                  ) : null}
+                </div>
+                {groupingTags && !editingGroups ? (
+                  <div className="wa-tags-color-picks" role="listbox" aria-label="Color del grupo">
+                    {CLUSTER_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        role="option"
+                        className={`wa-tags-color-pick${groupColor === color ? " is-on" : ""}`}
+                        style={{ background: color }}
+                        aria-label="Elegir color"
+                        aria-selected={groupColor === color}
+                        onClick={() => setGroupColor(color)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {pinnedTags.length === 0 ? (
+                  <p>Pineá etiquetas del buscador para tenerlas acá.</p>
+                ) : (
+                  <div
+                    className={`wa-tags-quick-list${dragPinnedId ? " is-sorting" : ""}`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={handlePinnedDrop}
+                  >
+                    {pinnedBlocks.map((block, blockIndex) => {
+                      if (block.kind === "single") {
+                        const primeroSuelto =
+                          pinnedBlocks.some((item) => item.kind === "cluster") &&
+                          pinnedBlocks.findIndex((item) => item.kind === "single") === blockIndex;
+                        return (
+                          <div key={block.tag.id} className="wa-tags-free-slot">
+                            {primeroSuelto ? <p className="wa-tags-free">Sin grupo</p> : null}
+                            {renderPinnedItem(block.tag, block.index)}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={block.cluster.id} className="wa-tags-group">
+                          {editingGroups ? (
+                            <div className="wa-tags-group__edit">
+                              <button
+                                type="button"
+                                className="wa-tags-group__undo"
+                                onClick={() => dissolvePinnedCluster(block.cluster.id)}
+                              >
+                                Desagrupar
+                              </button>
+                              <div className="wa-tags-color-picks" role="listbox" aria-label="Color del grupo">
+                                {CLUSTER_COLORS.map((color) => (
+                                  <button
+                                    key={color}
+                                    type="button"
+                                    role="option"
+                                    className={`wa-tags-color-pick${block.cluster.color === color ? " is-on" : ""}`}
+                                    style={{ background: color }}
+                                    aria-label="Elegir color"
+                                    aria-selected={block.cluster.color === color}
+                                    onClick={() => recolorPinnedCluster(block.cluster.id, color)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          {block.items.map((item, itemIndex) =>
+                            renderPinnedItem(
+                              item.tag,
+                              item.index,
+                              block.cluster.color,
+                              itemIndex === block.items.length - 1,
+                            ),
+                          )}
+                        </div>
+                      );
+                    })}
+                    {dragPinnedId != null &&
+                    pinnedDropIndex === pinnedTags.length &&
+                    pinnedTags.findIndex((item) => item.id === dragPinnedId) !==
+                      pinnedTags.length - 1 ? (
+                      <div className="wa-tags-quick-drop-end" aria-hidden />
+                    ) : null}
+                  </div>
+                )}
+              </section>
+              <section className="wa-tags-panel__fold">
+                <button
+                  type="button"
+                  className="wa-tags-panel__fold-btn"
+                  aria-expanded={allTagsOpen}
+                  onClick={() => setAllTagsOpen((open) => !open)}
+                >
+                  <span>Todas</span>
+                  <IconChevronDown size={14} />
+                </button>
+                {allTagsOpen ? (
+                  tags.length === 0 ? (
+                    <p>Todavía no hay etiquetas.</p>
+                  ) : quickTagResults.length === 0 ? (
+                    <p>Ninguna etiqueta coincide.</p>
+                  ) : (
+                    <div className="wa-tags-quick-list">
+                      {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+                    </div>
+                  )
+                ) : null}
+              </section>
+            </>
+          )}
+        </aside>
+      )}
 
       <Modal
         open={tagsModalOpen}
@@ -2637,12 +3648,16 @@ export function WhatsAppConversationsPanel({
               disabled={notaSaving}
               onClick={() => setNotaOpen(false)}
             >
-              Cancelar
+              Volver
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              disabled={notaSaving || !notaTexto.trim()}
+              disabled={
+                notaSaving ||
+                rechazoIds.length === 0 ||
+                rechazoIds.some((id) => !String(aclaraciones[id] ?? "").trim())
+              }
               onClick={() => void saveNotaIncorrecta()}
             >
               {notaSaving ? "Guardando…" : "Guardar"}
@@ -2650,16 +3665,24 @@ export function WhatsAppConversationsPanel({
           </>
         }
       >
-        <label className="form-group form-group--full">
-          <span>Qué pasó. Es obligatorio.</span>
-          <textarea
-            className="wa-prueba-nota"
-            rows={12}
-            value={notaTexto}
-            onChange={(event) => setNotaTexto(event.target.value)}
-            placeholder="Contá qué respondió mal, qué dato falló o qué esperabas"
-          />
-        </label>
+        <div className="wa-prueba-nota-list">
+          {messages
+            .filter((item) => item.direction === "OUTBOUND" && rechazoIds.includes(item.id))
+            .map((item) => (
+              <label key={item.id} className="form-group form-group--full">
+                <span>{item.text}</span>
+                <textarea
+                  className="wa-prueba-nota"
+                  rows={4}
+                  value={aclaraciones[item.id] ?? ""}
+                  onChange={(event) =>
+                    setAclaraciones((prev) => ({ ...prev, [item.id]: event.target.value }))
+                  }
+                  placeholder="Qué esperabas en este mensaje"
+                />
+              </label>
+            ))}
+        </div>
       </Modal>
     </div>
   );

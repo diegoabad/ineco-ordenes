@@ -17,7 +17,7 @@ import {
 } from "../services/whatsappCrmService";
 import type { WaTag, WaTagGroup } from "../types/whatsappCrm";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { IconFile, IconPencil, IconTrash } from "./Icons";
+import { IconFile, IconPencil, IconPin, IconSearch, IconTrash, IconX } from "./Icons";
 import { LoadingBlock } from "./InecoMark";
 import { Modal } from "./Modal";
 
@@ -54,8 +54,21 @@ type Props = {
   onTabChange?: (tab: TagsPanelTab) => void;
 };
 
+const PINNED_WA_TAGS_KEY = "wa-inbox-pinned-tag-ids";
+
 function byName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name, "es");
+}
+
+function readPinnedTagIds(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_WA_TAGS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((id) => String(id ?? "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Props) {
@@ -68,6 +81,9 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
   const [groupDraft, setGroupDraft] = useState<GroupDraft | null>(null);
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [removeGroupId, setRemoveGroupId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [pinFilter, setPinFilter] = useState<"todas" | "pineadas" | "sin">("todas");
+  const [pinnedIds, setPinnedIds] = useState<string[]>(readPinnedTagIds);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +110,10 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
     onTabChange?.(tab);
   }, [onTabChange, tab]);
 
+  useEffect(() => {
+    localStorage.setItem(PINNED_WA_TAGS_KEY, JSON.stringify(pinnedIds));
+  }, [pinnedIds]);
+
   const removing = items.find((item) => item.id === removeId) ?? null;
   const removingGroup = groups.find((group) => group.id === removeGroupId) ?? null;
   const sortedGroups = [...groups].sort(byName);
@@ -118,6 +138,17 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
     const byGroup = groupName(a.groupId).localeCompare(groupName(b.groupId), "es");
     return byGroup || byName(a, b);
   });
+  const filtro = query.trim().toLowerCase();
+  const pinned = new Set(pinnedIds);
+  const visibleItems = sortedItems.filter((tag) => {
+    if (pinFilter === "pineadas" && !pinned.has(tag.id)) return false;
+    if (pinFilter === "sin" && pinned.has(tag.id)) return false;
+    if (!filtro) return true;
+    return (
+      tag.name.toLowerCase().includes(filtro) ||
+      groupName(tag.groupId).toLowerCase().includes(filtro)
+    );
+  });
 
   function openCreate() {
     if (groups.length === 0) {
@@ -141,6 +172,12 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
 
   if (createRef) createRef.current = openCreate;
   if (createGroupRef) createGroupRef.current = openCreateGroup;
+
+  function togglePin(tagId: string) {
+    setPinnedIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId],
+    );
+  }
 
   function openEdit(tag: WaTag) {
     setDraft({
@@ -220,6 +257,7 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
     try {
       await deleteWaTag(removeId);
       setItems((prev) => prev.filter((item) => item.id !== removeId));
+      setPinnedIds((prev) => prev.filter((id) => id !== removeId));
       setRemoveId(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo eliminar");
@@ -268,18 +306,54 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
 
       {tab === "etiquetas" ? (
         <section className="fl-table-card" role="tabpanel">
+          <div className="table-toolbar table-toolbar--filters">
+            <div className="table-search">
+              <span className="table-search__icon" aria-hidden>
+                <IconSearch size={16} />
+              </span>
+              <input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar etiqueta o grupo…"
+                aria-label="Buscar etiqueta"
+                autoComplete="off"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  className="wa-tags-panel__clear"
+                  aria-label="Borrar búsqueda"
+                  onClick={() => setQuery("")}
+                >
+                  <IconX size={16} />
+                </button>
+              ) : null}
+            </div>
+            <select
+              className="ui-select wa-tags-pin-filter"
+              aria-label="Filtrar por pin"
+              value={pinFilter}
+              onChange={(event) => setPinFilter(event.target.value as "todas" | "pineadas" | "sin")}
+            >
+              <option value="todas">Todas</option>
+              <option value="pineadas">Pineadas</option>
+              <option value="sin">Sin pinear</option>
+            </select>
+          </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Etiqueta</th>
                   <th>Grupo</th>
+                  <th>Pin</th>
                   <th className="fl-col-actions fl-col-actions--2" aria-label="Acciones" />
                 </tr>
               </thead>
-              {!loading && sortedItems.length > 0 ? (
+              {!loading && visibleItems.length > 0 ? (
                 <tbody>
-                  {sortedItems.map((tag) => (
+                  {visibleItems.map((tag) => (
                     <tr key={tag.id}>
                       <td>
                         <span
@@ -290,6 +364,18 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
                         </span>
                       </td>
                       <td>{groupName(tag.groupId)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className={`wa-tag-pin${pinnedIds.includes(tag.id) ? " is-on" : ""}`}
+                          aria-label={pinnedIds.includes(tag.id) ? "Pineada" : "Sin pinear"}
+                          title={pinnedIds.includes(tag.id) ? "Quitar pin" : "Pinear"}
+                          onClick={() => togglePin(tag.id)}
+                        >
+                          <IconPin size={15} filled={pinnedIds.includes(tag.id)} />
+                          {pinnedIds.includes(tag.id) ? "Pineada" : "Sin pinear"}
+                        </button>
+                      </td>
                       <td className="fl-col-actions fl-col-actions--2">
                         <div className="fl-table-actions fl-table-actions--2">
                           <button
@@ -319,18 +405,22 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
               <div className="fl-table-empty fl-table-empty--fill">
                 <LoadingBlock label="Cargando etiquetas…" />
               </div>
-            ) : sortedItems.length === 0 ? (
+            ) : visibleItems.length === 0 ? (
               <div className="fl-table-empty fl-table-empty--fill">
                 <div className="fl-table-empty__art">
                   <IconFile size={32} />
                 </div>
-                <p className="fl-table-empty__title">Todavía no hay etiquetas</p>
-                <p className="fl-table-empty__hint">
-                  {groups.length === 0
-                    ? "Primero creá un grupo y después las etiquetas."
-                    : "Creá la primera etiqueta para clasificar las conversaciones."}
+                <p className="fl-table-empty__title">
+                  {sortedItems.length === 0 ? "Todavía no hay etiquetas" : "Ninguna etiqueta coincide"}
                 </p>
-                {groups.length === 0 ? (
+                <p className="fl-table-empty__hint">
+                  {sortedItems.length > 0
+                    ? "Probá con otro nombre o con el grupo."
+                    : groups.length === 0
+                      ? "Primero creá un grupo y después las etiquetas."
+                      : "Creá la primera etiqueta para clasificar las conversaciones."}
+                </p>
+                {sortedItems.length > 0 ? null : groups.length === 0 ? (
                   <button type="button" className="btn btn-primary" onClick={openCreateGroup}>
                     Crear grupo
                   </button>

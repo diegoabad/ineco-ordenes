@@ -55,8 +55,15 @@ export type WaAuditoriaPaso = {
   peligro: boolean;
   duda: boolean;
   cortesia: "" | "saludo" | "cierre";
+  /** Qué pasó en este mensaje. El resumen de la charla va aparte. */
+  hecho: string;
   resumen: string;
   etiquetas: string[];
+};
+
+export type WaPruebaAclaracion = {
+  messageId: string;
+  texto: string;
 };
 
 export type WaConversation = {
@@ -81,9 +88,11 @@ export type WaConversation = {
   prueba: boolean;
   /** correctá o incorrecta, según la revisión de la prueba. */
   pruebaResultado: "correcta" | "incorrecta" | null;
-  /** Por qué esta prueba se marcó como incorrecta. */
+  /** Resumen de las aclaraciones, para lecturas viejas. */
   pruebaNota: string | null;
   pruebaNotaEn: string | null;
+  /** Aclaración por cada mensaje enviado a la IA que se marcó mal. */
+  pruebaAclaraciones: WaPruebaAclaracion[];
   /** Una entrada por turno, para revisar qué detectó el bot. */
   auditoria: WaAuditoriaPaso[];
   createdAt: string;

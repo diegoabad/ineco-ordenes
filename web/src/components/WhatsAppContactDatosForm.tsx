@@ -20,6 +20,11 @@ const RELACION_FAMILIAR_OPTIONS = [
   "Tía",
   "Sobrino",
   "Sobrina",
+  "Esposo",
+  "Esposa",
+  "Pareja",
+  "Novio",
+  "Novia",
   "Tutor",
   "Otro",
 ] as const;

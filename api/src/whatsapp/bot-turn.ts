@@ -221,8 +221,8 @@ function fichaDesdeContacto(contact: {
 function requeridosDe(clave: string, ficha: Ficha): string[] {
   const base: Record<string, string[]> = {
     TURNOS: ["consultaPara", "pacienteNombre", "pacienteApellido", "dni", "sexo", "grupoEtario"],
-    INFO_TRATAMIENTOS: ["consultaPara", "pacienteNombre", "grupoEtario"],
-    INFO_PROFESIONALES: ["consultaPara", "pacienteNombre", "grupoEtario"],
+    INFO_TRATAMIENTOS: [],
+    INFO_PROFESIONALES: [],
     QUEJAS: ["pacienteNombre"],
   };
   const campos = [...(base[clave] ?? [])];
@@ -230,6 +230,55 @@ function requeridosDe(clave: string, ficha: Ficha): string[] {
     campos.push("relacionFamiliar", "contactoNombre");
   }
   return campos;
+}
+
+function inferirRelacion(
+  textos: string[],
+):
+  | "Padre"
+  | "Madre"
+  | "Abuelo"
+  | "Abuela"
+  | "Hijo"
+  | "Hija"
+  | "Tío"
+  | "Tía"
+  | "Sobrino"
+  | "Sobrina"
+  | "Esposo"
+  | "Esposa"
+  | "Pareja"
+  | "Novio"
+  | "Novia"
+  | "Tutor"
+  | "" {
+  const texto = textos
+    .join("\n")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+  const reglas: [RegExp, Exclude<ReturnType<typeof inferirRelacion>, "">][] = [
+    [/\b(mi|su|para mi|para su|es mi|por mi) (esposa)\b|\bsoy (la|su) esposa\b|\bmi mujer\b/, "Esposa"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) (esposo|marido)\b|\bsoy (el|su) (esposo|marido)\b/, "Esposo"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) novia\b|\bsoy (la|su) novia\b/, "Novia"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) novio\b|\bsoy (el|su) novio\b/, "Novio"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) pareja\b|\bsoy su pareja\b/, "Pareja"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) (hija|nena)\b|\bsoy (la|su) hija\b/, "Hija"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) (hijo|nene)\b|\bsoy (el|su) hijo\b/, "Hijo"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) abuela\b|\bsoy (la|su) abuela\b/, "Abuela"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) abuelo\b|\bsoy (el|su) abuelo\b/, "Abuelo"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) tia\b|\bsoy (la|su) tia\b/, "Tía"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) tio\b|\bsoy (el|su) tio\b/, "Tío"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) sobrina\b|\bsoy (la|su) sobrina\b/, "Sobrina"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) sobrino\b|\bsoy (el|su) sobrino\b/, "Sobrino"],
+    [/\b(soy (el|la|su) tutor(a)?|mi tutor(a)?|su tutor(a)?)\b/, "Tutor"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) (mama|madre)\b|\bsoy (la|su) (mama|madre)\b/, "Madre"],
+    [/\b(mi|su|para mi|para su|es mi|por mi) (papa|padre)\b|\bsoy (el|su) (papa|padre)\b/, "Padre"],
+  ];
+  for (const [regla, valor] of reglas) {
+    if (regla.test(texto)) return valor;
+  }
+  return "";
 }
 
 function faltantesDe(clave: string, ficha: Ficha): string[] {
@@ -373,12 +422,14 @@ const deteccionSchema = {
     etiquetas: { type: "array", items: { type: "string" } },
     preguntaAclaracion: { type: "string" },
     resumen: { type: "string" },
+    hecho: { type: "string" },
     continuarAnterior: { type: "boolean" },
     anteriorConcluida: { type: "boolean" },
     intencionConcluida: { type: "boolean" },
     intencionSecundaria: { type: "string" },
     enConflicto: { type: "boolean" },
     hayPedido: { type: "boolean" },
+    fueraDeIneco: { type: "boolean" },
     cortesia: { type: "string", enum: ["", "saludo", "cierre"] },
     accion: { type: "string" },
     consulta: { type: "string" },
@@ -422,12 +473,14 @@ const deteccionSchema = {
     "etiquetas",
     "preguntaAclaracion",
     "resumen",
+    "hecho",
     "continuarAnterior",
     "anteriorConcluida",
     "intencionConcluida",
     "intencionSecundaria",
     "enConflicto",
     "hayPedido",
+    "fueraDeIneco",
     "cortesia",
     "accion",
     "consulta",
@@ -484,7 +537,14 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     .slice(lastOutbound + 1)
     .filter((message) => message.direction === "INBOUND" && message.text.trim());
   if (!batch.length) return;
-  const fase: "inicio" | "en_curso" = lastOutbound >= 0 ? "en_curso" : "inicio";
+  const anterior = lastOutbound >= 0 ? messages[lastOutbound] : undefined;
+  const primeroNuevo = batch[0];
+  const pausaMs =
+    anterior && primeroNuevo
+      ? Date.parse(primeroNuevo.createdAt) - Date.parse(anterior.createdAt)
+      : 0;
+  const pausaLarga = Number.isFinite(pausaMs) && pausaMs >= 6 * 60 * 60 * 1000;
+  const fase: "inicio" | "en_curso" = lastOutbound < 0 || pausaLarga ? "inicio" : "en_curso";
 
   const [botDoc, motorDoc, intenciones, catalog, conocimiento] = await Promise.all([
     getWhatsappBotConfig(),
@@ -526,12 +586,14 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     etiquetas: string[];
     preguntaAclaracion: string;
     resumen: string;
+    hecho: string;
     continuarAnterior: boolean;
     anteriorConcluida: boolean;
     intencionConcluida: boolean;
     intencionSecundaria: string;
     enConflicto: boolean;
     hayPedido: boolean;
+    fueraDeIneco: boolean;
     cortesia: "" | "saludo" | "cierre";
     accion: string;
     consulta: string;
@@ -564,6 +626,8 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Si hay un segundo tema, ponelo en intencionSecundaria. Si hay uno solo, o ninguno, intencionSecundaria vacía.",
       "enConflicto=true solo si los dos pedidos no se pueden hacer juntos, por ejemplo cancelar un turno y sacar otro distinto. Si se pueden responder los dos, false.",
       "hayPedido=false si no hay un pedido concreto: saludo, despedida, o un mensaje del que no se entiende la intención. Un sí, un no, un nombre o un DNI que responde algo nuestro es hayPedido=true.",
+      "fueraDeIneco=true solo si el mensaje no tiene nada que ver con INECO: cultura general, tareas, clima, deportes, política, chistes, recetas, otras empresas o datos varios. false si habla de turnos, tratamientos, profesionales, sedes, precios, coberturas, pacientes, quejas, o responde un dato que pedimos. Un saludo o una despedida no son fuera de INECO.",
+      "Si pasaron varias horas desde el último mensaje, un hola no continúa la pregunta anterior: continuarAnterior=false e intencion vacía, salvo que vuelva a pedir el tema.",
       "cortesia=saludo si se presenta, dice hola o pregunta cómo estás, sin otro pedido. cierre si se despide o agradece y no pide nada más. Vacío si no hay cortesía.",
       "No diagnostiques. Un síntoma no confirma una condición.",
       "peligroActual solo si hay peligro en este momento: ideas de muerte o de hacerse daño, síntomas de ACV, dolor de cabeza súbito e intenso, convulsión que no cede, pérdida de conocimiento, confusión grave, dolor de pecho o falta de aire intensa, violencia o riesgo para otros.",
@@ -576,10 +640,12 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "dni: solo dígitos, si la persona lo dijo. email: solo si lo dijo.",
       "sexo=masculino o femenino solo si el texto lo dice. Si no se sabe, vacío.",
       "consultaPara=tercero si escribe por otra persona (por ejemplo \"para mi hijo\"). propio si la consulta es para quien escribe.",
-      "relacionFamiliar es quién escribe respecto del paciente: Padre, Madre, Abuelo, Abuela, Hijo, Hija, Tío, Tía, Sobrino, Sobrina, Tutor u Otro. \"Para mi hijo\" significa que escribe un padre o una madre: usá Padre o Madre solo si el texto lo aclara (papá, mamá, padre, madre). Si no se sabe cuál, dejala vacía.",
+      "relacionFamiliar es quién es el paciente para quien escribe: Padre, Madre, Abuelo, Abuela, Hijo, Hija, Tío, Tía, Sobrino, Sobrina, Esposo, Esposa, Pareja, Novio, Novia, Tutor u Otro.",
+      "Si ya lo dijo, completalo y no dejes el campo vacío: mi hijo o mi nene = Hijo; mi hija o mi nena = Hija; mi papá o mi padre = Padre; mi mamá o mi madre = Madre; mi abuelo = Abuelo; mi abuela = Abuela; mi tío = Tío; mi tía = Tía; mi sobrino = Sobrino; mi sobrina = Sobrina; mi marido o mi esposo = Esposo; mi esposa o mi mujer = Esposa; mi pareja = Pareja; mi novio = Novio; mi novia = Novia; soy su tutor o tutora = Tutor. No vuelvas a preguntar la relación.",
       "pacienteNombre es el paciente. contactoNombre es quien escribe, cuando no es el paciente.",
       "grupoEtario=infanto si dice una edad menor de 18 o que es un niño. adulto si es un adulto o mayor de 18. Si no hay edad, vacío.",
-      "resumen: una frase corta de por dónde venía la charla, actualizando el resumen anterior. No es una transcripción. Ejemplo: Consulta por su hijo. Preguntó por psiquiatría infantojuvenil.",
+      "resumen: una frase corta de toda la charla hasta ahora, actualizando el resumen anterior. No es una transcripción. Ejemplo: Consulta por su hijo Franco. Preguntó por tratamientos de TDAH en CABA.",
+      "hecho: una sola frase de lo que pasó en este mensaje, no repitas el resumen entero. Si solo saludó, hecho=Saludo. Si solo se despidió, hecho=Despedida. Si pidió un teléfono o un dato, decí solo eso.",
       "Los mensajes anteriores muestran qué preguntó el bot. Si el lote nuevo responde eso (sí, no, un nombre, un DNI, una edad), continuarAnterior=true y la intención sigue siendo la abierta.",
       "Si el tema es el mismo, continuarAnterior=true. Si cambia de tema, continuarAnterior=false.",
       "anteriorConcluida=true solo si la intención abierta ya quedó resuelta. Si todavía faltaba algo, false: no la cierres sola.",
@@ -602,6 +668,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       ahora,
       estado,
       `Ficha. Vacío significa que todavía no lo tenemos:\n${textoFicha(ficha)}`,
+      pausaLarga
+        ? "Pasaron varias horas desde el último mensaje. La charla se saluda de nuevo. El resumen queda como contexto, no como pregunta pendiente."
+        : "",
       conversation.resumen ? `Resumen de donde venía: ${conversation.resumen}` : "Resumen de donde venía: (todavía no hay)",
       `Mensajes anteriores:\n${previos}`,
       "Mensajes nuevos de la persona:",
@@ -612,6 +681,15 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     skipUsage: io?.skipUsage === true,
   });
   if (io?.trace) io.trace.terra = detection;
+
+  const relacionDicha = inferirRelacion([
+    ...messages.map((message) => message.text),
+    ...batch.map((message) => message.text),
+  ]);
+  if (detection.datos && relacionDicha && !detection.datos.relacionFamiliar?.trim()) {
+    detection.datos.relacionFamiliar = relacionDicha;
+    if (!detection.datos.consultaPara) detection.datos.consultaPara = "tercero";
+  }
 
   const contactoActual =
     contact && detection.datos ? await fillContact(contact.id, detection.datos) : contact;
@@ -636,12 +714,12 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
 
   let chosen = principal;
   let secundaria = coincidencia ? secundariaPedida : undefined;
-  if (sinTema && previaAbierta && detection.cortesia === "") {
+  if (!pausaLarga && sinTema && previaAbierta && detection.cortesia === "") {
     chosen = intenciones.find((item) => item.clave === previa);
-  } else if (continuar) {
+  } else if (!pausaLarga && continuar) {
     chosen = intenciones.find((item) => item.clave === previa) ?? principal;
     if (principal?.clave && principal.clave !== chosen?.clave && !secundaria) secundaria = principal;
-  } else if (previaAbierta && detection.anteriorConcluida !== true && principal?.clave && principal.clave !== previa && !conflicto) {
+  } else if (!pausaLarga && previaAbierta && detection.anteriorConcluida !== true && principal?.clave && principal.clave !== previa && !conflicto) {
     chosen = intenciones.find((item) => item.clave === previa) ?? principal;
     if (principal.clave !== chosen?.clave && !secundaria) secundaria = principal;
   }
@@ -692,6 +770,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       duda: detection.dudaSinPeligro === true,
       cortesia:
         detection.cortesia === "saludo" || detection.cortesia === "cierre" ? detection.cortesia : "",
+      hecho: (detection.hecho ?? "").trim().slice(0, 240),
       resumen: (detection.resumen ?? "").trim().slice(0, 240),
       etiquetas: etiquetasDelModelo(Array.isArray(detection.etiquetas) ? detection.etiquetas : []),
     });
@@ -720,6 +799,16 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     );
     await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
     await anotar(chosen?.clave ?? (previa || null), true);
+    return;
+  }
+
+  if (detection.fueraDeIneco === true && sinTema) {
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+    await send(
+      conversationId,
+      "Solo puedo ayudarte con consultas de INECO: turnos, tratamientos, profesionales, sedes y coberturas. ¿En qué te puedo ayudar?",
+    );
+    await anotar(previa || null, conversation.intencionConcluida);
     return;
   }
 
@@ -757,7 +846,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     : "";
 
   const faltan = faltantesDe(chosen?.clave ?? "", fichaActual);
+  const esInfo = Boolean(chosen?.clave?.startsWith("INFO_"));
   if (!conflicto && faltan.length) estadoSiguiente.intencionConcluida = false;
+  if (!conflicto && esInfo && faltan.length === 0) estadoSiguiente.intencionConcluida = true;
   await anotar(estadoSiguiente.intencionAbierta, estadoSiguiente.intencionConcluida);
   const pedido = faltan[0] ? ETIQUETA_DATO[faltan[0]] ?? faltan[0] : "";
   const chapter = sliceKnowledge(
@@ -788,10 +879,11 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Redactá un mensaje corto de WhatsApp, en español de Argentina, en texto plano. Sin HTML, sin markdown y sin asteriscos.",
       "Si nombrás varias sedes, precios, profesionales o pasos, poné una frase corta y después cada ítem en su propio renglón, uno debajo del otro. No los encadenes con comas en un solo párrafo.",
       "texto es la información. pregunta es la única pregunta, o vacía si no hay que preguntar. Una oferta como si quiere un turno, cuál sede, o un dato que falta, también va en pregunta. No la dejes al final de texto.",
-      "Usá solo el texto de la base. No inventes precios, profesionales, coberturas ni direcciones.",
+      "Usá solo el texto de la base. No inventes precios, profesionales, coberturas ni direcciones. No respondas cultura general, clima, deportes, tareas ni ningún tema que no sea de INECO.",
       "Si un dato dice no informado o en confirmación, no lo completes: pedí los datos y decí que el equipo informa.",
       "Si hay dos precios, decí los dos.",
       "Si pregunta por una obra social, prepaga o CUD, respondé con lo que dice Coberturas sobre esa cobertura: condiciones, mail y prestador, si están escritos. Si esa cobertura no está nombrada en Coberturas, decí que depende de la sede, la prestación y el plan, y pasá coberturas@ineco.org.ar. No digas que atienden por una cobertura que el texto no nombra.",
+      "No preguntes la relación si ya dijo hijo, hija, padre, madre, abuelo, abuela, tío, tía, sobrino, sobrina, marido, esposo, esposa, pareja, novio, novia o tutor, o si la ficha ya tiene una.",
       "No digas que un turno quedó reservado.",
       "No diagnostiques ni des medicación.",
       stringField(plazos, "seInforma") ? `Sí se puede informar: ${stringField(plazos, "seInforma")}` : "",
@@ -813,7 +905,11 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
         ? ""
         : pedido
           ? `Para la intención principal falta un solo dato. La información va en texto. En pregunta pedí únicamente: ${pedido}. No pidas ningún dato que ya figure en la ficha.`
-          : "La ficha ya tiene los datos que esta intención necesita. No pidas nombre, apellido, DNI, edad ni ningún otro dato.",
+          : esInfo
+            ? fichaActual.esPaciente
+              ? "Ya pasaste la información pedida. Esa consulta queda cerrada. No pidas nombre, edad, DNI ni ningún otro dato. En pregunta ofrecé una sola frase: si lo podés ayudar en algo más, o si le gustaría sacar un turno."
+              : "Ya pasaste la información pedida. Esa consulta queda cerrada. No pidas nombre, edad, DNI ni ningún otro dato. En pregunta preguntá solo si ya es paciente de INECO o no."
+            : "La ficha ya tiene los datos que esta intención necesita. No pidas nombre, apellido, DNI, edad ni ningún otro dato.",
       identidad.texto,
       ...instrucciones,
     ]
@@ -834,7 +930,11 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       `Ficha:\n${textoFicha(fichaActual)}`,
       conflicto
         ? `Preguntá solo con cuál siguen: ${chosen?.clave ?? ""} o ${secundaria?.clave ?? principal?.clave ?? ""}.`
-        : faltan.length
+        : esInfo && faltan.length === 0
+          ? fichaActual.esPaciente
+            ? "La información ya se respondió. No pidas datos. En la pregunta ofrecé ayudar en algo más o sacar un turno."
+            : "La información ya se respondió. No pidas datos. En la pregunta preguntá solo si ya es paciente de INECO o no."
+          : faltan.length
           ? `Falta para la intención principal: ${faltan.join(", ")}. Pedí solo el primero.`
           : "No falta ningún dato para esta intención.",
       `Intención principal: ${chosen?.clave ?? ""} ${chosen?.nombre ?? ""}`,

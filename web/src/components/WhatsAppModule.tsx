@@ -178,11 +178,16 @@ export function WhatsAppModule({ section }: Props) {
       </header>
       {section === "conversaciones" ? (
         <WhatsAppConversationsPanel
+          key="conversaciones"
           onConnectionChange={onConnectionChange}
           connectRef={connectRef}
         />
       ) : section === "prueba" ? (
-        <WhatsAppConversationsPanel mode="prueba" createPruebaRef={createPruebaRef} />
+        <WhatsAppConversationsPanel
+          key="prueba"
+          mode="prueba"
+          createPruebaRef={createPruebaRef}
+        />
       ) : section === "operadoras" ? (
         <WhatsAppOperatorsPanel addRef={addOperatorRef} />
       ) : section === "respuestas-rapidas" ? (

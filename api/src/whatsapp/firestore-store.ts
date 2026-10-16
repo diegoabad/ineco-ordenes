@@ -11,6 +11,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
 import type {
@@ -99,6 +100,7 @@ function normalizeAuditoria(raw: unknown): WaAuditoriaPaso[] {
         peligro: row.peligro === true,
         duda: row.duda === true,
         cortesia,
+        hecho: String(row.hecho ?? "").trim(),
         resumen: String(row.resumen ?? "").trim(),
         etiquetas: Array.isArray(row.etiquetas)
           ? row.etiquetas.map((name) => String(name).trim()).filter(Boolean)
@@ -106,6 +108,21 @@ function normalizeAuditoria(raw: unknown): WaAuditoriaPaso[] {
       },
     ];
   });
+}
+
+function normalizePruebaAclaraciones(value: unknown): { messageId: string; texto: string }[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const items: { messageId: string; texto: string }[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const messageId = String((row as { messageId?: unknown }).messageId ?? "").trim();
+    const texto = String((row as { texto?: unknown }).texto ?? "").trim();
+    if (!messageId || !texto || seen.has(messageId)) continue;
+    seen.add(messageId);
+    items.push({ messageId, texto: texto.slice(0, 2000) });
+  }
+  return items;
 }
 
 function normalizeConversation(id: string, raw: Record<string, unknown>): WaConversation {
@@ -137,6 +154,7 @@ function normalizeConversation(id: string, raw: Record<string, unknown>): WaConv
           : null,
     pruebaNota: raw.pruebaNota != null ? String(raw.pruebaNota).trim() || null : null,
     pruebaNotaEn: raw.pruebaNotaEn != null ? String(raw.pruebaNotaEn) : null,
+    pruebaAclaraciones: normalizePruebaAclaraciones(raw.pruebaAclaraciones),
     auditoria: normalizeAuditoria(raw.auditoria),
     createdAt: String(raw.createdAt ?? nowIso()),
     updatedAt: String(raw.updatedAt ?? nowIso()),
@@ -414,6 +432,7 @@ export async function findOrCreateOpenConversation(contactId: string): Promise<W
     pruebaResultado: null,
     pruebaNota: null,
     pruebaNotaEn: null,
+    pruebaAclaraciones: [],
     auditoria: [],
     createdAt: now,
     updatedAt: now,
@@ -437,7 +456,7 @@ export async function createPruebaConversation(): Promise<WaConversation> {
     return next;
   });
   const phone = numeroFicticio(seq);
-  const contact = await findOrCreateContact({ phoneNumber: phone });
+  const existing = await findContactByPhone(phone);
   const now = nowIso();
   const limpio = {
     firstName: null,
@@ -453,9 +472,39 @@ export async function createPruebaConversation(): Promise<WaConversation> {
     dni: null,
     sexo: null,
     esPaciente: null,
+    lastInteractionAt: now,
     updatedAt: now,
   };
-  await updateDoc(doc(firestore, CONTACTS, contact.id), limpio);
+  const batch = writeBatch(firestore);
+  let contact: WaContact;
+  if (existing) {
+    batch.update(doc(firestore, CONTACTS, existing.id), limpio);
+    contact = { ...existing, ...limpio };
+  } else {
+    contact = {
+      id: randomUUID(),
+      phoneNumber: phone,
+      firstName: null,
+      lastName: null,
+      displayName: null,
+      whatsappName: null,
+      cobertura: null,
+      email: null,
+      grupoEtario: null,
+      consultaPara: null,
+      contactoNombre: null,
+      contactoApellido: null,
+      relacionFamiliar: null,
+      dni: null,
+      sexo: null,
+      esPaciente: null,
+      isBlocked: false,
+      lastInteractionAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    batch.set(doc(firestore, CONTACTS, contact.id), contact);
+  }
   const id = randomUUID();
   const conversation: WaConversation = {
     id,
@@ -476,12 +525,14 @@ export async function createPruebaConversation(): Promise<WaConversation> {
     pruebaResultado: null,
     pruebaNota: null,
     pruebaNotaEn: null,
+    pruebaAclaraciones: [],
     auditoria: [],
     createdAt: now,
     updatedAt: now,
   };
-  await setDoc(doc(firestore, CONVERSATIONS, id), conversation);
-  return { ...conversation, contact: { ...contact, ...limpio } };
+  batch.set(doc(firestore, CONVERSATIONS, id), conversation);
+  await batch.commit();
+  return { ...conversation, contact };
 }
 
 export async function getConversation(id: string): Promise<WaConversation | null> {
@@ -677,6 +728,11 @@ const RELACIONES = new Set([
   "Tía",
   "Sobrino",
   "Sobrina",
+  "Esposo",
+  "Esposa",
+  "Pareja",
+  "Novio",
+  "Novia",
   "Tutor",
   "Otro",
 ]);
@@ -799,16 +855,26 @@ export async function setConversationResumen(
 export async function setPruebaNota(
   id: string,
   resultado: "correcta" | "incorrecta",
-  texto: string,
+  aclaraciones: { messageId: string; texto: string }[],
 ): Promise<WaConversation | null> {
   const current = await getConversation(id);
   if (!current?.prueba) throw new Error("No es una conversación de prueba");
-  const nota = texto.trim().replace(/\s+/g, " ");
-  if (resultado === "incorrecta" && !nota) throw new Error("Contá qué pasó");
+  const notas = normalizePruebaAclaraciones(aclaraciones);
+  if (resultado === "incorrecta" && notas.length === 0) {
+    throw new Error("Elegí al menos un mensaje y contá qué pasó");
+  }
   const now = nowIso();
+  const pruebaNota =
+    resultado === "incorrecta"
+      ? notas
+          .map((item) => item.texto)
+          .join("\n\n")
+          .slice(0, 4000)
+      : null;
   await updateDoc(doc(firestore, CONVERSATIONS, id), {
     pruebaResultado: resultado,
-    pruebaNota: resultado === "incorrecta" ? nota.slice(0, 4000) : null,
+    pruebaNota,
+    pruebaAclaraciones: resultado === "incorrecta" ? notas : [],
     pruebaNotaEn: now,
     updatedAt: now,
   });
