@@ -474,7 +474,15 @@ export function WhatsAppConversationsPanel({
         if (snap.selectedId) {
           tasks.push(
             fetchWaMessages(snap.selectedId)
-              .then((msgs) => setMessages(msgs))
+              .then((msgs) => {
+                setMessages((prev) => {
+                  const pendingLocal = prev.filter((item) => item.id.startsWith("local-"));
+                  if (!pendingLocal.length) return msgs;
+                  return [...msgs, ...pendingLocal].sort(
+                    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+                  );
+                });
+              })
               .catch(() => undefined),
           );
         }
@@ -482,7 +490,7 @@ export function WhatsAppConversationsPanel({
       void Promise.all(tasks).finally(() => {
         busy = false;
       });
-    }, waitingQr ? 3000 : 20000);
+    }, pruebaMode ? 2000 : waitingQr ? 3000 : 20000);
     return () => window.clearInterval(id);
   }, [ready, refreshStatus, qrModalOpen, waStatus, pruebaMode]);
 
@@ -629,7 +637,10 @@ export function WhatsAppConversationsPanel({
       const sameResumen = (current.resumen ?? "") === (fresh.resumen ?? "");
       const sameContact = current.contact?.updatedAt === fresh.contact?.updatedAt;
       const sameTags = (current.tagIds ?? []).join() === (fresh.tagIds ?? []).join();
-      if (sameResumen && sameContact && sameTags) return current;
+      const sameAssignee =
+        (current.assigneeKind ?? "") === (fresh.assigneeKind ?? "") &&
+        (current.assigneeName ?? "") === (fresh.assigneeName ?? "");
+      if (sameResumen && sameContact && sameTags && sameAssignee) return current;
       return { ...current, ...fresh, contact: fresh.contact ?? current.contact };
     });
   }, [conversations, selectedId]);
@@ -1050,10 +1061,11 @@ export function WhatsAppConversationsPanel({
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();
-    if (!selectedId || sending) return;
+    if (!selectedId || (!pruebaMode && sending)) return;
     if (pruebaMode && (selected?.pruebaResultado === "correcta" || selected?.pruebaResultado === "incorrecta")) {
       return;
     }
+    if (pruebaMode && selected?.assigneeKind === "user") return;
     if (!draft.trim() && !attachment) return;
     if (pruebaMode && attachment) {
       toast.error("En una prueba solo se puede mandar texto");
@@ -1067,21 +1079,54 @@ export function WhatsAppConversationsPanel({
     }
     await flushPendingTags();
     lastQuickReplyRef.current = null;
+    if (pruebaMode) {
+      const tempId = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      setDraft("");
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          conversationId,
+          contactId: selected?.contactId ?? "",
+          direction: "INBOUND",
+          type: "TEXT",
+          text,
+          status: "RECEIVED",
+          mimeType: null,
+          fileName: null,
+          mediaUrl: null,
+          isDeleted: false,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      try {
+        const result = await sendWaPruebaMessage(conversationId, text);
+        setMessages((prev) => {
+          const server = result.messages;
+          const pendingLocal = prev.filter(
+            (item) => item.id.startsWith("local-") && item.id !== tempId,
+          );
+          return [...server, ...pendingLocal].sort(
+            (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+          );
+        });
+        if (result.conversation) setSelected(result.conversation);
+      } catch (error) {
+        setMessages((prev) => prev.filter((item) => item.id !== tempId));
+        toast.error(error instanceof Error ? error.message : "No se pudo enviar el mensaje");
+      }
+      return;
+    }
     setSending(true);
     try {
-      if (pruebaMode) {
-        const result = await sendWaPruebaMessage(conversationId, text);
-        setDraft("");
-        setMessages(result.messages);
-        if (result.conversation) setSelected(result.conversation);
-      } else if (file) {
+      if (file) {
         await sendWaMedia(conversationId, file, text || undefined);
         setAttachment(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
         await sendWaMessage(conversationId, text);
       }
-      if (!pruebaMode) setDraft("");
+      setDraft("");
       const localTagIds = pendingTags.current ?? selected?.tagIds ?? [];
       const [msgs, page] = await Promise.all([
         fetchWaMessages(conversationId),
@@ -1150,6 +1195,7 @@ export function WhatsAppConversationsPanel({
   const pruebaCerrada =
     pruebaMode &&
     (selected?.pruebaResultado === "correcta" || selected?.pruebaResultado === "incorrecta");
+  const pruebaDerivada = pruebaMode && selected?.assigneeKind === "user";
   const composerLocked = pruebaMode
     ? false
     : Boolean(selected) && selected?.contact?.isBlocked !== true && !assignedToMe;
@@ -1580,6 +1626,9 @@ export function WhatsAppConversationsPanel({
                   </button>
                 </div>
               ) : null}
+              {pruebaDerivada ? (
+                <p className="wa-prueba-derivada">Fuiste derivado a un humano.</p>
+              ) : null}
               <div className="wa-inbox__composer-row">
                 <input
                   ref={fileInputRef}
@@ -1623,10 +1672,10 @@ export function WhatsAppConversationsPanel({
                 )}
                 <input
                   type="text"
-                  value={composerLocked ? "" : draft}
+                  value={composerLocked || pruebaDerivada ? "" : draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(event) => {
-                    if (composerLocked) {
+                    if (composerLocked || pruebaDerivada || pruebaCerrada) {
                       event.preventDefault();
                       return;
                     }
@@ -1658,7 +1707,9 @@ export function WhatsAppConversationsPanel({
                     }
                   }}
                   placeholder={
-                    pruebaCerrada
+                    pruebaDerivada
+                      ? "Fuiste derivado a un humano."
+                      : pruebaCerrada
                       ? "Esta prueba ya está marcada."
                       : composerLocked
                         ? "Asignate la conversación para escribir…"
@@ -1671,9 +1722,10 @@ export function WhatsAppConversationsPanel({
                               : "Escribí un mensaje… (/saludo)"
                   }
                   disabled={
-                    sending ||
+                    (!pruebaMode && sending) ||
                     composerLocked ||
                     pruebaCerrada ||
+                    pruebaDerivada ||
                     selected?.contact?.isBlocked === true
                   }
                   autoComplete="off"
@@ -1692,13 +1744,14 @@ export function WhatsAppConversationsPanel({
                     type="submit"
                     className="btn btn-primary"
                     disabled={
-                      sending ||
+                      (!pruebaMode && sending) ||
                       pruebaCerrada ||
+                      pruebaDerivada ||
                       (!draft.trim() && !attachment) ||
                       selected?.contact?.isBlocked === true
                     }
                   >
-                    {sending ? (pruebaMode ? "Respondiendo…" : "Enviando…") : "Enviar"}
+                    {sending && !pruebaMode ? "Enviando…" : "Enviar"}
                   </button>
                 )}
               </div>
@@ -1799,13 +1852,18 @@ export function WhatsAppConversationsPanel({
                   <section>
                     <h3>Etiquetas</h3>
                     {assignedTags.length ? (
-                      <ul>
+                      <div className="wa-prueba-tags">
                         {assignedTags.map((tag) => (
-                          <li key={tag.id} className={freshTagIds.includes(tag.id) ? "is-new" : ""}>
+                          <span
+                            key={tag.id}
+                            className={`wa-tag${freshTagIds.includes(tag.id) ? " is-new" : ""}`}
+                            style={{ "--tag": tagColor(tag) } as CSSProperties}
+                            title={tagGroupLabel(tag)}
+                          >
                             {tag.name}
-                          </li>
+                          </span>
                         ))}
-                      </ul>
+                      </div>
                     ) : (
                       <p>Todavía ninguna.</p>
                     )}
@@ -1840,29 +1898,39 @@ export function WhatsAppConversationsPanel({
                     <ul className="wa-prueba-uso">
                       {usoPorModelo.map((grupo) => (
                         <li key={grupo.paso}>
-                          <strong>{grupo.titulo}</strong>
-                          <p className="wa-prueba-uso__modelo">{grupo.modelo}</p>
-                          <p className="wa-prueba-uso__tarifa">
-                            {tarifa(grupo.entradaPorMillon)} entrada · {tarifa(grupo.salidaPorMillon)} salida / millón
-                          </p>
-                          <p>
-                            Entrada {miles(grupo.entrada)} · Salida {miles(grupo.salida)} · Total{" "}
-                            {miles(grupo.total)}
-                          </p>
-                          <p>
+                          <div className="wa-prueba-uso__head">
+                            <strong>{grupo.titulo}</strong>
+                            <span>{grupo.modelo}</span>
+                          </div>
+                          <dl className="wa-prueba-uso__nums">
+                            <div>
+                              <dt>Entrada</dt>
+                              <dd>{miles(grupo.entrada)}</dd>
+                            </div>
+                            <div>
+                              <dt>Salida</dt>
+                              <dd>{miles(grupo.salida)}</dd>
+                            </div>
+                            <div>
+                              <dt>Total</dt>
+                              <dd>{miles(grupo.total)}</dd>
+                            </div>
+                          </dl>
+                          <p className="wa-prueba-uso__meta">
                             {grupo.llamadas === 0
                               ? "Sin llamadas en esta conversación"
                               : `${grupo.llamadas} ${grupo.llamadas === 1 ? "llamada" : "llamadas"}`}
+                            {" · "}
+                            {tarifa(grupo.entradaPorMillon)} entrada · {tarifa(grupo.salidaPorMillon)} salida / millón
                           </p>
                         </li>
                       ))}
                     </ul>
-                    <p className="wa-prueba-total">
-                      Total aproximado {gastoUsd(usoPorModelo.reduce((sum, grupo) => sum + grupo.costo, 0))}
-                    </p>
-                    <p className="wa-prueba-total">
-                      {gastoPesos(usoPorModelo.reduce((sum, grupo) => sum + grupo.costo, 0) * DOLAR_PESOS)}
-                    </p>
+                    <div className="wa-prueba-total">
+                      <span>Total aproximado</span>
+                      <strong>{gastoUsd(usoPorModelo.reduce((sum, grupo) => sum + grupo.costo, 0))}</strong>
+                      <strong>{gastoPesos(usoPorModelo.reduce((sum, grupo) => sum + grupo.costo, 0) * DOLAR_PESOS)}</strong>
+                    </div>
                   </section>
                 </>
               ) : null}

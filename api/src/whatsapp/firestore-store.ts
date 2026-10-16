@@ -439,6 +439,23 @@ export async function createPruebaConversation(): Promise<WaConversation> {
   const phone = numeroFicticio(seq);
   const contact = await findOrCreateContact({ phoneNumber: phone });
   const now = nowIso();
+  const limpio = {
+    firstName: null,
+    lastName: null,
+    displayName: null,
+    cobertura: null,
+    email: null,
+    grupoEtario: null,
+    consultaPara: null,
+    contactoNombre: null,
+    contactoApellido: null,
+    relacionFamiliar: null,
+    dni: null,
+    sexo: null,
+    esPaciente: null,
+    updatedAt: now,
+  };
+  await updateDoc(doc(firestore, CONTACTS, contact.id), limpio);
   const id = randomUUID();
   const conversation: WaConversation = {
     id,
@@ -464,7 +481,7 @@ export async function createPruebaConversation(): Promise<WaConversation> {
     updatedAt: now,
   };
   await setDoc(doc(firestore, CONVERSATIONS, id), conversation);
-  return { ...conversation, contact };
+  return { ...conversation, contact: { ...contact, ...limpio } };
 }
 
 export async function getConversation(id: string): Promise<WaConversation | null> {

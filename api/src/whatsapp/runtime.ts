@@ -24,7 +24,7 @@ import { mediaMetaFromRaw, normalizeIncomingMessage } from "./normalize.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { BaileysSessionStore } from "./session-store.js";
 import type { WaMessage, WaMessageType, WaStatusSnapshot } from "./types.js";
-import { runBotTurn, scheduleBotTurn, setBotDeliver } from "./bot-turn.js";
+import { scheduleBotTurn, setBotDeliver } from "./bot-turn.js";
 
 const sessionStore = new BaileysSessionStore(
   path.isAbsolute(env.whatsapp.sessionPath)
@@ -274,7 +274,7 @@ export async function sendPruebaInbound(conversationId: string, text: string): P
     externalMessageId: `prueba-${randomUUID()}`,
     status: "RECEIVED",
   });
-  await runBotTurn(conversationId);
+  scheduleBotTurn(conversationId);
 }
 
 setBotDeliver((conversationId, body) => sendConversationText(conversationId, body));

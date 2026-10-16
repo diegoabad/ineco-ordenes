@@ -101,6 +101,14 @@ async function kick(conversationId: string): Promise<void> {
   }
 }
 
+const ETIQUETAS_BOT_NO = new Set(["pedido de info"]);
+
+function etiquetasDelModelo(nombres: string[]): string[] {
+  return nombres
+    .map((name) => name.trim())
+    .filter((name) => name && !ETIQUETAS_BOT_NO.has(name.toLowerCase()));
+}
+
 function stringField(root: Record<string, unknown>, key: string): string {
   const value = root[key];
   return typeof value === "string" ? value.trim() : "";
@@ -432,9 +440,23 @@ const respuestaSchema = {
   additionalProperties: false,
   properties: {
     texto: { type: "string" },
+    pregunta: { type: "string" },
   },
-  required: ["texto"],
+  required: ["texto", "pregunta"],
 } as Record<string, unknown>;
+
+function separarPregunta(texto: string, pregunta: string): { cuerpo: string; pregunta: string } {
+  const cuerpo = texto.trim();
+  const aparte = pregunta.trim();
+  if (aparte) return { cuerpo, pregunta: aparte };
+  const corte = cuerpo.lastIndexOf("¿");
+  if (corte <= 0) return { cuerpo, pregunta: "" };
+  const final = cuerpo.slice(corte).trim();
+  if (!final.endsWith("?")) return { cuerpo, pregunta: "" };
+  const antes = cuerpo.slice(0, corte).trim();
+  if (!antes) return { cuerpo, pregunta: "" };
+  return { cuerpo: antes, pregunta: final };
+}
 
 export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promise<void> {
   const getConv = io?.getConversation ?? getConversation;
@@ -546,7 +568,8 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "No diagnostiques. Un síntoma no confirma una condición.",
       "peligroActual solo si hay peligro en este momento: ideas de muerte o de hacerse daño, síntomas de ACV, dolor de cabeza súbito e intenso, convulsión que no cede, pérdida de conocimiento, confusión grave, dolor de pecho o falta de aire intensa, violencia o riesgo para otros.",
       "dudaSinPeligro=true solo si no hay peligro actual y hace falta una persona: malestar intenso sin un pedido concreto, frases ambiguas sobre la vida o la muerte sin una intención explícita, antecedente de intento o de autolesión, o la crisis de un tercero en curso. false si nombra una condición como motivo o pregunta por un servicio o un precio.",
-      "etiquetas: nombres exactos del catálogo, solo las que correspondan. No inventes etiquetas ni diagnósticos.",
+      "etiquetas: nombres exactos del catálogo, solo las concretas. No inventes etiquetas ni diagnósticos. No uses Pedido de info: es demasiado genérica. Pedido de turno sí, cuando pide sacar, consultar, cancelar o reprogramar un turno.",
+      "Si nombra una sede, un programa, una evaluación, una cobertura o un profesional que está en las etiquetas, poné esa. Si pregunta por todas las sedes y todavía no elige una, no etiquetes una sede.",
       "Si nombra una obra social, prepaga o certificado que está en las etiquetas, poné esa etiqueta. No pongas una cobertura que no nombró.",
       "preguntaAclaracion dejala vacía. La pregunta por datos faltantes la arma el otro paso, solo si el campo no está en la ficha.",
       "datos: completá solo lo que el texto dice y que en la ficha está vacío. Si el campo ya tiene valor, dejalo vacío. No inventes. El teléfono ya viene de WhatsApp: no lo pidas ni lo cambies.",
@@ -567,7 +590,10 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Intenciones:",
       ...intenciones.map((item) => `- ${item.clave}: ${item.nombre}. ${item.descripcion}`),
       "Etiquetas:",
-      catalog.items.map((item) => item.name).join(", "),
+      catalog.items
+        .filter((item) => !ETIQUETAS_BOT_NO.has(item.name.trim().toLowerCase()))
+        .map((item) => item.name)
+        .join(", "),
     ]
       .filter(Boolean)
       .join("\n"),
@@ -629,9 +655,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   const duda = motor.seguridad.detectarRiesgos && !peligro && detection.dudaSinPeligro === true;
 
   const wantedNames = new Set(
-    (Array.isArray(detection.etiquetas) ? detection.etiquetas : [])
-      .map((name) => name.trim().toLowerCase())
-      .filter(Boolean),
+    etiquetasDelModelo(Array.isArray(detection.etiquetas) ? detection.etiquetas : []).map((name) =>
+      name.toLowerCase(),
+    ),
   );
   if (peligro) {
     const urgencia = tagsByName.get("urgencia");
@@ -667,9 +693,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       cortesia:
         detection.cortesia === "saludo" || detection.cortesia === "cierre" ? detection.cortesia : "",
       resumen: (detection.resumen ?? "").trim().slice(0, 240),
-      etiquetas: (Array.isArray(detection.etiquetas) ? detection.etiquetas : [])
-        .map((name) => name.trim())
-        .filter(Boolean),
+      etiquetas: etiquetasDelModelo(Array.isArray(detection.etiquetas) ? detection.etiquetas : []),
     });
 
   if (peligro && riesgo) {
@@ -711,21 +735,16 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   }
 
   if (sinTema && detection.cortesia === "saludo") {
-    const saludoSolo =
-      fase === "inicio"
-        ? [charla.saludo, charla.pregunta].filter(Boolean).join("\n\n")
-        : charla.pregunta || "¿En qué puedo ayudarte?";
-    await send(conversationId, saludoSolo);
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+    const pregunta = charla.pregunta || "¿En qué puedo ayudarte?";
+    if (pregunta) await send(conversationId, pregunta);
     await anotar(previa || null, conversation.intencionConcluida);
     return;
   }
 
   if (sinTema && !previaAbierta) {
-    const descubrir =
-      fase === "inicio"
-        ? [charla.saludo, charla.pregunta || "¿En qué puedo ayudarte?"].filter(Boolean).join("\n\n")
-        : charla.pregunta || "¿En qué puedo ayudarte?";
-    await send(conversationId, descubrir);
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+    await send(conversationId, charla.pregunta || "¿En qué puedo ayudarte?");
     await anotar(previa || null, conversation.intencionConcluida);
     return;
   }
@@ -756,7 +775,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     bot.conversacion && typeof bot.conversacion === "object"
       ? stringField(bot.conversacion as Record<string, unknown>, "estiloRespuesta")
       : "";
-  const reply = await completeStructured<{ texto: string }>({
+  const reply = await completeStructured<{ texto: string; pregunta?: string }>({
     conversacionId: conversationId,
     paso: "responder",
     modelo: models.responder,
@@ -766,7 +785,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     schema: respuestaSchema,
     onUsage: io?.onUsage,
     instructions: [
-      "Redactá un mensaje corto de WhatsApp, en español de Argentina, en texto plano.",
+      "Redactá un mensaje corto de WhatsApp, en español de Argentina, en texto plano. Sin HTML, sin markdown y sin asteriscos.",
+      "Si nombrás varias sedes, precios, profesionales o pasos, poné una frase corta y después cada ítem en su propio renglón, uno debajo del otro. No los encadenes con comas en un solo párrafo.",
+      "texto es la información. pregunta es la única pregunta, o vacía si no hay que preguntar. Una oferta como si quiere un turno, cuál sede, o un dato que falta, también va en pregunta. No la dejes al final de texto.",
       "Usá solo el texto de la base. No inventes precios, profesionales, coberturas ni direcciones.",
       "Si un dato dice no informado o en confirmación, no lo completes: pedí los datos y decí que el equipo informa.",
       "Si hay dos precios, decí los dos.",
@@ -778,7 +799,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       objetivo ? `Objetivo: ${objetivo}` : "",
       estilo ? `Estilo: ${estilo}.` : "",
       fase === "inicio"
-        ? `La primera línea es exactamente esta, sin cambiarla: ${charla.saludo}. No agregues "${charla.pregunta}". Después respondé.`
+        ? "La charla recién empieza. No saludes ni te presentes: el saludo ya sale en otro mensaje. Respondé el pedido. No agregues la pregunta de en qué podés ayudar si ya vas a hacer otra pregunta."
         : "La charla ya empezó. No saludes, no te presentes y no repitas tu nombre.",
       resultadoAccion
         ? "Si hay un resultado de listas, incluilo. Si hay varias coincidencias, nombrálas y no elijas una. Si no hay coincidencia, decí que no está en las listas y que el equipo lo confirma. No inventes horarios."
@@ -786,12 +807,12 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       conflicto
         ? `Hay dos pedidos que no se pueden hacer juntos: ${chosen?.clave ?? ""} y ${secundaria?.clave ?? principal?.clave ?? ""}. Preguntá solo con cuál siguen. No pidas datos y no saludes de nuevo.`
         : secundaria
-          ? `Respondé los dos temas: ${chosen?.clave ?? ""} y ${secundaria.clave}. Una sola pregunta en todo el mensaje.`
+          ? `Respondé los dos temas: ${chosen?.clave ?? ""} y ${secundaria.clave}. Una sola pregunta, en el campo pregunta.`
           : "",
       conflicto
         ? ""
         : pedido
-          ? `Para la intención principal falta un solo dato. Después de responder, pedí únicamente: ${pedido}. No pidas ningún dato que ya figure en la ficha.`
+          ? `Para la intención principal falta un solo dato. La información va en texto. En pregunta pedí únicamente: ${pedido}. No pidas ningún dato que ya figure en la ficha.`
           : "La ficha ya tiene los datos que esta intención necesita. No pidas nombre, apellido, DNI, edad ni ningún otro dato.",
       identidad.texto,
       ...instrucciones,
@@ -831,9 +852,14 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   });
   if (io?.trace) io.trace.lunaLlamada = true;
 
-  const texto = reply.texto.trim();
-  if (!texto) return;
-  await send(conversationId, texto.slice(0, 1500));
+  const partes = separarPregunta(reply.texto ?? "", reply.pregunta ?? "");
+  let cuerpo = partes.cuerpo;
+  if (fase === "inicio" && charla.saludo) {
+    await send(conversationId, charla.saludo);
+    if (cuerpo.startsWith(charla.saludo)) cuerpo = cuerpo.slice(charla.saludo.length).trim();
+  }
+  if (cuerpo) await send(conversationId, cuerpo.slice(0, 1500));
+  if (partes.pregunta) await send(conversationId, partes.pregunta.slice(0, 500));
   await saveIntencion(conversationId, estadoSiguiente);
   if (conversation.assigneeKind === "none") {
     await saveAssignee(conversationId, { kind: "bot", name: identidad.nombre });
