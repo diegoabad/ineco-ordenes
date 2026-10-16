@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
 import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
 import { formatFechaHora, fechaHoyIso } from "../lib/fechas";
@@ -36,9 +36,10 @@ import {
   sendWaMessage,
   sendWaPruebaMessage,
   setWaConversationTags,
+  updateWaContact,
   waMediaUrl,
 } from "../services/whatsappCrmService";
-import type { WaConversation, WaMessage, WaOperator, WaTag, WaTagGroup } from "../types/whatsappCrm";
+import type { WaContact, WaConversation, WaMessage, WaOperator, WaTag, WaTagGroup } from "../types/whatsappCrm";
 import { waAssigneeLabel, waContactLabel, waContactThreadHeader } from "../types/whatsappCrm";
 import { DatePicker } from "./DatePicker";
 import {
@@ -67,6 +68,77 @@ import {
 import { WhatsAppContactProfileModal } from "./WhatsAppContactProfileModal";
 
 const CONVERSATIONS_PAGE_SIZE = 40;
+
+type DatoCampo =
+  | "firstName"
+  | "lastName"
+  | "fullName"
+  | "dni"
+  | "email"
+  | "contactoNombre"
+  | "contactoApellido";
+
+function esCaracterDePalabra(char: string): boolean {
+  return /[\p{L}\p{N}@._+-]/u.test(char);
+}
+
+function seleccionarPalabra(x: number, y: number, root: HTMLElement): string {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (px: number, py: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (px: number, py: number) => Range | null;
+  };
+  const hit = doc.caretPositionFromPoint?.(x, y);
+  const rangeHit = hit ? null : doc.caretRangeFromPoint?.(x, y);
+  const rawNode = hit?.offsetNode ?? rangeHit?.startContainer ?? null;
+  const rawOffset = hit?.offset ?? rangeHit?.startOffset ?? 0;
+  if (!rawNode || !root.contains(rawNode)) return "";
+  let textNode: Text | null = null;
+  let offset = rawOffset;
+  if (rawNode.nodeType === Node.TEXT_NODE) {
+    textNode = rawNode as Text;
+  } else if (rawNode.nodeType === Node.ELEMENT_NODE) {
+    const child = rawNode.childNodes[Math.min(rawOffset, rawNode.childNodes.length - 1)];
+    if (child?.nodeType === Node.TEXT_NODE) {
+      textNode = child as Text;
+      offset = rawOffset >= rawNode.childNodes.length ? textNode.length : 0;
+    }
+  }
+  if (!textNode) return "";
+  const value = textNode.textContent ?? "";
+  let start = Math.min(offset, value.length);
+  let end = start;
+  if (start > 0 && !esCaracterDePalabra(value[start] ?? "") && esCaracterDePalabra(value[start - 1] ?? "")) {
+    start -= 1;
+    end = start;
+  }
+  while (start > 0 && esCaracterDePalabra(value[start - 1] ?? "")) start -= 1;
+  while (end < value.length && esCaracterDePalabra(value[end] ?? "")) end += 1;
+  if (start === end) return "";
+  const range = document.createRange();
+  range.setStart(textNode, start);
+  range.setEnd(textNode, end);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return value.slice(start, end);
+}
+
+function datoOpciones(text: string, tercero: boolean): { campo: DatoCampo; label: string }[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const items: { campo: DatoCampo; label: string }[] = [
+    { campo: "firstName", label: "Nombre" },
+    { campo: "lastName", label: "Apellido" },
+  ];
+  if (words.length >= 2) items.push({ campo: "fullName", label: "Nombre y apellido" });
+  items.push({ campo: "dni", label: "DNI" }, { campo: "email", label: "Email" });
+  if (tercero) {
+    items.push(
+      { campo: "contactoNombre", label: "Nombre de quien escribe" },
+      { campo: "contactoApellido", label: "Apellido de quien escribe" },
+    );
+  }
+  return items;
+}
 
 function mergeMensajesServidor(prev: WaMessage[], server: WaMessage[]): WaMessage[] {
   const locales = prev.filter((item) => item.id.startsWith("local-"));
@@ -424,6 +496,12 @@ export function WhatsAppConversationsPanel({
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpKind, setFollowUpKind] = useState<WaFollowUpKind>("tarea");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [datoMenu, setDatoMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [datoSaving, setDatoSaving] = useState(false);
+  const datoMenuRef = useRef<HTMLDivElement | null>(null);
+  const wordPointer = useRef<{ x: number; y: number } | null>(null);
+  const quickTagSearchRef = useRef<HTMLInputElement | null>(null);
+  const tagSearchFocus = useRef(false);
   const [notaOpen, setNotaOpen] = useState(false);
   const [eligiendoRechazo, setEligiendoRechazo] = useState(false);
   const [rechazoIds, setRechazoIds] = useState<string[]>([]);
@@ -673,6 +751,35 @@ export function WhatsAppConversationsPanel({
     setMessages([]);
     void loadThread(selectedId);
   }, [selectedId, loadThread]);
+
+  useEffect(() => {
+    setDatoMenu(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!tagSearchFocus.current || !quickPanelOpen) return;
+    tagSearchFocus.current = false;
+    quickTagSearchRef.current?.focus();
+  }, [quickPanelOpen, quickTagQuery]);
+
+  useEffect(() => {
+    if (!datoMenu) return;
+    function close(event: Event) {
+      if (event.type === "pointerdown" && datoMenuRef.current?.contains(event.target as Node)) return;
+      setDatoMenu(null);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setDatoMenu(null);
+    }
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [datoMenu]);
 
   useEffect(() => {
     const current = selected?.tagIds ?? [];
@@ -1483,6 +1590,159 @@ export function WhatsAppConversationsPanel({
       return false;
     } finally {
       setAssigning(false);
+    }
+  }
+
+  function rememberContact(updated: WaContact) {
+    const merge = (current: WaConversation): WaConversation =>
+      current.contactId === updated.id
+        ? {
+            ...current,
+            contact: {
+              ...updated,
+              phoneNumber: updated.phoneNumber?.trim() || current.contact?.phoneNumber || "",
+            },
+          }
+        : current;
+    setSelected((prev) => (prev ? merge(prev) : prev));
+    setConversations((prev) => prev.map(merge));
+  }
+
+  function onInboundWordClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.detail !== 1) return;
+    const start = wordPointer.current;
+    wordPointer.current = null;
+    if (!start) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+    seleccionarPalabra(event.clientX, event.clientY, event.currentTarget);
+  }
+
+  function onInboundContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    if (!selected?.contact) return;
+    const bubble = event.currentTarget;
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+    const node = range?.commonAncestorContainer ?? null;
+    const yaSelecciono =
+      Boolean(range && !range.collapsed && node && bubble.contains(node)) &&
+      (() => {
+        const probe = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+        const probeNode = probe?.offsetNode;
+        return !probeNode || range?.intersectsNode(probeNode) === true;
+      })();
+    let text = yaSelecciono ? selection?.toString().replace(/\s+/g, " ").trim() ?? "" : "";
+    if (!text) text = seleccionarPalabra(event.clientX, event.clientY, bubble);
+    if (!text) {
+      text = bubble.querySelector(".wa-bubble__text")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+    }
+    if (!text) return;
+    event.preventDefault();
+    const width = 248;
+    const height = 360;
+    setDatoMenu({
+      text,
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)),
+    });
+  }
+
+  function buscarComoEtiqueta() {
+    const text = datoMenu?.text.trim() ?? "";
+    if (!text) return;
+    if (pruebaMode) {
+      setTagsModalGroupId("");
+      setTagsModalQuery(text);
+      setTagsModalOpen(true);
+    } else {
+      setQuickTagQuery(text);
+      setQuickPanelOpen(true);
+      tagSearchFocus.current = true;
+    }
+    setDatoMenu(null);
+  }
+
+  async function copyDatoSeleccionado() {
+    if (!datoMenu) return;
+    try {
+      await navigator.clipboard.writeText(datoMenu.text);
+      toast.success("Texto copiado");
+    } catch {
+      toast.error("No se pudo copiar el texto");
+    }
+    setDatoMenu(null);
+  }
+
+  async function guardarDatoSeleccionado(campo: DatoCampo) {
+    const contact = selected?.contact;
+    const text = datoMenu?.text.trim() ?? "";
+    if (!contact || !text || datoSaving) return;
+    let firstName = contact.firstName?.trim() || "";
+    let lastName = contact.lastName?.trim() || "";
+    let dni = contact.dni?.trim() || "";
+    let email = contact.email?.trim() || "";
+    let contactoNombre = contact.contactoNombre?.trim() || "";
+    let contactoApellido = contact.contactoApellido?.trim() || "";
+    let label = "dato";
+    if (campo === "firstName") {
+      firstName = text;
+      label = "Nombre";
+    } else if (campo === "lastName") {
+      lastName = text;
+      label = "Apellido";
+    } else if (campo === "fullName") {
+      const parts = text.split(/\s+/).filter(Boolean);
+      firstName = parts[0] ?? "";
+      lastName = parts.slice(1).join(" ");
+      label = "Nombre y apellido";
+    } else if (campo === "dni") {
+      const digits = text.replace(/\D/g, "");
+      if (digits.length < 7 || digits.length > 8) {
+        toast.error("Ese texto no parece un DNI");
+        return;
+      }
+      dni = digits;
+      label = "DNI";
+    } else if (campo === "email") {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+        toast.error("Ese texto no es un email");
+        return;
+      }
+      email = text;
+      label = "Email";
+    } else if (campo === "contactoNombre") {
+      contactoNombre = text;
+      label = "Nombre de quien escribe";
+    } else if (campo === "contactoApellido") {
+      contactoApellido = text;
+      label = "Apellido de quien escribe";
+    }
+    if (!firstName) {
+      toast.error("Primero guardá el nombre del paciente");
+      return;
+    }
+    setDatoSaving(true);
+    try {
+      const updated = await updateWaContact(contact.id, {
+        firstName,
+        lastName,
+        cobertura: contact.cobertura ?? "",
+        email,
+        grupoEtario: contact.grupoEtario,
+        consultaPara: contact.consultaPara,
+        relacionFamiliar: contact.relacionFamiliar ?? "",
+        contactoNombre,
+        contactoApellido,
+        dni,
+        sexo: contact.sexo,
+        esPaciente: contact.esPaciente,
+      });
+      rememberContact(updated);
+      toast.success(`Guardado en ${label}`);
+      setDatoMenu(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el dato");
+    } finally {
+      setDatoSaving(false);
     }
   }
 
@@ -2356,7 +2616,19 @@ export function WhatsAppConversationsPanel({
                           />
                         </label>
                       ) : null}
-                      <div className={`wa-bubble${outbound ? " is-out" : " is-in"}${elegido && mostrarCheck ? " is-picked" : ""}`}>
+                      <div
+                        className={`wa-bubble${outbound ? " is-out" : " is-in"}${elegido && mostrarCheck ? " is-picked" : ""}`}
+                        onPointerDown={
+                          outbound || m.isDeleted
+                            ? undefined
+                            : (event) => {
+                                if (event.button !== 0) return;
+                                wordPointer.current = { x: event.clientX, y: event.clientY };
+                              }
+                        }
+                        onClick={outbound || m.isDeleted ? undefined : onInboundWordClick}
+                        onContextMenu={outbound || m.isDeleted ? undefined : onInboundContextMenu}
+                      >
                       {m.type === "IMAGE" && !m.isDeleted ? (
                         <img
                           className="wa-bubble__media"
@@ -2406,6 +2678,38 @@ export function WhatsAppConversationsPanel({
               ) : null}
               <div ref={messagesEndRef} />
             </div>
+            {datoMenu ? (
+              <div
+                ref={datoMenuRef}
+                className="wa-dato-menu"
+                style={{ left: datoMenu.x, top: datoMenu.y }}
+                role="menu"
+                aria-label="Guardar texto seleccionado"
+              >
+                <p className="wa-dato-menu__hint" title={datoMenu.text}>
+                  {datoMenu.text}
+                </p>
+                <button type="button" role="menuitem" onClick={() => void copyDatoSeleccionado()}>
+                  Copiar
+                </button>
+                <div className="wa-dato-menu__sep" />
+                <button type="button" role="menuitem" onClick={buscarComoEtiqueta}>
+                  Buscar como etiqueta
+                </button>
+                <div className="wa-dato-menu__sep" />
+                {datoOpciones(datoMenu.text, selected?.contact?.consultaPara === "tercero").map((item) => (
+                  <button
+                    key={item.campo}
+                    type="button"
+                    role="menuitem"
+                    disabled={datoSaving}
+                    onClick={() => void guardarDatoSeleccionado(item.campo)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <form
               className={`wa-inbox__composer${composerLocked ? " is-locked" : ""}${pruebaDerivada ? " is-derivada" : ""}`}
               onSubmit={(e) => {
@@ -2879,6 +3183,7 @@ export function WhatsAppConversationsPanel({
               <IconSearch size={16} />
             </span>
             <input
+              ref={quickTagSearchRef}
               type="text"
               value={quickTagQuery}
               onChange={(e) => setQuickTagQuery(e.target.value)}

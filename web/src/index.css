@@ -10754,26 +10754,35 @@ textarea.wa-prueba-nota {
 
 .wa-bubble-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  justify-content: flex-start;
   gap: 0.45rem;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
-  align-self: flex-start;
 }
 
 .wa-bubble-row.is-out {
-  align-self: flex-end;
-  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .wa-bubble-row .wa-bubble,
-.wa-bubble-row .wa-bubble.is-out {
-  align-self: center;
-  width: max-content;
-  max-width: min(32rem, 100%);
+.wa-bubble-row .wa-bubble.is-out,
+.wa-bubble-row .wa-typing {
+  align-self: auto;
+  width: auto;
+  max-width: min(32rem, 85%);
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.wa-bubble-row.is-out .wa-bubble,
+.wa-bubble-row.is-out .wa-typing {
+  margin-left: auto;
+  margin-right: 0;
 }
 
 .wa-bubble-row.is-out.is-pick {
+  justify-content: flex-start;
   align-self: stretch;
   width: 100%;
   max-width: 100%;
@@ -11251,6 +11260,57 @@ textarea.wa-prueba-nota {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text;
+}
+
+.wa-dato-menu {
+  position: fixed;
+  z-index: 80;
+  width: 15.5rem;
+  padding: 0.3rem;
+  border-radius: 0.7rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.wa-dato-menu__hint {
+  margin: 0;
+  padding: 0.35rem 0.55rem 0.2rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-dato-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.55rem;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.wa-dato-menu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 10%, #fff);
+}
+
+.wa-dato-menu button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wa-dato-menu__sep {
+  height: 1px;
+  margin: 0.25rem 0.4rem;
+  background: var(--border);
 }
 
 .wa-bubble__meta {
