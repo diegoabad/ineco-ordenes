@@ -12,6 +12,7 @@ export type WaConversationStatus = "OPEN" | "ARCHIVED";
 
 export type WaContactGrupoEtario = "infanto" | "adulto";
 export type WaContactConsultaPara = "propio" | "tercero";
+export type WaContactSexo = "masculino" | "femenino";
 
 export type WaContact = {
   id: string;
@@ -29,8 +30,10 @@ export type WaContact = {
   contactoApellido: string | null;
   relacionFamiliar: string | null;
   dni: string | null;
+  sexo: WaContactSexo | null;
   esPaciente: boolean | null;
   isBlocked: boolean;
+  updatedAt?: string;
 };
 
 export type WaConversation = {
@@ -44,6 +47,26 @@ export type WaConversation = {
   assigneeUserId?: string | null;
   assigneeName?: string | null;
   tagIds?: string[];
+  resumen?: string | null;
+  intencionAbierta?: string | null;
+  intencionConcluida?: boolean;
+  intencionPropuesta?: string | null;
+  prueba?: boolean;
+  pruebaResultado?: "correcta" | "incorrecta" | null;
+  pruebaNota?: string | null;
+  pruebaNotaEn?: string | null;
+  auditoria?: {
+    en: string;
+    intencion: string;
+    secundaria: string;
+    abierta: string;
+    concluida: boolean;
+    peligro: boolean;
+    duda: boolean;
+    cortesia: "" | "saludo" | "cierre";
+    resumen: string;
+    etiquetas: string[];
+  }[];
   contact?: WaContact;
 };
 

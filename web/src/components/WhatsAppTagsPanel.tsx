@@ -1,8 +1,8 @@
 import {
-  FormEvent,
   useEffect,
   useState,
   type CSSProperties,
+  type FormEvent,
   type MutableRefObject,
 } from "react";
 import { toast } from "react-toastify";

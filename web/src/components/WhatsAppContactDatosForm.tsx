@@ -6,6 +6,7 @@ import type {
   WaContact,
   WaContactConsultaPara,
   WaContactGrupoEtario,
+  WaContactSexo,
 } from "../types/whatsappCrm";
 
 const RELACION_FAMILIAR_OPTIONS = [
@@ -74,6 +75,7 @@ export function WhatsAppContactDatosForm({
   const [agendaContactoNombre, setAgendaContactoNombre] = useState("");
   const [agendaContactoApellido, setAgendaContactoApellido] = useState("");
   const [agendaDni, setAgendaDni] = useState("");
+  const [agendaSexo, setAgendaSexo] = useState<WaContactSexo | "">("");
   const [agendaEsPaciente, setAgendaEsPaciente] = useState<"" | "si" | "no">("");
   const [coberturas, setCoberturas] = useState<WaCobertura[]>([]);
 
@@ -114,6 +116,7 @@ export function WhatsAppContactDatosForm({
     setAgendaContactoNombre(contact?.contactoNombre?.trim() || "");
     setAgendaContactoApellido(contact?.contactoApellido?.trim() || "");
     setAgendaDni(contact?.dni?.trim() || "");
+    setAgendaSexo(contact?.sexo ?? "");
     setAgendaEsPaciente(
       contact?.esPaciente === true ? "si" : contact?.esPaciente === false ? "no" : "",
     );
@@ -198,6 +201,7 @@ export function WhatsAppContactDatosForm({
         contactoApellido:
           agendaConsultaPara === "tercero" ? agendaContactoApellido.trim() : "",
         dni: agendaDni.trim(),
+        sexo: agendaSexo || null,
         esPaciente:
           agendaEsPaciente === "si" ? true : agendaEsPaciente === "no" ? false : null,
       });
@@ -346,6 +350,19 @@ export function WhatsAppContactDatosForm({
           inputMode="numeric"
           autoComplete="off"
         />
+      </div>
+      <div className="form-group">
+        <label htmlFor={`${idPrefix}-sexo`}>Sexo</label>
+        <select
+          id={`${idPrefix}-sexo`}
+          className="ui-select"
+          value={agendaSexo}
+          onChange={(e) => setAgendaSexo((e.target.value || "") as WaContactSexo | "")}
+        >
+          <option value="">Sin indicar</option>
+          <option value="masculino">Masculino</option>
+          <option value="femenino">Femenino</option>
+        </select>
       </div>
       <div className="form-group">
         <label htmlFor={`${idPrefix}-paciente`}>¿Es paciente?</label>

@@ -31,8 +31,11 @@ import {
   setConversationAssignee,
   setConversationTags,
   findOpenConversationByContact,
+  createPruebaConversation,
+  sendPruebaInbound,
 } from "../whatsapp/runtime.js";
-import { updateContact } from "../whatsapp/firestore-store.js";
+import { setPruebaNota, updateContact } from "../whatsapp/firestore-store.js";
+import { listLlmUsageByConversation } from "../whatsapp/llm-usage.js";
 import {
   createWhatsappTag,
   createWhatsappTagGroup,
@@ -63,6 +66,10 @@ import {
   listIntenciones,
   updateIntencion,
 } from "../whatsapp/intenciones.js";
+import {
+  getWhatsappConocimiento,
+  saveWhatsappConocimiento,
+} from "../whatsapp/conocimiento.js";
 
 const router = Router();
 const uploadMedia = multer({
@@ -448,6 +455,7 @@ router.patch("/contacts/:id", async (req, res) => {
     const contactoApellido =
       typeof req.body?.contactoApellido === "string" ? req.body.contactoApellido : "";
     const dni = typeof req.body?.dni === "string" ? req.body.dni : "";
+    const sexo = typeof req.body?.sexo === "string" ? req.body.sexo.trim() : "";
     const esPacienteRaw = req.body?.esPaciente;
     const esPaciente =
       esPacienteRaw === true || esPacienteRaw === "true"
@@ -470,6 +478,7 @@ router.patch("/contacts/:id", async (req, res) => {
       contactoNombre,
       contactoApellido,
       dni,
+      sexo: sexo || null,
       esPaciente,
     });
     if (!data) {
@@ -486,10 +495,47 @@ router.patch("/contacts/:id", async (req, res) => {
       message.includes("tercero") ||
       message.includes("relación familiar") ||
       message.includes("quien escribe") ||
+      message.includes("sexo") ||
       message.includes("paciente")
         ? 400
         : 500;
     res.status(status).json({ ok: false, message });
+  }
+});
+
+router.post("/pruebas", async (_req, res) => {
+  try {
+    const data = await createPruebaConversation();
+    res.status(201).json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo crear la prueba");
+  }
+});
+
+router.post("/pruebas/:id/mensajes", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const text = typeof req.body?.text === "string" ? req.body.text : "";
+    await sendPruebaInbound(String(id ?? ""), text);
+    const [conversation, messages] = await Promise.all([
+      getConversation(String(id ?? "")),
+      listMessagesByConversation(String(id ?? "")),
+    ]);
+    res.json({ ok: true, data: { conversation, messages } });
+  } catch (error) {
+    sendError(res, error, "No se pudo enviar el mensaje de prueba");
+  }
+});
+
+router.post("/pruebas/:id/nota", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const resultado = req.body?.resultado === "correcta" ? "correcta" : "incorrecta";
+    const texto = typeof req.body?.texto === "string" ? req.body.texto : "";
+    const data = await setPruebaNota(String(id ?? ""), resultado, texto);
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar la nota");
   }
 });
 
@@ -523,6 +569,7 @@ router.get("/conversations", async (req, res) => {
       tagIds,
       dateFrom,
       dateTo,
+      prueba: req.query.prueba === "1" || req.query.prueba === "true",
     });
     res.json({ ok: true, data: data.items, total: data.total, hasMore: data.hasMore, nextOffset: data.nextOffset });
   } catch (error) {
@@ -617,14 +664,14 @@ router.patch("/conversations/:id/assignee", async (req, res) => {
 
 router.patch("/conversations/:id/tags", async (req, res) => {
   try {
-    const raw = Array.isArray(req.body?.tagIds) ? req.body.tagIds : null;
-    if (!raw) {
+    const rawList: unknown[] = Array.isArray(req.body?.tagIds) ? req.body.tagIds : [];
+    if (!Array.isArray(req.body?.tagIds)) {
       res.status(400).json({ ok: false, message: "Etiquetas inválidas" });
       return;
     }
     const catalog = await listWhatsappTags();
     const allowed = new Set(catalog.map((tag) => tag.id));
-    const tagIds = [...new Set(raw.map((id: unknown) => String(id ?? "").trim()).filter(Boolean))];
+    const tagIds = [...new Set(rawList.map((id) => String(id ?? "").trim()).filter((id) => id.length > 0))];
     if (tagIds.some((id) => !allowed.has(id))) {
       res.status(400).json({ ok: false, message: "Hay una etiqueta que no existe" });
       return;
@@ -641,12 +688,23 @@ router.patch("/conversations/:id/tags", async (req, res) => {
   }
 });
 
+router.get("/conversations/:id/llm-usage", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const items = await listLlmUsageByConversation(String(id ?? ""));
+    res.json({ ok: true, items });
+  } catch (error) {
+    sendError(res, error, "No se pudo leer el uso del modelo");
+  }
+});
+
 router.post("/conversations/:id/messages", uploadMedia.single("file"), async (req, res) => {
   try {
     if (req.file) {
       const caption = String(req.body?.message ?? "").trim();
+      const conversationId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const data = await sendConversationMedia(
-        req.params.id,
+        String(conversationId ?? ""),
         {
           buffer: req.file.buffer,
           mimeType: req.file.mimetype || "application/octet-stream",
@@ -663,7 +721,7 @@ router.post("/conversations/:id/messages", uploadMedia.single("file"), async (re
       res.status(400).json({ ok: false, message: "El mensaje no puede estar vacío" });
       return;
     }
-    const data = await sendConversationText(req.params.id, message);
+    const data = await sendConversationText(String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id ?? ""), message);
     res.status(201).json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudo enviar el mensaje");
@@ -817,6 +875,33 @@ router.get("/motor-config", async (_req, res) => {
     });
   } catch (error) {
     sendError(res, error, "No se pudo leer la configuración del motor");
+  }
+});
+
+router.get("/conocimiento", async (_req, res) => {
+  try {
+    const doc = await getWhatsappConocimiento();
+    res.json({
+      ok: true,
+      text: doc.text,
+      updatedAt: doc.updatedAt || null,
+    });
+  } catch (error) {
+    sendError(res, error, "No se pudo leer la base de conocimiento");
+  }
+});
+
+router.put("/conocimiento", async (req, res) => {
+  try {
+    const text = req.body?.text;
+    if (typeof text !== "string") {
+      res.status(400).json({ ok: false, message: "Enviá el texto en text" });
+      return;
+    }
+    const saved = await saveWhatsappConocimiento(text);
+    res.json({ ok: true, text: saved.text, updatedAt: saved.updatedAt });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar la base de conocimiento");
   }
 });
 

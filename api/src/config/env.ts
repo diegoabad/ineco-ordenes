@@ -63,4 +63,7 @@ export const env = {
     accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN?.trim() || "",
     sandbox: process.env.MERCADOPAGO_SANDBOX === "true",
   },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY?.trim() || "",
+  },
 };

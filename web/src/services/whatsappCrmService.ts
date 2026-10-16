@@ -233,6 +233,7 @@ export async function updateWaContact(
     contactoApellido?: string | null;
     relacionFamiliar?: string | null;
     dni?: string | null;
+    sexo?: string | null;
     esPaciente?: boolean | null;
   },
 ): Promise<WaContact> {
@@ -251,6 +252,7 @@ export async function updateWaContact(
         contactoNombre: input.contactoNombre ?? "",
         contactoApellido: input.contactoApellido ?? "",
         dni: input.dni ?? "",
+        sexo: input.sexo ?? "",
         esPaciente: input.esPaciente ?? null,
       }),
     },
@@ -310,6 +312,7 @@ export async function fetchWaConversations(params?: {
   tagIds?: string[];
   dateFrom?: string;
   dateTo?: string;
+  prueba?: boolean;
 }): Promise<WaConversationListPage> {
   const q = new URLSearchParams();
   if (params?.search?.trim()) q.set("search", params.search.trim());
@@ -320,6 +323,7 @@ export async function fetchWaConversations(params?: {
   if (params?.tagIds?.length) q.set("tagIds", params.tagIds.filter(Boolean).join(","));
   if (params?.dateFrom?.trim()) q.set("dateFrom", params.dateFrom.trim());
   if (params?.dateTo?.trim()) q.set("dateTo", params.dateTo.trim());
+  if (params?.prueba) q.set("prueba", "1");
   const qs = q.toString();
   const res = await apiFetch<{
     ok: boolean;
@@ -369,6 +373,64 @@ export async function fetchWaMessages(
     `/api/whatsapp-crm/messages/conversation/${conversationId}?limit=${limit}`,
   );
   return Array.isArray(res.data) ? res.data : [];
+}
+
+export type WaLlmUsage = {
+  id: string;
+  paso: "detectar" | "responder";
+  modelo: string;
+  tokensEntrada: number;
+  tokensSalida: number;
+  tokensTotal: number;
+  tokensCache: number;
+  tokensRazonamiento: number;
+  ok: boolean;
+};
+
+export async function fetchWaLlmUsage(conversationId: string): Promise<WaLlmUsage[]> {
+  const res = await apiFetch<{ ok: boolean; items: WaLlmUsage[] }>(
+    `/api/whatsapp-crm/conversations/${encodeURIComponent(conversationId)}/llm-usage`,
+  );
+  return Array.isArray(res.items) ? res.items : [];
+}
+
+export async function createWaPrueba(): Promise<WaConversation> {
+  const res = await apiFetch<{ ok: boolean; data: WaConversation }>("/api/whatsapp-crm/pruebas", {
+    method: "POST",
+  });
+  return res.data;
+}
+
+export async function sendWaPruebaMessage(
+  conversationId: string,
+  text: string,
+): Promise<{ conversation: WaConversation | null; messages: WaMessage[] }> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: { conversation: WaConversation | null; messages: WaMessage[] };
+  }>(`/api/whatsapp-crm/pruebas/${encodeURIComponent(conversationId)}/mensajes`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+  return {
+    conversation: res.data?.conversation ?? null,
+    messages: Array.isArray(res.data?.messages) ? res.data.messages : [],
+  };
+}
+
+export async function saveWaPruebaNota(
+  conversationId: string,
+  resultado: "correcta" | "incorrecta",
+  texto = "",
+): Promise<WaConversation> {
+  const res = await apiFetch<{ ok: boolean; data: WaConversation }>(
+    `/api/whatsapp-crm/pruebas/${encodeURIComponent(conversationId)}/nota`,
+    {
+      method: "POST",
+      body: JSON.stringify({ resultado, texto }),
+    },
+  );
+  return res.data;
 }
 
 export async function sendWaMessage(
@@ -510,6 +572,32 @@ export async function saveWhatsappMotorConfig(
     body: JSON.stringify({ data }),
   });
   return { data: res.data, updatedAt: res.updatedAt };
+}
+
+export async function fetchWhatsappConocimiento(): Promise<{
+  text: string;
+  updatedAt: string | null;
+}> {
+  const res = await apiFetch<{
+    ok: boolean;
+    text: string;
+    updatedAt: string | null;
+  }>("/api/whatsapp-crm/conocimiento");
+  return { text: res.text ?? "", updatedAt: res.updatedAt ?? null };
+}
+
+export async function saveWhatsappConocimiento(
+  text: string,
+): Promise<{ text: string; updatedAt: string }> {
+  const res = await apiFetch<{
+    ok: boolean;
+    text: string;
+    updatedAt: string;
+  }>("/api/whatsapp-crm/conocimiento", {
+    method: "PUT",
+    body: JSON.stringify({ text }),
+  });
+  return { text: res.text, updatedAt: res.updatedAt };
 }
 
 export async function fetchIntenciones(): Promise<WaIntencion[]> {

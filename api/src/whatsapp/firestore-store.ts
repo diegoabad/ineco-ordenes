@@ -7,6 +7,7 @@ import {
   limit,
   orderBy,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
@@ -16,8 +17,10 @@ import type {
   WaContact,
   WaContactConsultaPara,
   WaContactGrupoEtario,
+  WaContactSexo,
   WaConversation,
   WaConversationStatus,
+  WaAuditoriaPaso,
   WaMessage,
   WaMessageDirection,
   WaMessageStatus,
@@ -38,6 +41,11 @@ function normalizeGrupoEtario(raw: unknown): WaContactGrupoEtario | null {
 
 function normalizeConsultaPara(raw: unknown): WaContactConsultaPara | null {
   return raw === "propio" || raw === "tercero" ? raw : null;
+}
+
+function normalizeSexo(raw: unknown): WaContactSexo | null {
+  const value = String(raw ?? "").trim().toLowerCase();
+  return value === "masculino" || value === "femenino" ? value : null;
 }
 
 function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
@@ -65,6 +73,7 @@ function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
     relacionFamiliar:
       raw.relacionFamiliar != null ? String(raw.relacionFamiliar).trim() || null : null,
     dni: raw.dni != null ? String(raw.dni).trim() || null : null,
+    sexo: normalizeSexo(raw.sexo),
     esPaciente:
       raw.esPaciente === true ? true : raw.esPaciente === false ? false : null,
     isBlocked: raw.isBlocked === true,
@@ -72,6 +81,31 @@ function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
     createdAt: String(raw.createdAt ?? nowIso()),
     updatedAt: String(raw.updatedAt ?? nowIso()),
   };
+}
+
+function normalizeAuditoria(raw: unknown): WaAuditoriaPaso[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const cortesia = row.cortesia === "saludo" || row.cortesia === "cierre" ? row.cortesia : "";
+    return [
+      {
+        en: String(row.en ?? ""),
+        intencion: String(row.intencion ?? "").trim(),
+        secundaria: String(row.secundaria ?? "").trim(),
+        abierta: String(row.abierta ?? "").trim(),
+        concluida: row.concluida === true,
+        peligro: row.peligro === true,
+        duda: row.duda === true,
+        cortesia,
+        resumen: String(row.resumen ?? "").trim(),
+        etiquetas: Array.isArray(row.etiquetas)
+          ? row.etiquetas.map((name) => String(name).trim()).filter(Boolean)
+          : [],
+      },
+    ];
+  });
 }
 
 function normalizeConversation(id: string, raw: Record<string, unknown>): WaConversation {
@@ -89,6 +123,21 @@ function normalizeConversation(id: string, raw: Record<string, unknown>): WaConv
     tagIds: Array.isArray(raw.tagIds)
       ? [...new Set(raw.tagIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
       : [],
+    resumen: raw.resumen != null ? String(raw.resumen).trim() || null : null,
+    intencionAbierta: raw.intencionAbierta != null ? String(raw.intencionAbierta).trim() || null : null,
+    intencionConcluida: raw.intencionConcluida === true,
+    intencionPropuesta:
+      raw.intencionPropuesta != null ? String(raw.intencionPropuesta).trim() || null : null,
+    prueba: raw.prueba === true,
+    pruebaResultado:
+      raw.pruebaResultado === "correcta" || raw.pruebaResultado === "incorrecta"
+        ? raw.pruebaResultado
+        : raw.pruebaNota
+          ? "incorrecta"
+          : null,
+    pruebaNota: raw.pruebaNota != null ? String(raw.pruebaNota).trim() || null : null,
+    pruebaNotaEn: raw.pruebaNotaEn != null ? String(raw.pruebaNotaEn) : null,
+    auditoria: normalizeAuditoria(raw.auditoria),
     createdAt: String(raw.createdAt ?? nowIso()),
     updatedAt: String(raw.updatedAt ?? nowIso()),
   };
@@ -141,6 +190,7 @@ export async function updateContact(
     contactoApellido?: string | null;
     relacionFamiliar?: string | null;
     dni?: string | null;
+    sexo?: string | null;
     esPaciente?: boolean | null;
   },
 ): Promise<WaContact | null> {
@@ -177,15 +227,15 @@ export async function updateContact(
   }
   let relacionFamiliar =
     input.relacionFamiliar !== undefined
-      ? input.relacionFamiliar.trim() || null
+      ? input.relacionFamiliar?.trim() || null
       : existing.relacionFamiliar;
   let contactoNombre =
     input.contactoNombre !== undefined
-      ? input.contactoNombre.trim() || null
+      ? input.contactoNombre?.trim() || null
       : existing.contactoNombre;
   let contactoApellido =
     input.contactoApellido !== undefined
-      ? input.contactoApellido.trim() || null
+      ? input.contactoApellido?.trim() || null
       : existing.contactoApellido;
   if (consultaPara !== "tercero") {
     relacionFamiliar = null;
@@ -200,7 +250,11 @@ export async function updateContact(
     }
   }
   const dni =
-    input.dni !== undefined ? input.dni.replace(/\D/g, "").trim() || null : existing.dni;
+    input.dni !== undefined ? input.dni?.replace(/\D/g, "").trim() || null : existing.dni;
+  const sexo = input.sexo !== undefined ? normalizeSexo(input.sexo) : existing.sexo;
+  if (input.sexo && !sexo) {
+    throw new Error("Indicá si el sexo es masculino o femenino");
+  }
   const esPaciente =
     input.esPaciente !== undefined
       ? input.esPaciente === true
@@ -224,6 +278,7 @@ export async function updateContact(
     contactoApellido,
     terceroNombre: null,
     dni,
+    sexo,
     esPaciente,
     updatedAt: now,
   });
@@ -241,6 +296,7 @@ export async function updateContact(
     contactoNombre,
     contactoApellido,
     dni,
+    sexo,
     esPaciente,
     updatedAt: now,
   };
@@ -289,6 +345,7 @@ export async function findOrCreateContact(input: {
     contactoApellido: null,
     relacionFamiliar: null,
     dni: null,
+    sexo: null,
     esPaciente: null,
     isBlocked: false,
     lastInteractionAt: now,
@@ -349,11 +406,65 @@ export async function findOrCreateOpenConversation(contactId: string): Promise<W
     assigneeUserId: null,
     assigneeName: null,
     tagIds: [],
+    resumen: null,
+    intencionAbierta: null,
+    intencionConcluida: false,
+    intencionPropuesta: null,
+    prueba: false,
+    pruebaResultado: null,
+    pruebaNota: null,
+    pruebaNotaEn: null,
+    auditoria: [],
     createdAt: now,
     updatedAt: now,
   };
   await setDoc(doc(firestore, CONVERSATIONS, id), conversation);
   return conversation;
+}
+
+function numeroFicticio(n: number): string {
+  if (n >= 1 && n <= 9) return String(n).repeat(8);
+  return String(n).padStart(8, "0");
+}
+
+export async function createPruebaConversation(): Promise<WaConversation> {
+  const seqRef = doc(firestore, "ordenes_config", "whatsapp_prueba_seq");
+  const seq = await runTransaction(firestore, async (tx) => {
+    const snap = await tx.get(seqRef);
+    const current = Number(snap.data()?.next ?? 0);
+    const next = Number.isFinite(current) && current >= 1 ? current + 1 : 1;
+    tx.set(seqRef, { next, updatedAt: nowIso() }, { merge: true });
+    return next;
+  });
+  const phone = numeroFicticio(seq);
+  const contact = await findOrCreateContact({ phoneNumber: phone });
+  const now = nowIso();
+  const id = randomUUID();
+  const conversation: WaConversation = {
+    id,
+    contactId: contact.id,
+    status: "OPEN",
+    unreadCount: 0,
+    lastMessagePreview: null,
+    lastMessageAt: null,
+    assigneeKind: "bot",
+    assigneeUserId: null,
+    assigneeName: "Bot",
+    tagIds: [],
+    resumen: null,
+    intencionAbierta: null,
+    intencionConcluida: false,
+    intencionPropuesta: null,
+    prueba: true,
+    pruebaResultado: null,
+    pruebaNota: null,
+    pruebaNotaEn: null,
+    auditoria: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  await setDoc(doc(firestore, CONVERSATIONS, id), conversation);
+  return { ...conversation, contact };
 }
 
 export async function getConversation(id: string): Promise<WaConversation | null> {
@@ -389,6 +500,7 @@ export async function listConversations(opts?: {
   tagIds?: string[];
   dateFrom?: string;
   dateTo?: string;
+  prueba?: boolean;
 }): Promise<ConversationListResult> {
   const status = opts?.status?.trim() || "OPEN";
   const pageSize = Math.min(Math.max(Number(opts?.limit ?? 40) || 40, 1), 100);
@@ -396,6 +508,8 @@ export async function listConversations(opts?: {
   const q = query(collection(firestore, CONVERSATIONS), where("status", "==", status));
   const snap = await getDocs(q);
   let items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
+  const onlyPrueba = opts?.prueba === true;
+  items = items.filter((item) => item.prueba === onlyPrueba);
   items.sort((a, b) => {
     const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
     const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
@@ -535,6 +649,168 @@ export async function reassignConversationsFromUser(
   return ids.length;
 }
 
+const RELACIONES = new Set([
+  "Padre",
+  "Madre",
+  "Abuelo",
+  "Abuela",
+  "Hijo",
+  "Hija",
+  "Tío",
+  "Tía",
+  "Sobrino",
+  "Sobrina",
+  "Tutor",
+  "Otro",
+]);
+
+function matchRelacion(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+  for (const option of RELACIONES) {
+    if (option.toLowerCase() === text.toLowerCase()) return option;
+  }
+  return null;
+}
+
+export type DatosVaciosContacto = {
+  consultaPara?: "propio" | "tercero" | "";
+  relacionFamiliar?: string;
+  pacienteNombre?: string;
+  pacienteApellido?: string;
+  contactoNombre?: string;
+  contactoApellido?: string;
+  grupoEtario?: "infanto" | "adulto" | "";
+  cobertura?: string;
+  esPaciente?: "si" | "no" | "";
+  dni?: string;
+  sexo?: "masculino" | "femenino" | "";
+  email?: string;
+};
+
+/** Campos a completar. No incluye los que ya tienen valor. */
+export function datosVaciosParaContacto(
+  existing: WaContact,
+  input: DatosVaciosContacto,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  const consulta = normalizeConsultaPara(input.consultaPara);
+  const nextConsulta = existing.consultaPara ?? consulta;
+  if (!existing.consultaPara && consulta) patch.consultaPara = consulta;
+
+  if (nextConsulta === "tercero") {
+    const relacion = matchRelacion(input.relacionFamiliar ?? "");
+    if (!existing.relacionFamiliar && relacion) patch.relacionFamiliar = relacion;
+    const contactoNombre = input.contactoNombre?.trim() ?? "";
+    const contactoApellido = input.contactoApellido?.trim() ?? "";
+    if (!existing.contactoNombre && contactoNombre) patch.contactoNombre = contactoNombre;
+    if (!existing.contactoApellido && contactoApellido) patch.contactoApellido = contactoApellido;
+  }
+
+  const pacienteNombre = input.pacienteNombre?.trim() ?? "";
+  const pacienteApellido = input.pacienteApellido?.trim() ?? "";
+  if (!existing.firstName && pacienteNombre) {
+    patch.firstName = pacienteNombre;
+    patch.displayName = [pacienteNombre, existing.lastName || pacienteApellido]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (!existing.lastName && pacienteApellido) {
+    patch.lastName = pacienteApellido;
+    const first = String(patch.firstName ?? existing.firstName ?? "");
+    if (first) patch.displayName = [first, pacienteApellido].filter(Boolean).join(" ");
+  }
+
+  const grupo = normalizeGrupoEtario(input.grupoEtario);
+  if (!existing.grupoEtario && grupo) patch.grupoEtario = grupo;
+  const cobertura = input.cobertura?.trim() ?? "";
+  if (!existing.cobertura && cobertura) patch.cobertura = cobertura;
+  if (existing.esPaciente == null && input.esPaciente === "si") patch.esPaciente = true;
+  if (existing.esPaciente == null && input.esPaciente === "no") patch.esPaciente = false;
+  const dni = (input.dni ?? "").replace(/\D/g, "");
+  if (!existing.dni && dni.length >= 7 && dni.length <= 9) patch.dni = dni;
+  const sexo = normalizeSexo(input.sexo);
+  if (!existing.sexo && sexo) patch.sexo = sexo;
+  const email = input.email?.trim() ?? "";
+  if (!existing.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) patch.email = email;
+  return patch;
+}
+
+/** Completa solo campos vacíos. No pisa lo que ya cargó una persona. */
+export async function fillEmptyContactFields(
+  id: string,
+  input: DatosVaciosContacto,
+): Promise<WaContact | null> {
+  const existing = await getContact(id);
+  if (!existing) return null;
+  const patch = datosVaciosParaContacto(existing, input);
+  if (Object.keys(patch).length === 0) return existing;
+  patch.updatedAt = nowIso();
+  await updateDoc(doc(firestore, CONTACTS, id), patch as { [key: string]: string | boolean | null });
+  return getContact(id);
+}
+
+export async function setConversationIntencion(
+  id: string,
+  input: {
+    intencionAbierta: string | null;
+    intencionConcluida: boolean;
+    intencionPropuesta: string | null;
+  },
+): Promise<void> {
+  await updateDoc(doc(firestore, CONVERSATIONS, id), {
+    intencionAbierta: input.intencionAbierta,
+    intencionConcluida: input.intencionConcluida,
+    intencionPropuesta: input.intencionPropuesta,
+    updatedAt: nowIso(),
+  });
+}
+
+export async function setConversationResumen(
+  id: string,
+  resumen: string,
+): Promise<string | null> {
+  const text = resumen.trim().replace(/\s+/g, " ").slice(0, 240);
+  if (!text) return null;
+  await updateDoc(doc(firestore, CONVERSATIONS, id), {
+    resumen: text,
+    updatedAt: nowIso(),
+  });
+  return text;
+}
+
+export async function setPruebaNota(
+  id: string,
+  resultado: "correcta" | "incorrecta",
+  texto: string,
+): Promise<WaConversation | null> {
+  const current = await getConversation(id);
+  if (!current?.prueba) throw new Error("No es una conversación de prueba");
+  const nota = texto.trim().replace(/\s+/g, " ");
+  if (resultado === "incorrecta" && !nota) throw new Error("Contá qué pasó");
+  const now = nowIso();
+  await updateDoc(doc(firestore, CONVERSATIONS, id), {
+    pruebaResultado: resultado,
+    pruebaNota: resultado === "incorrecta" ? nota.slice(0, 4000) : null,
+    pruebaNotaEn: now,
+    updatedAt: now,
+  });
+  return getConversation(id);
+}
+
+export async function appendConversationAuditoria(
+  id: string,
+  paso: WaAuditoriaPaso,
+): Promise<void> {
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return;
+  const prev = normalizeAuditoria(snap.data()?.auditoria);
+  await updateDoc(doc(firestore, CONVERSATIONS, id), {
+    auditoria: [...prev, paso].slice(-40),
+    updatedAt: nowIso(),
+  });
+}
+
 export async function setConversationTags(
   id: string,
   tagIds: string[],
@@ -564,6 +840,27 @@ export async function getMessage(id: string): Promise<WaMessage | null> {
   const snap = await getDoc(doc(firestore, MESSAGES, id));
   if (!snap.exists()) return null;
   return normalizeMessage(snap.id, snap.data() as Record<string, unknown>);
+}
+
+export async function listRecentMessagesByConversation(
+  conversationId: string,
+  max = 40,
+): Promise<WaMessage[]> {
+  const q = query(
+    collection(firestore, MESSAGES),
+    where("conversationId", "==", conversationId),
+    orderBy("createdAt", "desc"),
+    limit(Math.min(Math.max(max, 1), 80)),
+  );
+  try {
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => normalizeMessage(d.id, d.data() as Record<string, unknown>))
+      .reverse();
+  } catch {
+    const all = await listMessagesByConversation(conversationId, 80);
+    return all.slice(-max);
+  }
 }
 
 export async function listMessagesByConversation(

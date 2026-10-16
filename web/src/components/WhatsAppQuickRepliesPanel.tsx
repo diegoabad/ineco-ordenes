@@ -1,11 +1,11 @@
 import {
-  FormEvent,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
   type MutableRefObject,
 } from "react";
 import { createPortal } from "react-dom";

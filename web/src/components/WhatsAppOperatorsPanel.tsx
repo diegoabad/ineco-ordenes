@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState, type CSSProperties, type MutableRefObject } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type MutableRefObject } from "react";
 import { toast } from "react-toastify";
 import { fetchUserDirectory } from "../services/dataService";
 import {
@@ -153,7 +153,7 @@ export function WhatsAppOperatorsPanel({ addRef }: Props) {
     try {
       const reassign =
         choice === "none" || choice === "bot"
-          ? { kind: choice }
+          ? { kind: choice as "none" | "bot" }
           : { kind: "user" as const, userId: choice };
       setOperators(await removeWaOperator(removeDraft.operator.id, reassign));
       setRemoveDraft(null);

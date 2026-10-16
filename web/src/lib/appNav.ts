@@ -12,13 +12,15 @@ export type PamiSection = "historial" | "analisis";
 export type BuscaTurnoSection = "turnos" | "config";
 export type WhatsappSection =
   | "conversaciones"
+  | "prueba"
   | "contactos"
   | "operadoras"
   | "etiquetas"
   | "respuestas-rapidas"
   | "config"
   | "motor"
-  | "intenciones";
+  | "intenciones"
+  | "conocimiento";
 
 export type AccordionModuleId =
   | "ordenes"
@@ -70,6 +72,7 @@ export const BUSCA_TURNO_SECTIONS: { id: BuscaTurnoSection; label: string }[] = 
 
 export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "conversaciones", label: "Conversaciones" },
+  { id: "prueba", label: "Prueba" },
   { id: "contactos", label: "Contactos" },
   { id: "operadoras", label: "Operadoras" },
   { id: "etiquetas", label: "Etiquetas" },
@@ -77,6 +80,7 @@ export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "config", label: "Bot" },
   { id: "motor", label: "Motor" },
   { id: "intenciones", label: "Intenciones" },
+  { id: "conocimiento", label: "Conocimiento" },
 ];
 
 export function isAccordionModule(module: AppModuleId): module is AccordionModuleId {

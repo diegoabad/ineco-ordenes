@@ -20,7 +20,6 @@ import {
   INICIO_RECURRENCIA_LABEL,
 } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { DatePicker } from "./DatePicker";
 import { DateTimePicker } from "./DateTimePicker";
 import {
   IconCalendar,
@@ -47,7 +46,6 @@ import {
   UserAvatarStack,
 } from "./InicioSharePicker";
 import { Modal } from "./Modal";
-import { TimePicker } from "./TimePicker";
 
 const weekdayFmt = new Intl.DateTimeFormat("es-AR", { weekday: "short" });
 const dayFmt = new Intl.DateTimeFormat("es-AR", { day: "numeric" });
@@ -1321,7 +1319,6 @@ export function InicioPanel({ userName, onNavigate }: Props) {
                     dropHint?.id === item.id && dragTareaId && dragTareaId !== item.id
                       ? dropHint.edge
                       : null;
-                  const shared = item.sharedWith ?? [];
                   const detallePreview = detalleSinContextoWa(item.detalle);
                   return (
                   <li
@@ -1711,7 +1708,6 @@ export function InicioPanel({ userName, onNavigate }: Props) {
                   const tituloVisible = item.titulo.trim() || "Sin título";
                   const isDragging = dragNotaId === item.id;
                   const isOwner = item.userId === myUserId;
-                  const shared = item.sharedWith ?? [];
                   const dropEdge =
                     dropHint?.id === item.id && dragNotaId !== item.id ? dropHint.edge : null;
                   const color = item.color || "gris";

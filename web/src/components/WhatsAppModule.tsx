@@ -11,6 +11,7 @@ import { WhatsAppTagsPanel, type TagsPanelTab } from "./WhatsAppTagsPanel";
 import { WhatsAppConfigPanel } from "./WhatsAppConfigPanel";
 import { WhatsAppMotorPanel } from "./WhatsAppMotorPanel";
 import { WhatsAppIntencionesPanel } from "./WhatsAppIntencionesPanel";
+import { WhatsAppConocimientoPanel } from "./WhatsAppConocimientoPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -34,6 +35,7 @@ export function WhatsAppModule({ section }: Props) {
     setTagsTab(tab);
   }, []);
   const connectRef = useRef<(() => void) | null>(null);
+  const createPruebaRef = useRef<(() => void) | null>(null);
   const createReplyRef = useRef<(() => void) | null>(null);
   const createTagRef = useRef<(() => void) | null>(null);
   const createGroupRef = useRef<(() => void) | null>(null);
@@ -43,12 +45,16 @@ export function WhatsAppModule({ section }: Props) {
 
   return (
     <div className="app-shell">
-      <header className={`app-header${section === "conversaciones" ? " wa-header" : ""}`}>
+      <header
+        className={`app-header${section === "conversaciones" || section === "prueba" ? " wa-header" : ""}`}
+      >
         <div className="app-header__brand">
           <div>
             <h1>{label}</h1>
             {section === "conversaciones" ? (
               <p>Chats del WhatsApp vinculado</p>
+            ) : section === "prueba" ? (
+              <p>Números ficticios para hablarle al bot y ver la ficha. No sale por WhatsApp.</p>
             ) : section === "operadoras" ? (
               <p>Usuarios a los que se pueden derivar las conversaciones</p>
             ) : section === "respuestas-rapidas" ? (
@@ -65,6 +71,8 @@ export function WhatsAppModule({ section }: Props) {
               <p>Interpretación, contexto y comportamiento del motor conversacional</p>
             ) : section === "intenciones" ? (
               <p>Objetivos que el bot puede reconocer y resolver</p>
+            ) : section === "conocimiento" ? (
+              <p>Información institucional que el bot puede usar para responder</p>
             ) : null}
           </div>
         </div>
@@ -88,6 +96,17 @@ export function WhatsAppModule({ section }: Props) {
                 {connection.connecting ? "Conectando…" : "Conectar"}
               </button>
             ) : null}
+          </div>
+        ) : section === "prueba" ? (
+          <div className="app-header__actions wa-header-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => createPruebaRef.current?.()}
+            >
+              <IconPlus size={16} />
+              Crear prueba
+            </button>
           </div>
         ) : section === "operadoras" ? (
           <div className="app-header__actions">
@@ -162,6 +181,8 @@ export function WhatsAppModule({ section }: Props) {
           onConnectionChange={onConnectionChange}
           connectRef={connectRef}
         />
+      ) : section === "prueba" ? (
+        <WhatsAppConversationsPanel mode="prueba" createPruebaRef={createPruebaRef} />
       ) : section === "operadoras" ? (
         <WhatsAppOperatorsPanel addRef={addOperatorRef} />
       ) : section === "respuestas-rapidas" ? (
@@ -184,6 +205,8 @@ export function WhatsAppModule({ section }: Props) {
         <WhatsAppMotorPanel />
       ) : section === "intenciones" ? (
         <WhatsAppIntencionesPanel createRef={createIntencionRef} />
+      ) : section === "conocimiento" ? (
+        <WhatsAppConocimientoPanel />
       ) : (
         <div className="fl-table-empty fl-table-empty--fill">
           <p className="fl-table-empty__title">Próximamente</p>

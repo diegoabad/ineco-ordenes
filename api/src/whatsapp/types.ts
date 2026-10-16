@@ -20,6 +20,7 @@ export type WaConversationStatus = "OPEN" | "ARCHIVED";
 
 export type WaContactGrupoEtario = "infanto" | "adulto";
 export type WaContactConsultaPara = "propio" | "tercero";
+export type WaContactSexo = "masculino" | "femenino";
 
 export type WaContact = {
   id: string;
@@ -37,11 +38,25 @@ export type WaContact = {
   contactoApellido: string | null;
   relacionFamiliar: string | null;
   dni: string | null;
+  sexo: WaContactSexo | null;
   esPaciente: boolean | null;
   isBlocked: boolean;
   lastInteractionAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WaAuditoriaPaso = {
+  en: string;
+  intencion: string;
+  secundaria: string;
+  abierta: string;
+  concluida: boolean;
+  peligro: boolean;
+  duda: boolean;
+  cortesia: "" | "saludo" | "cierre";
+  resumen: string;
+  etiquetas: string[];
 };
 
 export type WaConversation = {
@@ -55,6 +70,22 @@ export type WaConversation = {
   assigneeUserId: string | null;
   assigneeName: string | null;
   tagIds: string[];
+  /** Rastro corto de la charla, para el equipo y para el próximo mensaje. */
+  resumen: string | null;
+  /** Intención en curso. No es un saludo: la conversación puede seguir con otra. */
+  intencionAbierta: string | null;
+  intencionConcluida: boolean;
+  /** Otra intención detectada mientras la abierta no está concluida. */
+  intencionPropuesta: string | null;
+  /** Charla local, con número ficticio. No sale por WhatsApp. */
+  prueba: boolean;
+  /** correctá o incorrecta, según la revisión de la prueba. */
+  pruebaResultado: "correcta" | "incorrecta" | null;
+  /** Por qué esta prueba se marcó como incorrecta. */
+  pruebaNota: string | null;
+  pruebaNotaEn: string | null;
+  /** Una entrada por turno, para revisar qué detectó el bot. */
+  auditoria: WaAuditoriaPaso[];
   createdAt: string;
   updatedAt: string;
   contact?: WaContact;

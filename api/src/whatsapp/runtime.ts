@@ -5,6 +5,7 @@ import { env } from "../config/env.js";
 import { BaileysProvider } from "./baileys.provider.js";
 import {
   createMessage,
+  createPruebaConversation,
   findMessageByExternalId,
   findOrCreateContact,
   findOrCreateOpenConversation,
@@ -23,6 +24,7 @@ import { mediaMetaFromRaw, normalizeIncomingMessage } from "./normalize.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { BaileysSessionStore } from "./session-store.js";
 import type { WaMessage, WaMessageType, WaStatusSnapshot } from "./types.js";
+import { runBotTurn, scheduleBotTurn, setBotDeliver } from "./bot-turn.js";
 
 const sessionStore = new BaileysSessionStore(
   path.isAbsolute(env.whatsapp.sessionPath)
@@ -117,6 +119,10 @@ async function handleIncomingRaw(raw: unknown, _isBackfill: boolean): Promise<vo
       mediaPath,
       createdAt: normalized.timestamp.toISOString(),
     });
+
+    if (!_isBackfill && normalized.direction === "INBOUND" && normalized.text.trim()) {
+      scheduleBotTurn(conversation.id);
+    }
   } catch (error) {
     console.error("[whatsapp] Error ingestando mensaje", error);
   }
@@ -174,8 +180,8 @@ export async function sendConversationText(
     throw new Error("El contacto está bloqueado");
   }
 
-  // Sin sesión WhatsApp: igual guardamos el mensaje en el CRM para probar UI/etiquetas.
-  if (provider.getStatus() !== "CONNECTED") {
+  // Una prueba no sale por WhatsApp. Sin sesión, el CRM igual guarda el mensaje.
+  if (conversation.prueba || provider.getStatus() !== "CONNECTED") {
     return createMessage({
       conversationId: conversation.id,
       contactId: conversation.contactId,
@@ -253,6 +259,26 @@ export async function sendConversationMedia(
   });
 }
 
+export async function sendPruebaInbound(conversationId: string, text: string): Promise<void> {
+  const conversation = await getConversation(conversationId);
+  if (!conversation?.prueba) throw new Error("No es una conversación de prueba");
+  if (conversation.contact?.isBlocked) throw new Error("El contacto está bloqueado");
+  const body = text.trim();
+  if (!body) throw new Error("Escribí un mensaje");
+  await createMessage({
+    conversationId: conversation.id,
+    contactId: conversation.contactId,
+    direction: "INBOUND",
+    type: "TEXT",
+    text: body,
+    externalMessageId: `prueba-${randomUUID()}`,
+    status: "RECEIVED",
+  });
+  await runBotTurn(conversationId);
+}
+
+setBotDeliver((conversationId, body) => sendConversationText(conversationId, body));
+
 export {
   getConversation,
   getMessage,
@@ -263,4 +289,5 @@ export {
   setConversationAssignee,
   setConversationTags,
   findOpenConversationByContact,
+  createPruebaConversation,
 };

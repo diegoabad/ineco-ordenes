@@ -20,14 +20,19 @@ import {
   fetchWaConversationByContact,
   fetchWaConversations,
   fetchWaMessages,
+  fetchWaLlmUsage,
   fetchWaOperators,
+  type WaLlmUsage,
   fetchQuickReplies,
   fetchWaTagCatalog,
   fetchWhatsappCrmHealth,
   fetchWhatsappStatus,
   markWaConversationRead,
+  createWaPrueba,
+  saveWaPruebaNota,
   sendWaMedia,
   sendWaMessage,
+  sendWaPruebaMessage,
   setWaConversationTags,
   waMediaUrl,
 } from "../services/whatsappCrmService";
@@ -143,6 +148,66 @@ function messageBody(message: WaMessage): string {
   return message.text || "Mensaje";
 }
 
+function textoDato(value: unknown): string {
+  if (value == null || value === "") return "vacío";
+  if (value === true) return "sí";
+  if (value === false) return "no";
+  return String(value);
+}
+
+function miles(valor: number): string {
+  return new Intl.NumberFormat("es-AR").format(valor);
+}
+
+const DOLAR_PESOS = 1550;
+
+const PASOS_BOT = [
+  { paso: "detectar" as const, titulo: "Detecta", modelo: "gpt-6-luna" },
+  { paso: "responder" as const, titulo: "Redacta", modelo: "gpt-6-luna" },
+];
+
+function precioModelo(modelo: string): { entrada: number; salida: number } {
+  const id = modelo.toLowerCase();
+  if (id.includes("gpt-6-luna")) return { entrada: 0.1, salida: 0.5 };
+  if (id.includes("5.6-luna") || id.includes("luna")) return { entrada: 0.2, salida: 1.2 };
+  if (id.includes("terra")) return { entrada: 2, salida: 12 };
+  if (id.includes("5.4-mini")) return { entrada: 0.75, salida: 4.5 };
+  if (id.includes("5.4-nano")) return { entrada: 0.2, salida: 1.25 };
+  if (id.includes("4.1-mini")) return { entrada: 0.4, salida: 1.6 };
+  if (id.includes("5-nano")) return { entrada: 0.05, salida: 0.4 };
+  return { entrada: 0.1, salida: 0.5 };
+}
+
+function costoUsd(entrada: number, salida: number, precioEntrada: number, precioSalida: number): number {
+  return (entrada / 1_000_000) * precioEntrada + (salida / 1_000_000) * precioSalida;
+}
+
+function tarifa(valor: number): string {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: valor < 1 ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(valor);
+}
+
+function gastoUsd(valor: number): string {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(valor);
+}
+
+function gastoPesos(valor: number): string {
+  const numero = new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(valor);
+  return `ARS ${numero}`;
+}
+
 export type WaConnectionBanner = {
   connected: boolean;
   connecting: boolean;
@@ -152,12 +217,17 @@ export type WaConnectionBanner = {
 type Props = {
   onConnectionChange?: (status: WaConnectionBanner) => void;
   connectRef?: MutableRefObject<(() => void) | null>;
+  mode?: "live" | "prueba";
+  createPruebaRef?: MutableRefObject<(() => void) | null>;
 };
 
 export function WhatsAppConversationsPanel({
   onConnectionChange,
   connectRef,
+  mode = "live",
+  createPruebaRef,
 }: Props) {
+  const pruebaMode = mode === "prueba";
   const { user } = useAuth();
   const [ready, setReady] = useState(false);
   const [waStatus, setWaStatus] = useState<string>("");
@@ -198,6 +268,13 @@ export function WhatsAppConversationsPanel({
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpKind, setFollowUpKind] = useState<WaFollowUpKind>("tarea");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notaOpen, setNotaOpen] = useState(false);
+  const [notaTexto, setNotaTexto] = useState("");
+  const [notaSaving, setNotaSaving] = useState(false);
+  const [pruebaTab, setPruebaTab] = useState<"paciente" | "modulo" | "intenciones">("paciente");
+  const tagWatch = useRef<{ id: string; tags: string[] }>({ id: "", tags: [] });
+  const [freshTagIds, setFreshTagIds] = useState<string[]>([]);
+  const [uso, setUso] = useState<WaLlmUsage[]>([]);
   const [takeOverOpen, setTakeOverOpen] = useState(false);
   const [pendingAssignee, setPendingAssignee] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -241,6 +318,7 @@ export function WhatsAppConversationsPanel({
         status: "OPEN",
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: 0,
+        prueba: pruebaMode,
         ...waFiltersQuery(applied),
       });
       setConversations(page.items);
@@ -254,7 +332,7 @@ export function WhatsAppConversationsPanel({
     } finally {
       setLoadingList(false);
     }
-  }, [filters]);
+  }, [filters, pruebaMode]);
 
   const loadMoreConversations = useCallback(async () => {
     if (loadingMoreRef.current || loadingList || !hasMoreConversations || nextConversationsOffset == null) {
@@ -268,6 +346,7 @@ export function WhatsAppConversationsPanel({
         status: "OPEN",
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: nextConversationsOffset,
+        prueba: pruebaMode,
         ...filtersQuery,
       });
       setConversations((prev) => {
@@ -283,7 +362,7 @@ export function WhatsAppConversationsPanel({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasMoreConversations, loadingList, nextConversationsOffset, search, filtersQuery]);
+  }, [hasMoreConversations, loadingList, nextConversationsOffset, search, filtersQuery, pruebaMode]);
 
   const loadThread = useCallback(async (id: string) => {
     setLoadingMessages(true);
@@ -372,6 +451,7 @@ export function WhatsAppConversationsPanel({
             status: "OPEN",
             limit: Math.max(snap.loadedCount, CONVERSATIONS_PAGE_SIZE),
             offset: 0,
+            prueba: pruebaMode,
             ...waFiltersQuery(snap.filters),
           })
             .then((page) => {
@@ -404,7 +484,7 @@ export function WhatsAppConversationsPanel({
       });
     }, waitingQr ? 3000 : 20000);
     return () => window.clearInterval(id);
-  }, [ready, refreshStatus, qrModalOpen, waStatus]);
+  }, [ready, refreshStatus, qrModalOpen, waStatus, pruebaMode]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -415,6 +495,33 @@ export function WhatsAppConversationsPanel({
     setMessages([]);
     void loadThread(selectedId);
   }, [selectedId, loadThread]);
+
+  useEffect(() => {
+    const current = selected?.tagIds ?? [];
+    const sameChat = tagWatch.current.id === (selected?.id ?? "");
+    const added = sameChat ? current.filter((id) => !tagWatch.current.tags.includes(id)) : [];
+    if (!sameChat) setFreshTagIds([]);
+    else if (added.length) setFreshTagIds(added);
+    tagWatch.current = { id: selected?.id ?? "", tags: [...current] };
+  }, [selected?.id, selected?.tagIds]);
+
+  useEffect(() => {
+    if (!pruebaMode || !selectedId) {
+      setUso([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchWaLlmUsage(selectedId)
+      .then((items) => {
+        if (!cancelled) setUso(items);
+      })
+      .catch(() => {
+        if (!cancelled) setUso([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pruebaMode, selectedId, messages.length]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -513,6 +620,20 @@ export function WhatsAppConversationsPanel({
     [selected],
   );
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const fresh = conversations.find((item) => item.id === selectedId);
+    if (!fresh) return;
+    setSelected((current) => {
+      if (!current || current.id !== fresh.id) return current;
+      const sameResumen = (current.resumen ?? "") === (fresh.resumen ?? "");
+      const sameContact = current.contact?.updatedAt === fresh.contact?.updatedAt;
+      const sameTags = (current.tagIds ?? []).join() === (fresh.tagIds ?? []).join();
+      if (sameResumen && sameContact && sameTags) return current;
+      return { ...current, ...fresh, contact: fresh.contact ?? current.contact };
+    });
+  }, [conversations, selectedId]);
+
   function selectConversation(conversation: WaConversation) {
     setSelectedId(conversation.id);
     setSelected(conversation);
@@ -560,6 +681,31 @@ export function WhatsAppConversationsPanel({
     () => tags.filter((tag) => (selected?.tagIds ?? []).includes(tag.id)),
     [tags, selected?.tagIds],
   );
+  const usoPorModelo = useMemo(() => {
+    return PASOS_BOT.map((paso) => {
+      const items = uso.filter((item) => item.paso === paso.paso);
+      const modelos = [...new Set(items.map((item) => item.modelo).filter(Boolean))];
+      const modelo = modelos.length ? modelos.join(", ") : paso.modelo;
+      const precio = precioModelo(modelos[0] ?? paso.modelo);
+      const entrada = items.reduce((sum, item) => sum + item.tokensEntrada, 0);
+      const salida = items.reduce((sum, item) => sum + item.tokensSalida, 0);
+      const costo = items.reduce((sum, item) => {
+        const tarifaItem = precioModelo(item.modelo);
+        return sum + costoUsd(item.tokensEntrada, item.tokensSalida, tarifaItem.entrada, tarifaItem.salida);
+      }, 0);
+      return {
+        ...paso,
+        modelo,
+        entradaPorMillon: precio.entrada,
+        salidaPorMillon: precio.salida,
+        llamadas: items.length,
+        entrada,
+        salida,
+        total: items.reduce((sum, item) => sum + item.tokensTotal, 0),
+        costo,
+      };
+    });
+  }, [uso]);
   const availableTags = useMemo(
     () => tags.filter((tag) => !(selected?.tagIds ?? []).includes(tag.id)),
     [tags, selected?.tagIds],
@@ -837,10 +983,82 @@ export function WhatsAppConversationsPanel({
     };
   }
 
+  async function handleCreatePrueba() {
+    try {
+      const created = await createWaPrueba();
+      setConversations((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+      setSelectedId(created.id);
+      setSelected(created);
+      setMessages([]);
+      setDraft("");
+      setAttachment(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo crear la prueba");
+    }
+  }
+
+  if (createPruebaRef) {
+    createPruebaRef.current = () => {
+      void handleCreatePrueba();
+    };
+  }
+
+  function openNotaIncorrecta() {
+    setNotaTexto(selected?.pruebaResultado === "incorrecta" ? selected.pruebaNota ?? "" : "");
+    setNotaOpen(true);
+  }
+
+  function aplicarResultado(updated: WaConversation) {
+    setSelected((prev) =>
+      prev && prev.id === updated.id ? { ...prev, ...updated, contact: updated.contact ?? prev.contact } : prev,
+    );
+    setConversations((prev) =>
+      prev.map((item) =>
+        item.id === updated.id ? { ...item, ...updated, contact: updated.contact ?? item.contact } : item,
+      ),
+    );
+  }
+
+  async function marcarCorrecta() {
+    if (!selectedId || notaSaving) return;
+    setNotaSaving(true);
+    try {
+      aplicarResultado(await saveWaPruebaNota(selectedId, "correcta"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo marcar como correcta");
+    } finally {
+      setNotaSaving(false);
+    }
+  }
+
+  async function saveNotaIncorrecta() {
+    if (!selectedId || notaSaving) return;
+    if (!notaTexto.trim()) {
+      toast.error("Contá qué pasó");
+      return;
+    }
+    setNotaSaving(true);
+    try {
+      aplicarResultado(await saveWaPruebaNota(selectedId, "incorrecta", notaTexto));
+      setNotaOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la nota");
+    } finally {
+      setNotaSaving(false);
+    }
+  }
+
   async function handleSend(e: FormEvent) {
     e.preventDefault();
     if (!selectedId || sending) return;
+    if (pruebaMode && (selected?.pruebaResultado === "correcta" || selected?.pruebaResultado === "incorrecta")) {
+      return;
+    }
     if (!draft.trim() && !attachment) return;
+    if (pruebaMode && attachment) {
+      toast.error("En una prueba solo se puede mandar texto");
+      return;
+    }
     const conversationId = selectedId;
     const { text, reply } = resolveOutgoingText(draft);
     const file = attachment;
@@ -851,14 +1069,19 @@ export function WhatsAppConversationsPanel({
     lastQuickReplyRef.current = null;
     setSending(true);
     try {
-      if (file) {
+      if (pruebaMode) {
+        const result = await sendWaPruebaMessage(conversationId, text);
+        setDraft("");
+        setMessages(result.messages);
+        if (result.conversation) setSelected(result.conversation);
+      } else if (file) {
         await sendWaMedia(conversationId, file, text || undefined);
         setAttachment(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
         await sendWaMessage(conversationId, text);
       }
-      setDraft("");
+      if (!pruebaMode) setDraft("");
       const localTagIds = pendingTags.current ?? selected?.tagIds ?? [];
       const [msgs, page] = await Promise.all([
         fetchWaMessages(conversationId),
@@ -867,6 +1090,7 @@ export function WhatsAppConversationsPanel({
           status: "OPEN",
           limit: Math.max(conversations.length, CONVERSATIONS_PAGE_SIZE),
           offset: 0,
+          prueba: pruebaMode,
           ...filtersQuery,
         }),
       ]);
@@ -892,16 +1116,15 @@ export function WhatsAppConversationsPanel({
           return tb - ta;
         });
       });
-      setSelected((prev) =>
-        prev && prev.id === conversationId
-          ? {
-              ...prev,
-              tagIds: [...new Set([...(prev.tagIds ?? []), ...localTagIds])],
-              lastMessagePreview: text.slice(0, 200),
-              lastMessageAt: new Date().toISOString(),
-            }
-          : prev,
-      );
+      setSelected((prev) => {
+        if (!prev || prev.id !== conversationId) return prev;
+        const fresh = page.items.find((item) => item.id === conversationId);
+        return {
+          ...(fresh ?? prev),
+          tagIds: [...new Set([...(fresh?.tagIds ?? []), ...(prev.tagIds ?? []), ...localTagIds])],
+          contact: fresh?.contact ?? prev.contact,
+        };
+      });
       setHasMoreConversations(page.hasMore);
       setNextConversationsOffset(page.nextOffset);
     } catch (error) {
@@ -924,10 +1147,12 @@ export function WhatsAppConversationsPanel({
     selected?.assigneeKind === "user" &&
     Boolean(user?.id) &&
     selected.assigneeUserId === user?.id;
-  const composerLocked =
-    Boolean(selected) &&
-    selected?.contact?.isBlocked !== true &&
-    !assignedToMe;
+  const pruebaCerrada =
+    pruebaMode &&
+    (selected?.pruebaResultado === "correcta" || selected?.pruebaResultado === "incorrecta");
+  const composerLocked = pruebaMode
+    ? false
+    : Boolean(selected) && selected?.contact?.isBlocked !== true && !assignedToMe;
   const takeOverHolderLabel = (() => {
     if (!selected) return "";
     if (selected.assigneeKind === "bot") return "Bot";
@@ -991,6 +1216,7 @@ export function WhatsAppConversationsPanel({
                 aria-label="Buscar conversación"
               />
             </div>
+            {pruebaMode ? null : (
             <button
               type="button"
               className={`wa-inbox__filter-btn${activeFilterCount > 0 ? " is-active" : ""}`}
@@ -1011,6 +1237,7 @@ export function WhatsAppConversationsPanel({
                 <span className="wa-inbox__filter-badge">{activeFilterCount}</span>
               ) : null}
             </button>
+            )}
           </div>
         </div>
         <div
@@ -1027,11 +1254,13 @@ export function WhatsAppConversationsPanel({
             <p className="wa-inbox__empty">Cargando…</p>
           ) : conversations.length === 0 ? (
             <p className="wa-inbox__empty">
-              {connected
-                ? activeFilterCount > 0 || search.trim()
-                  ? "No hay conversaciones con esos filtros."
-                  : "No hay conversaciones abiertas."
-                : "Conectá WhatsApp para empezar a recibir chats."}
+              {pruebaMode
+                ? "Creá una prueba para empezar a hablarle al bot."
+                : connected
+                  ? activeFilterCount > 0 || search.trim()
+                    ? "No hay conversaciones con esos filtros."
+                    : "No hay conversaciones abiertas."
+                  : "Conectá WhatsApp para empezar a recibir chats."}
             </p>
           ) : (
             <>
@@ -1055,12 +1284,17 @@ export function WhatsAppConversationsPanel({
                         {formatPreviewTime(c.lastMessageAt)}
                       </span>
                     </div>
+                    {pruebaMode && c.pruebaResultado ? (
+                      <span className={`wa-prueba-flag${c.pruebaResultado === "correcta" ? " is-ok" : " is-bad"}`}>
+                        {c.pruebaResultado === "correcta" ? "Correcta" : "Incorrecta"}
+                      </span>
+                    ) : null}
                     <div className="wa-inbox__item-bottom">
                       <span
                         className="wa-inbox__item-preview"
-                        data-tooltip={c.lastMessagePreview || "Sin mensajes"}
+                        data-tooltip={c.resumen || c.lastMessagePreview || "Sin mensajes"}
                       >
-                        {c.lastMessagePreview || "Sin mensajes"}
+                        {c.resumen || c.lastMessagePreview || "Sin mensajes"}
                       </span>
                       <span
                         className="wa-inbox__assignee"
@@ -1101,15 +1335,41 @@ export function WhatsAppConversationsPanel({
               <button
                 type="button"
                 className="wa-inbox__contact-open"
-                onClick={() => setProfileOpen(true)}
-                title="Ver ficha del contacto"
+                onClick={() => {
+                  if (!pruebaMode) setProfileOpen(true);
+                }}
+                title={pruebaMode ? "Datos de la prueba" : "Ver ficha del contacto"}
               >
                 <h2>{threadHeader.title}</h2>
                 {threadHeader.subtitle ? (
                   <p className="wa-inbox__thread-rel">{threadHeader.subtitle}</p>
                 ) : null}
+                {selected?.resumen && !pruebaMode ? (
+                  <p className="wa-inbox__thread-resumen">{selected.resumen}</p>
+                ) : null}
               </button>
               <div className="wa-inbox__assign">
+                {pruebaMode ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn btn-sm wa-prueba-btn wa-prueba-btn--ok${selected?.pruebaResultado === "correcta" ? " is-on" : ""}`}
+                      disabled={notaSaving}
+                      onClick={() => void marcarCorrecta()}
+                    >
+                      Marcar como correcta
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm wa-prueba-btn wa-prueba-btn--bad${selected?.pruebaResultado === "incorrecta" ? " is-on" : ""}`}
+                      disabled={notaSaving}
+                      onClick={openNotaIncorrecta}
+                    >
+                      Marcar como incorrecta
+                    </button>
+                  </>
+                ) : (
+                  <>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tarea"
@@ -1188,6 +1448,8 @@ export function WhatsAppConversationsPanel({
                     </option>
                   ))}
                 </select>
+                  </>
+                )}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm wa-inbox__close-btn"
@@ -1197,6 +1459,7 @@ export function WhatsAppConversationsPanel({
                 </button>
               </div>
             </header>
+            {pruebaMode ? null : (
             <div className="wa-inbox__tags">
               {assignedTags.length > 0 ? (
                 assignedTags.map((tag) => (
@@ -1216,6 +1479,7 @@ export function WhatsAppConversationsPanel({
                 <p className="wa-inbox__tags-empty">Sin etiquetas asignadas</p>
               )}
             </div>
+            )}
             <div className="wa-inbox__messages">
               {loadingMessages ? (
                 <p className="wa-inbox__empty">Cargando mensajes…</p>
@@ -1260,7 +1524,7 @@ export function WhatsAppConversationsPanel({
                       ) : null}
                       <span className="wa-bubble__meta">
                         {formatPreviewTime(m.createdAt)}
-                        {outbound ? <MessageTicks status={m.status} /> : null}
+                        {outbound && !pruebaMode ? <MessageTicks status={m.status} /> : null}
                       </span>
                     </div>
                   );
@@ -1332,6 +1596,7 @@ export function WhatsAppConversationsPanel({
                     setAttachment(file);
                   }}
                 />
+                {pruebaMode ? null : (
                 <button
                   type="button"
                   className="wa-inbox__attach"
@@ -1355,6 +1620,7 @@ export function WhatsAppConversationsPanel({
                     />
                   </svg>
                 </button>
+                )}
                 <input
                   type="text"
                   value={composerLocked ? "" : draft}
@@ -1392,17 +1658,22 @@ export function WhatsAppConversationsPanel({
                     }
                   }}
                   placeholder={
-                    composerLocked
-                      ? "Asignate la conversación para escribir…"
-                      : attachment
-                        ? "Pie de foto o archivo (opcional)…"
-                        : selected?.contact?.isBlocked
-                          ? "Contacto bloqueado"
-                          : "Escribí un mensaje… (/saludo)"
+                    pruebaCerrada
+                      ? "Esta prueba ya está marcada."
+                      : composerLocked
+                        ? "Asignate la conversación para escribir…"
+                        : pruebaMode
+                          ? "Escribí como la persona…"
+                          : attachment
+                            ? "Pie de foto o archivo (opcional)…"
+                            : selected?.contact?.isBlocked
+                              ? "Contacto bloqueado"
+                              : "Escribí un mensaje… (/saludo)"
                   }
                   disabled={
                     sending ||
                     composerLocked ||
+                    pruebaCerrada ||
                     selected?.contact?.isBlocked === true
                   }
                   autoComplete="off"
@@ -1422,11 +1693,12 @@ export function WhatsAppConversationsPanel({
                     className="btn btn-primary"
                     disabled={
                       sending ||
+                      pruebaCerrada ||
                       (!draft.trim() && !attachment) ||
                       selected?.contact?.isBlocked === true
                     }
                   >
-                    {sending ? "Enviando…" : "Enviar"}
+                    {sending ? (pruebaMode ? "Respondiendo…" : "Enviando…") : "Enviar"}
                   </button>
                 )}
               </div>
@@ -1434,6 +1706,232 @@ export function WhatsAppConversationsPanel({
           </>
         )}
       </section>
+      {pruebaMode ? (
+        <aside className="wa-prueba-panel" aria-label="Funcionamiento del bot">
+          {!selected ? (
+            <p className="wa-inbox__empty">Elegí una prueba para ver la ficha y las etiquetas.</p>
+          ) : (
+            <>
+              <div className="wa-prueba-tabs" role="tablist">
+                {(
+                  [
+                    ["paciente", "Paciente"],
+                    ["modulo", "Módulo"],
+                    ["intenciones", "Intenciones"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={pruebaTab === id}
+                    className={`wa-prueba-tabs__btn${pruebaTab === id ? " is-active" : ""}`}
+                    onClick={() => setPruebaTab(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {pruebaTab === "paciente" ? (
+                <>
+                  <section>
+                    <h3>Quien escribe</h3>
+                    <dl>
+                      {(
+                        [
+                          ["Nombre", selected.contact?.contactoNombre],
+                          ["Apellido", selected.contact?.contactoApellido],
+                          ["Relación con el paciente", selected.contact?.relacionFamiliar],
+                          ["Teléfono", selected.contact?.phoneNumber],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd className={textoDato(value) === "vacío" ? "is-empty" : ""}>{textoDato(value)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                  <section>
+                    <h3>Paciente</h3>
+                    <dl>
+                      {(
+                        [
+                          [
+                            "La consulta es para",
+                            selected.contact?.consultaPara === "propio"
+                              ? "quien escribe"
+                              : selected.contact?.consultaPara === "tercero"
+                                ? "otra persona"
+                                : "",
+                          ],
+                          ["Nombre", selected.contact?.firstName],
+                          ["Apellido", selected.contact?.lastName],
+                          [
+                            "Grupo etario",
+                            selected.contact?.grupoEtario === "infanto"
+                              ? "infanto"
+                              : selected.contact?.grupoEtario === "adulto"
+                                ? "adulto"
+                                : "",
+                          ],
+                          ["DNI", selected.contact?.dni],
+                          ["Sexo", selected.contact?.sexo],
+                          [
+                            "¿Es paciente?",
+                            selected.contact?.esPaciente === true
+                              ? "sí"
+                              : selected.contact?.esPaciente === false
+                                ? "no"
+                                : "",
+                          ],
+                          ["Cobertura", selected.contact?.cobertura],
+                          ["Email", selected.contact?.email],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd className={textoDato(value) === "vacío" ? "is-empty" : ""}>{textoDato(value)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                  <section>
+                    <h3>Etiquetas</h3>
+                    {assignedTags.length ? (
+                      <ul>
+                        {assignedTags.map((tag) => (
+                          <li key={tag.id} className={freshTagIds.includes(tag.id) ? "is-new" : ""}>
+                            {tag.name}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>Todavía ninguna.</p>
+                    )}
+                  </section>
+                </>
+              ) : null}
+              {pruebaTab === "modulo" ? (
+                <>
+                  <section>
+                    <h3>Resultado</h3>
+                    <p
+                      className={
+                        selected.pruebaResultado === "correcta"
+                          ? "wa-prueba-resultado is-ok"
+                          : selected.pruebaResultado === "incorrecta"
+                            ? "wa-prueba-resultado is-bad"
+                            : "wa-prueba-resultado"
+                      }
+                    >
+                      {selected.pruebaResultado === "correcta"
+                        ? "Correcta"
+                        : selected.pruebaResultado === "incorrecta"
+                          ? "Incorrecta"
+                          : "Sin marcar"}
+                    </p>
+                    {selected.pruebaResultado === "incorrecta" && selected.pruebaNota ? (
+                      <p>{selected.pruebaNota}</p>
+                    ) : null}
+                  </section>
+                  <section>
+                    <h3>Modelos</h3>
+                    <ul className="wa-prueba-uso">
+                      {usoPorModelo.map((grupo) => (
+                        <li key={grupo.paso}>
+                          <strong>{grupo.titulo}</strong>
+                          <p className="wa-prueba-uso__modelo">{grupo.modelo}</p>
+                          <p className="wa-prueba-uso__tarifa">
+                            {tarifa(grupo.entradaPorMillon)} entrada · {tarifa(grupo.salidaPorMillon)} salida / millón
+                          </p>
+                          <p>
+                            Entrada {miles(grupo.entrada)} · Salida {miles(grupo.salida)} · Total{" "}
+                            {miles(grupo.total)}
+                          </p>
+                          <p>
+                            {grupo.llamadas === 0
+                              ? "Sin llamadas en esta conversación"
+                              : `${grupo.llamadas} ${grupo.llamadas === 1 ? "llamada" : "llamadas"}`}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="wa-prueba-total">
+                      Total aproximado {gastoUsd(usoPorModelo.reduce((sum, grupo) => sum + grupo.costo, 0))}
+                    </p>
+                    <p className="wa-prueba-total">
+                      {gastoPesos(usoPorModelo.reduce((sum, grupo) => sum + grupo.costo, 0) * DOLAR_PESOS)}
+                    </p>
+                  </section>
+                </>
+              ) : null}
+              {pruebaTab === "intenciones" ? (
+                <>
+                  <section>
+                    <h3>Quedó</h3>
+                    <dl>
+                      <div>
+                        <dt>Intención abierta</dt>
+                        <dd>{textoDato(selected.intencionAbierta)}</dd>
+                      </div>
+                      <div>
+                        <dt>Concluida</dt>
+                        <dd>{selected.intencionConcluida ? "sí" : "no"}</dd>
+                      </div>
+                      <div>
+                        <dt>En conflicto con</dt>
+                        <dd>{textoDato(selected.intencionPropuesta)}</dd>
+                      </div>
+                      <div>
+                        <dt>Asignada</dt>
+                        <dd>{waAssigneeLabel(selected)}</dd>
+                      </div>
+                      <div>
+                        <dt>Resumen</dt>
+                        <dd>{textoDato(selected.resumen)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                  <section>
+                    <h3>Detecciones</h3>
+                    {(selected.auditoria ?? []).length ? (
+                      <ol className="wa-prueba-audit">
+                        {[...(selected.auditoria ?? [])].reverse().map((paso, index) => (
+                          <li key={`${paso.en}-${index}`}>
+                            <strong>
+                              {[paso.intencion || "sin intención", paso.secundaria].filter(Boolean).join(" + ")}
+                            </strong>
+                            <span>
+                              {[
+                                paso.cortesia === "saludo"
+                                  ? "saludo"
+                                  : paso.cortesia === "cierre"
+                                    ? "despedida"
+                                    : "",
+                                paso.peligro ? "peligro" : "",
+                                paso.duda ? "duda" : "",
+                                paso.abierta ? `quedó ${paso.abierta}` : "",
+                                paso.concluida ? "concluida" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                            {paso.resumen ? <p>{paso.resumen}</p> : null}
+                            {paso.etiquetas.length ? <p>Etiquetas: {paso.etiquetas.join(", ")}</p> : null}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p>Todavía no hay detecciones.</p>
+                    )}
+                  </section>
+                </>
+              ) : null}
+            </>
+          )}
+        </aside>
+      ) : null}
 
       <Modal
         open={tagsModalOpen}
@@ -2054,6 +2552,46 @@ export function WhatsAppConversationsPanel({
         }
       >
         <p className="wa-inbox__takeover-msg">{pendingAssigneeMessage}</p>
+      </Modal>
+      <Modal
+        open={notaOpen}
+        title="Marcar como incorrecta"
+        wide
+        className="wa-prueba-nota-modal"
+        onClose={() => {
+          if (!notaSaving) setNotaOpen(false);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={notaSaving}
+              onClick={() => setNotaOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={notaSaving || !notaTexto.trim()}
+              onClick={() => void saveNotaIncorrecta()}
+            >
+              {notaSaving ? "Guardando…" : "Guardar"}
+            </button>
+          </>
+        }
+      >
+        <label className="form-group form-group--full">
+          <span>Qué pasó. Es obligatorio.</span>
+          <textarea
+            className="wa-prueba-nota"
+            rows={12}
+            value={notaTexto}
+            onChange={(event) => setNotaTexto(event.target.value)}
+            placeholder="Contá qué respondió mal, qué dato falló o qué esperabas"
+          />
+        </label>
       </Modal>
     </div>
   );
