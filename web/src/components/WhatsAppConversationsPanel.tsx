@@ -1058,14 +1058,12 @@ export function WhatsAppConversationsPanel({
 
   const quickTagResults = useMemo(() => {
     const q = quickTagQuery.trim().toLowerCase();
-    const pinned = new Set(pinnedTagIds);
     return tags.filter((tag) => {
-      if (!q && pinned.has(tag.id)) return false;
       if (!q) return true;
       const groupName = tagGroups.find((group) => group.id === tag.groupId)?.name?.toLowerCase() ?? "";
       return tag.name.toLowerCase().includes(q) || groupName.includes(q);
     });
-  }, [tags, quickTagQuery, pinnedTagIds, tagGroups]);
+  }, [tags, quickTagQuery, tagGroups]);
   const usoPorModelo = useMemo(() => {
     return PASOS_BOT.map((paso) => {
       const items = uso.filter((item) => item.paso === paso.paso);
@@ -1118,6 +1116,11 @@ export function WhatsAppConversationsPanel({
 
   function tagColor(tag: { groupId: string }): string {
     return tagGroups.find((group) => group.id === tag.groupId)?.color ?? "#a61948";
+  }
+
+  function appliedTagColor(tag: WaTag): string {
+    const cluster = activeClusters.find((item) => item.tagIds.includes(tag.id));
+    return cluster?.color ?? tagColor(tag);
   }
 
   function tagGroupLabel(tag: { groupId: string }): string {
@@ -1281,12 +1284,14 @@ export function WhatsAppConversationsPanel({
     }
   }
 
-  function toggleConversationTag(tagId: string) {
+  function toggleConversationTag(tagId: string, exclusiveIds?: string[]) {
     const current = pendingTags.current ?? selected?.tagIds ?? [];
-    const next = current.includes(tagId)
-      ? current.filter((id) => id !== tagId)
-      : [...current, tagId];
-    void applyTags(next);
+    if (current.includes(tagId)) {
+      void applyTags(current.filter((id) => id !== tagId));
+      return;
+    }
+    const others = new Set((exclusiveIds ?? []).filter((id) => id !== tagId));
+    void applyTags([...current.filter((id) => !others.has(id)), tagId]);
   }
 
   function togglePinnedTag(tagId: string) {
@@ -1820,6 +1825,7 @@ export function WhatsAppConversationsPanel({
     groupEnd = false,
     canLeave = false,
     showGroup = true,
+    exclusiveIds?: string[],
   ) {
     const assigned = (selected?.tagIds ?? []).includes(tag.id);
     const picked = pickable && groupPick.includes(tag.id);
@@ -1873,7 +1879,9 @@ export function WhatsAppConversationsPanel({
                   : `Etiquetar ${tag.name}`
                 : "Elegí una conversación"
           }
-          onClick={() => (pickable ? toggleGroupPick(tag.id) : toggleConversationTag(tag.id))}
+          onClick={() =>
+            pickable ? toggleGroupPick(tag.id) : toggleConversationTag(tag.id, exclusiveIds)
+          }
         >
           <span className="wa-tags-quick__name">{tag.name}</span>
           {showGroup ? <span className="wa-tags-quick__group">{tagGroupLabel(tag)}</span> : null}
@@ -1943,7 +1951,13 @@ export function WhatsAppConversationsPanel({
     setPinnedTagIds((prev) => withGroupsFirst(prev, next));
   }
 
-  function renderPinnedItem(tag: WaTag, index: number, clusterColor?: string, groupEnd = false) {
+  function renderPinnedItem(
+    tag: WaTag,
+    index: number,
+    clusterColor?: string,
+    groupEnd = false,
+    exclusiveIds?: string[],
+  ) {
     const fromIndex = dragPinnedId
       ? pinnedTags.findIndex((item) => item.id === dragPinnedId)
       : -1;
@@ -1963,6 +1977,7 @@ export function WhatsAppConversationsPanel({
       groupEnd,
       Boolean(clusterColor) && editingGroups,
       false,
+      exclusiveIds,
     );
   }
 
@@ -2249,7 +2264,7 @@ export function WhatsAppConversationsPanel({
                     key={tag.id}
                     type="button"
                     className="wa-tag"
-                    style={{ "--tag": tagColor(tag) } as CSSProperties}
+                    style={{ "--tag": appliedTagColor(tag) } as CSSProperties}
                     title="Quitar etiqueta"
                     onClick={() => toggleConversationTag(tag.id)}
                   >
@@ -2639,7 +2654,7 @@ export function WhatsAppConversationsPanel({
                           <span
                             key={tag.id}
                             className={`wa-tag${freshTagIds.includes(tag.id) ? " is-new" : ""}`}
-                            style={{ "--tag": tagColor(tag) } as CSSProperties}
+                            style={{ "--tag": appliedTagColor(tag) } as CSSProperties}
                             title={tagGroupLabel(tag)}
                           >
                             {tag.name}
@@ -2973,6 +2988,7 @@ export function WhatsAppConversationsPanel({
                               item.index,
                               block.cluster.color,
                               itemIndex === block.items.length - 1,
+                              groupingTags ? undefined : block.cluster.tagIds,
                             ),
                           )}
                         </div>

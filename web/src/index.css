@@ -10142,9 +10142,9 @@ tbody tr.is-inactive td {
 }
 
 .wa-tags-quick.is-on {
-  background: color-mix(in srgb, var(--tag) 22%, var(--surface));
-  border-color: color-mix(in srgb, var(--tag) 70%, var(--border));
-  box-shadow: inset 3px 0 0 var(--tag);
+  background: color-mix(in srgb, var(--tag) 16%, var(--surface));
+  border-color: var(--tag);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tag) 28%, transparent);
 }
 
 .wa-tags-quick__apply {
