@@ -8613,10 +8613,6 @@ tbody tr.is-inactive td {
   margin-top: 0.85rem;
 }
 
-.usuarios-sistemas-check {
-  margin-top: 0.85rem;
-}
-
 .usuarios-modules-hint {
   color: var(--text-muted, #6b7280);
   font-size: 0.85em;
