@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { AuthedRequest } from "../middleware/auth.middleware.js";
 import { getUserById } from "../services/users.service.js";
 import {
   addWhatsappOperator,
@@ -36,6 +37,7 @@ import {
 } from "../whatsapp/runtime.js";
 import { setPruebaNota, updateContact } from "../whatsapp/firestore-store.js";
 import { listLlmUsageByConversation } from "../whatsapp/llm-usage.js";
+import { getAccesosRapidos, saveAccesosRapidos } from "../whatsapp/accesos-rapidos.js";
 import {
   createWhatsappTag,
   createWhatsappTagGroup,
@@ -342,6 +344,37 @@ router.delete("/coberturas/:id", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo eliminar la cobertura";
     res.status(tagStatus(message)).json({ ok: false, message });
+  }
+});
+
+router.get("/accesos-rapidos", async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.id?.trim() ?? "";
+    if (!userId) {
+      res.status(401).json({ ok: false, message: "No autenticado" });
+      return;
+    }
+    const data = await getAccesosRapidos(userId);
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron leer los accesos rápidos");
+  }
+});
+
+router.put("/accesos-rapidos", async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.id?.trim() ?? "";
+    if (!userId) {
+      res.status(401).json({ ok: false, message: "No autenticado" });
+      return;
+    }
+    const data = await saveAccesosRapidos(userId, {
+      tagIds: Array.isArray(req.body?.tagIds) ? req.body.tagIds : undefined,
+      clusters: Array.isArray(req.body?.clusters) ? req.body.clusters : undefined,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron guardar los accesos rápidos");
   }
 });
 

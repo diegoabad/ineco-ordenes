@@ -10871,8 +10871,6 @@ textarea.wa-prueba-nota {
   gap: 0.7rem;
   flex: 1 1 12rem;
   min-width: 0;
-  padding-right: 0.9rem;
-  border-right: 1px solid var(--border);
 }
 
 .wa-inbox__avatar {
@@ -11211,6 +11209,11 @@ textarea.wa-prueba-nota {
 
 .wa-bubble.is-in {
   align-self: flex-start;
+}
+
+.wa-bubble.is-in ::selection {
+  background: var(--primary, #a61948);
+  color: #fff;
 }
 
 .wa-typing {
@@ -12192,8 +12195,6 @@ textarea.wa-prueba-nota {
 
   .wa-inbox__identity {
     flex: 1 1 100%;
-    padding-right: 0;
-    border-right: none;
   }
 
   .wa-inbox__assign .ui-select {

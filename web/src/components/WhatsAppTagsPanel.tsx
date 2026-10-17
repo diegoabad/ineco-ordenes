@@ -1,17 +1,21 @@
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
   type MutableRefObject,
 } from "react";
 import { toast } from "react-toastify";
+import { useAuth } from "../auth/AuthContext";
 import {
   createWaTag,
   createWaTagGroup,
   deleteWaTag,
   deleteWaTagGroup,
+  fetchWaAccesos,
   fetchWaTagCatalog,
+  saveWaAccesos,
   updateWaTag,
   updateWaTagGroup,
 } from "../services/whatsappCrmService";
@@ -54,24 +58,12 @@ type Props = {
   onTabChange?: (tab: TagsPanelTab) => void;
 };
 
-const PINNED_WA_TAGS_KEY = "wa-inbox-pinned-tag-ids";
-
 function byName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name, "es");
 }
 
-function readPinnedTagIds(): string[] {
-  try {
-    const raw = localStorage.getItem(PINNED_WA_TAGS_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((id) => String(id ?? "").trim()).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Props) {
+  const { user } = useAuth();
   const [tab, setTab] = useState<TagsPanelTab>("etiquetas");
   const [groups, setGroups] = useState<WaTagGroup[]>([]);
   const [items, setItems] = useState<WaTag[]>([]);
@@ -83,7 +75,9 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
   const [removeGroupId, setRemoveGroupId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [pinFilter, setPinFilter] = useState<"todas" | "pineadas" | "sin">("todas");
-  const [pinnedIds, setPinnedIds] = useState<string[]>(readPinnedTagIds);
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const accesosListos = useRef(false);
+  const clustersRef = useRef<{ id: string; color: string; tagIds: string[] }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,9 +104,34 @@ export function WhatsAppTagsPanel({ createRef, createGroupRef, onTabChange }: Pr
     onTabChange?.(tab);
   }, [onTabChange, tab]);
 
+  const accesosUserId = user?.id ?? "";
   useEffect(() => {
-    localStorage.setItem(PINNED_WA_TAGS_KEY, JSON.stringify(pinnedIds));
-  }, [pinnedIds]);
+    accesosListos.current = false;
+    if (!accesosUserId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchWaAccesos();
+        if (cancelled) return;
+        clustersRef.current = data.clusters;
+        setPinnedIds(data.tagIds);
+        accesosListos.current = true;
+      } catch {
+        /* el listado de pines queda vacío si no se puede leer */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accesosUserId]);
+
+  useEffect(() => {
+    if (!accesosListos.current || !accesosUserId) return;
+    const timer = window.setTimeout(() => {
+      void saveWaAccesos({ tagIds: pinnedIds, clusters: clustersRef.current }).catch(() => undefined);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [pinnedIds, accesosUserId]);
 
   const removing = items.find((item) => item.id === removeId) ?? null;
   const removingGroup = groups.find((group) => group.id === removeGroupId) ?? null;

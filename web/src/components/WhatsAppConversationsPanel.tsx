@@ -24,6 +24,7 @@ import {
   fetchWaOperators,
   type WaLlmUsage,
   fetchQuickReplies,
+  fetchWaAccesos,
   fetchWaTagCatalog,
   fetchWhatsappBotConfig,
   fetchWhatsappCrmHealth,
@@ -31,6 +32,7 @@ import {
   fetchWhatsappStatus,
   markWaConversationRead,
   createWaPrueba,
+  saveWaAccesos,
   saveWaPruebaNota,
   sendWaMedia,
   sendWaMessage,
@@ -1131,9 +1133,44 @@ export function WhatsAppConversationsPanel({
     [tags, selected?.tagIds],
   );
 
+  const accesosListos = useRef(false);
+  const accesosUserId = user?.id ?? "";
   useEffect(() => {
-    localStorage.setItem(PINNED_WA_TAGS_KEY, JSON.stringify(pinnedTagIds));
-  }, [pinnedTagIds]);
+    accesosListos.current = false;
+    if (!accesosUserId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        let data = await fetchWaAccesos();
+        if (!data.tagIds.length && !data.clusters.length) {
+          const localesIds = readPinnedTagIds();
+          const localesClusters = readPinnedClusters();
+          if (localesIds.length || localesClusters.length) {
+            data = await saveWaAccesos({ tagIds: localesIds, clusters: localesClusters });
+          }
+        }
+        localStorage.removeItem(PINNED_WA_TAGS_KEY);
+        localStorage.removeItem(PINNED_CLUSTERS_KEY);
+        if (cancelled) return;
+        setPinnedTagIds(data.tagIds);
+        setPinnedClusters(data.clusters);
+        accesosListos.current = true;
+      } catch {
+        /* si no carga, el acceso rápido queda vacío en esta sesión */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accesosUserId]);
+
+  useEffect(() => {
+    if (!accesosListos.current || !accesosUserId) return;
+    const timer = window.setTimeout(() => {
+      void saveWaAccesos({ tagIds: pinnedTagIds, clusters: pinnedClusters }).catch(() => undefined);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [pinnedTagIds, pinnedClusters, accesosUserId]);
 
   const pinnedTags = useMemo(
     () =>
@@ -1162,10 +1199,6 @@ export function WhatsAppConversationsPanel({
       return next.join("|") === prev.join("|") ? prev : next;
     });
   }, [activeClusters, pinnedOrderKey]);
-
-  useEffect(() => {
-    localStorage.setItem(PINNED_CLUSTERS_KEY, JSON.stringify(pinnedClusters));
-  }, [pinnedClusters]);
 
   useEffect(() => {
     if (groupingTags && pinnedTags.length < CLUSTER_MIN) {

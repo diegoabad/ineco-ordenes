@@ -107,6 +107,41 @@ export async function deleteQuickReply(id: string): Promise<void> {
   );
 }
 
+export type WaAccesoCluster = {
+  id: string;
+  color: string;
+  tagIds: string[];
+};
+
+export type WaAccesosRapidos = {
+  tagIds: string[];
+  clusters: WaAccesoCluster[];
+};
+
+export async function fetchWaAccesos(): Promise<WaAccesosRapidos> {
+  const res = await apiFetch<{ ok: boolean; data: WaAccesosRapidos }>(
+    "/api/whatsapp-crm/accesos-rapidos",
+  );
+  return {
+    tagIds: Array.isArray(res.data?.tagIds) ? res.data.tagIds : [],
+    clusters: Array.isArray(res.data?.clusters) ? res.data.clusters : [],
+  };
+}
+
+export async function saveWaAccesos(input: {
+  tagIds?: string[];
+  clusters?: WaAccesoCluster[];
+}): Promise<WaAccesosRapidos> {
+  const res = await apiFetch<{ ok: boolean; data: WaAccesosRapidos }>(
+    "/api/whatsapp-crm/accesos-rapidos",
+    { method: "PUT", body: JSON.stringify(input) },
+  );
+  return {
+    tagIds: Array.isArray(res.data?.tagIds) ? res.data.tagIds : [],
+    clusters: Array.isArray(res.data?.clusters) ? res.data.clusters : [],
+  };
+}
+
 export async function fetchWaTagCatalog(): Promise<WaTagCatalog> {
   const res = await apiFetch<{ ok: boolean; data: WaTagCatalog }>("/api/whatsapp-crm/tags");
   return {
