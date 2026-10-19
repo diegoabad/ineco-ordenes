@@ -6,6 +6,7 @@ import {
   datosVaciosParaContacto,
   type DatosVaciosContacto,
 } from "../src/whatsapp/firestore-store.js";
+import { listWhatsappTagCatalog } from "../src/whatsapp/tags.js";
 import type { WaContact, WaConversation, WaMessage } from "../src/whatsapp/types.js";
 
 type Caso = {
@@ -17,7 +18,7 @@ type Caso = {
     datosConocidos?: Record<string, string>;
     primerContacto?: boolean;
   };
-  turnos: { lote: string[] }[];
+  turnos: { lote: string[]; devolverAlBot?: boolean }[];
 };
 
 type Bateria = { casos: Caso[] };
@@ -70,7 +71,7 @@ function contactoInicial(datos: Record<string, string>): WaContact {
   };
 }
 
-function sesion(caso: Caso) {
+function sesion(caso: Caso, nombresEtiqueta: Map<string, string>) {
   const ahora = new Date().toISOString();
   const datos = caso.contexto?.datosConocidos ?? {};
   const contact = contactoInicial(datos);
@@ -114,6 +115,28 @@ function sesion(caso: Caso) {
       conversation = {
         ...conversation,
         contact: { ...conversation.contact, ...patch } as WaContact,
+      };
+      return conversation.contact;
+    },
+    replaceContactFields: async (_id, input) => {
+      if (!conversation.contact) return null;
+      const nombre = input.pacienteNombre.trim();
+      const apellido = input.pacienteApellido.trim();
+      conversation = {
+        ...conversation,
+        contact: {
+          ...conversation.contact,
+          firstName: nombre || null,
+          lastName: apellido || null,
+          displayName: [nombre, apellido].filter(Boolean).join(" ") || null,
+          consultaPara: input.consultaPara === "propio" || input.consultaPara === "tercero" ? input.consultaPara : null,
+          relacionFamiliar: input.relacionFamiliar.trim() || null,
+          contactoNombre: input.contactoNombre.trim() || null,
+          contactoApellido: input.contactoApellido.trim() || null,
+          grupoEtario: input.grupoEtario === "infanto" || input.grupoEtario === "adulto" ? input.grupoEtario : null,
+          dni: input.dni.trim() || null,
+          sexo: input.sexo === "masculino" || input.sexo === "femenino" ? input.sexo : null,
+        },
       };
       return conversation.contact;
     },
@@ -167,6 +190,10 @@ function sesion(caso: Caso) {
   return {
     io,
     enviados,
+    devolverAlBot() {
+      if (conversation.assigneeKind !== "user") return;
+      conversation = { ...conversation, assigneeKind: "bot", assigneeUserId: null, assigneeName: "Nina" };
+    },
     agregarLote(lote: string[]) {
       enviados.length = 0;
       for (const text of lote) {
@@ -192,9 +219,37 @@ function sesion(caso: Caso) {
     estado: () => ({
       asignado: conversation.assigneeKind,
       asignadoA: conversation.assigneeName,
+      derivacion: conversation.derivacionPendiente === true,
       intencion: conversation.intencionAbierta,
       concluida: conversation.intencionConcluida,
-      etiquetas: conversation.tagIds.length,
+      etiquetas: conversation.tagIds.map((id) => nombresEtiqueta.get(id) ?? id),
+      datoPedido: conversation.datoPedido ?? "",
+      casos: (conversation.casos ?? []).map((caso) => `${caso.etiqueta}:${caso.estado}`).join(" | "),
+      historial: (conversation.historialDatos ?? [])
+        .map((evento) => `${evento.campo} ${evento.anterior || "-"}→${evento.nuevo}`)
+        .join(" | "),
+      pila: (conversation.pilaTemas ?? [])
+        .map((tema) => {
+          const etiqueta = conversation.casos?.find((caso) => caso.id === tema.casoId)?.etiqueta ?? tema.casoId;
+          return `${tema.clave}:${etiqueta}:${tema.datoPedido || "-"}`;
+        })
+        .join(" | "),
+      resultado: conversation.ultimoResultado
+        ? `${conversation.ultimoResultado.accion} ${conversation.ultimoResultado.ok ? "ok" : "fallo"}`
+        : "",
+      pausa: conversation.pausa
+        ? `${conversation.pausa.intencion || "-"} dato ${conversation.pausa.datoPedido || "-"}`
+        : "",
+      ficha: [
+        conversation.contact?.firstName,
+        conversation.contact?.lastName,
+        conversation.contact?.grupoEtario,
+        conversation.contact?.dni,
+        conversation.contact?.sexo,
+        conversation.contact?.consultaPara,
+      ]
+        .filter(Boolean)
+        .join(" "),
     }),
   };
 }
@@ -216,14 +271,17 @@ async function main(): Promise<void> {
     return true;
   });
   if (!casos.length) throw new Error("Ningún caso coincide con el filtro");
+  const catalogo = await listWhatsappTagCatalog();
+  const nombresEtiqueta = new Map(catalogo.items.map((item) => [item.id, item.name]));
 
   const lineas: string[] = ["# Respuestas del bot", ""];
   for (const caso of casos) {
-    const memoria = sesion(caso);
+    const memoria = sesion(caso, nombresEtiqueta);
     lineas.push(`## ${caso.id} — ${caso.titulo}`, "");
     for (let i = 0; i < caso.turnos.length; i += 1) {
       const turno = caso.turnos[i]!;
       const trace: { terra?: unknown; lunaLlamada: boolean } = { lunaLlamada: false };
+      if (turno.devolverAlBot) memoria.devolverAlBot();
       memoria.agregarLote(turno.lote);
       let error = "";
       try {
@@ -234,8 +292,18 @@ async function main(): Promise<void> {
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
       }
-      const terra = trace.terra as { intencion?: string; peligroActual?: boolean; dudaSinPeligro?: boolean; etiquetas?: string[] } | undefined;
+      const terra = trace.terra as {
+        intencion?: string;
+        intencionSecundaria?: string;
+        hayPedido?: boolean;
+        cortesia?: string;
+        peligroActual?: boolean;
+        dudaSinPeligro?: boolean;
+        etiquetas?: string[];
+      } | undefined;
+      const estado = memoria.estado();
       lineas.push(`### Turno ${i + 1}`, "");
+      if (turno.devolverAlBot) lineas.push("Operador: devuelve la charla al bot.", "");
       lineas.push("Persona:", ...turno.lote.map((texto) => `> ${texto}`), "");
       if (error) lineas.push(`Error: ${error}`, "");
       lineas.push(
@@ -243,6 +311,8 @@ async function main(): Promise<void> {
           ? `Terra: ${terra.intencion ?? "?"} · secundaria ${terra.intencionSecundaria || "ninguna"} · pedido ${terra.hayPedido === false ? "no" : "sí"} · cortesía ${terra.cortesia || "ninguna"} · peligro ${terra.peligroActual ? "sí" : "no"} · duda ${terra.dudaSinPeligro ? "sí" : "no"} · etiquetas ${(terra.etiquetas ?? []).join(", ") || "ninguna"}`
           : "Terra: no se llamó",
         `Luna: ${trace.lunaLlamada ? "sí" : "no"}`,
+        `Estado: asignado ${estado.asignado}${estado.asignadoA ? ` (${estado.asignadoA})` : ""} · derivación ${estado.derivacion ? "pendiente" : "no"} · etiquetas ${estado.etiquetas.length ? estado.etiquetas.join(", ") : "(ninguna)"} · dato ${estado.datoPedido || "-"} · casos ${estado.casos || "-"} · ficha ${estado.ficha || "(vacía)"}`,
+        `Diálogo: historial ${estado.historial || "-"} · pila ${estado.pila || "-"} · resultado ${estado.resultado || "-"} · pausa ${estado.pausa || "-"}`,
         "",
         "Respuesta:",
         memoria.enviados.length ? memoria.enviados.join("\n\n") : "(ninguna)",

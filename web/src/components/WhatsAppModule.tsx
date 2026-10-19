@@ -12,6 +12,7 @@ import { WhatsAppConfigPanel } from "./WhatsAppConfigPanel";
 import { WhatsAppMotorPanel } from "./WhatsAppMotorPanel";
 import { WhatsAppIntencionesPanel } from "./WhatsAppIntencionesPanel";
 import { WhatsAppConocimientoPanel } from "./WhatsAppConocimientoPanel";
+import { WhatsAppMetricasPanel } from "./WhatsAppMetricasPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -71,6 +72,8 @@ export function WhatsAppModule({ section }: Props) {
               <p>Interpretación, contexto y comportamiento del motor conversacional</p>
             ) : section === "intenciones" ? (
               <p>Objetivos que el bot puede reconocer y resolver</p>
+            ) : section === "metricas" ? (
+              <p>Conversaciones del período, por bot, operador y etiquetas</p>
             ) : section === "conocimiento" ? (
               <p>Información institucional que el bot puede usar para responder</p>
             ) : null}
@@ -210,6 +213,8 @@ export function WhatsAppModule({ section }: Props) {
         <WhatsAppMotorPanel />
       ) : section === "intenciones" ? (
         <WhatsAppIntencionesPanel createRef={createIntencionRef} />
+      ) : section === "metricas" ? (
+        <WhatsAppMetricasPanel />
       ) : section === "conocimiento" ? (
         <WhatsAppConocimientoPanel />
       ) : (

@@ -74,6 +74,8 @@ export interface DatePickerProps {
   placeholder?: string;
   /** Tooltip nativo con el formato. Por defecto true. */
   formatHint?: boolean;
+  /** Textos al pasar el mouse. Por defecto true. */
+  tooltips?: boolean;
   className?: string;
   "aria-label"?: string;
 }
@@ -148,6 +150,7 @@ export function DatePicker({
   disabled = false,
   placeholder = "dd/mm/aaaa",
   formatHint = true,
+  tooltips = true,
   className,
   "aria-label": ariaLabel,
 }: DatePickerProps) {
@@ -336,34 +339,35 @@ export function DatePicker({
         style={{ top: coords.top, left: coords.left, width: coords.width }}
         role="dialog"
         aria-modal="false"
-        aria-label={ariaLabel ?? "Calendario"}
+        aria-label={tooltips ? (ariaLabel ?? "Calendario") : undefined}
       >
         <div className="fl-date-picker__header">
           <button
             type="button"
             className="fl-date-picker__nav"
-            aria-label="Mes anterior"
+            aria-label={tooltips ? "Mes anterior" : undefined}
             disabled={navMesAnteriorDisabled}
             onClick={mesAnterior}
           >
             ‹
+            {tooltips ? null : <span className="fl-date-picker__sr">Mes anterior</span>}
           </button>
           <div className="fl-date-picker__selects">
             <select
               className="fl-date-picker__select"
-              aria-label="Mes"
+              aria-label={tooltips ? "Mes" : undefined}
               value={month}
               onChange={(e) => setView((v) => ({ ...v, month: Number(e.target.value) }))}
             >
               {MESES.map((nombre, i) => (
-                <option key={nombre} value={i} title={nombre}>
+                <option key={nombre} value={i} title={tooltips ? nombre : undefined}>
                   {MESES_ABREV[i]}
                 </option>
               ))}
             </select>
             <select
               className="fl-date-picker__select"
-              aria-label="Año"
+              aria-label={tooltips ? "Año" : undefined}
               value={year}
               onChange={(e) => setView((v) => ({ ...v, year: Number(e.target.value) }))}
             >
@@ -377,11 +381,12 @@ export function DatePicker({
           <button
             type="button"
             className="fl-date-picker__nav"
-            aria-label="Mes siguiente"
+            aria-label={tooltips ? "Mes siguiente" : undefined}
             disabled={navMesSiguienteDisabled}
             onClick={mesSiguiente}
           >
             ›
+            {tooltips ? null : <span className="fl-date-picker__sr">Mes siguiente</span>}
           </button>
         </div>
 
@@ -446,9 +451,9 @@ export function DatePicker({
           autoComplete="off"
           spellCheck={false}
           placeholder={placeholder || "dd/mm/aaaa"}
-          aria-label={ariaLabel ?? placeholder ?? "Fecha dd/mm/aaaa"}
+          aria-label={tooltips ? (ariaLabel ?? placeholder ?? "Fecha dd/mm/aaaa") : undefined}
           aria-invalid={inputInvalido}
-          title={formatHint ? "Formato: dd/mm/aaaa" : undefined}
+          title={tooltips && formatHint ? "Formato: dd/mm/aaaa" : undefined}
           value={inputText}
           onChange={onInputChange}
           onFocus={onInputFocus}
@@ -460,20 +465,22 @@ export function DatePicker({
             <button
               type="button"
               className="fl-date-picker__icon-btn fl-date-picker__clear"
-              aria-label="Quitar fecha"
+              aria-label={tooltips ? "Quitar fecha" : undefined}
               onClick={limpiar}
             >
               ×
+              {tooltips ? null : <span className="fl-date-picker__sr">Quitar fecha</span>}
             </button>
           )}
           <button
             type="button"
             className="fl-date-picker__icon-btn"
-            aria-label="Abrir calendario"
+            aria-label={tooltips ? "Abrir calendario" : undefined}
             disabled={disabled}
             onClick={() => !disabled && setOpen((o) => !o)}
           >
             <IconCalendar size={compact ? 13 : 18} />
+            {tooltips ? null : <span className="fl-date-picker__sr">Abrir calendario</span>}
           </button>
         </div>
       </div>

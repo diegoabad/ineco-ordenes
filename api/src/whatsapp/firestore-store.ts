@@ -27,6 +27,14 @@ import type {
   WaMessageStatus,
   WaMessageType,
 } from "./types.js";
+import {
+  normalizarCasos,
+  normalizarHistorial,
+  normalizarPausa,
+  normalizarPila,
+  normalizarResultado,
+  type WaFichaCaso,
+} from "./estado-dialogo.js";
 
 const CONTACTS = "whatsapp_contacts";
 const CONVERSATIONS = "whatsapp_conversations";
@@ -145,6 +153,21 @@ function normalizeConversation(id: string, raw: Record<string, unknown>): WaConv
     intencionConcluida: raw.intencionConcluida === true,
     intencionPropuesta:
       raw.intencionPropuesta != null ? String(raw.intencionPropuesta).trim() || null : null,
+    intencionCola: Array.isArray(raw.intencionCola)
+      ? raw.intencionCola.map((clave) => String(clave ?? "").trim()).filter(Boolean).slice(0, 6)
+      : [],
+    advertenciasFuera: Number(raw.advertenciasFuera ?? 0) || 0,
+    derivacionPendiente: raw.derivacionPendiente === true,
+    temasAnotados: Array.isArray(raw.temasAnotados)
+      ? raw.temasAnotados.map((tema) => String(tema ?? "").trim()).filter(Boolean).slice(0, 8)
+      : [],
+    casos: normalizarCasos(raw.casos),
+    casoActivoId: raw.casoActivoId != null ? String(raw.casoActivoId).trim() || null : null,
+    datoPedido: raw.datoPedido != null ? String(raw.datoPedido).trim() || null : null,
+    historialDatos: normalizarHistorial(raw.historialDatos),
+    pilaTemas: normalizarPila(raw.pilaTemas),
+    ultimoResultado: normalizarResultado(raw.ultimoResultado),
+    pausa: normalizarPausa(raw.pausa),
     prueba: raw.prueba === true,
     pruebaResultado:
       raw.pruebaResultado === "correcta" || raw.pruebaResultado === "incorrecta"
@@ -155,6 +178,9 @@ function normalizeConversation(id: string, raw: Record<string, unknown>): WaConv
     pruebaNota: raw.pruebaNota != null ? String(raw.pruebaNota).trim() || null : null,
     pruebaNotaEn: raw.pruebaNotaEn != null ? String(raw.pruebaNotaEn) : null,
     pruebaAclaraciones: normalizePruebaAclaraciones(raw.pruebaAclaraciones),
+    pruebaCreadorId: raw.pruebaCreadorId != null ? String(raw.pruebaCreadorId).trim() || null : null,
+    pruebaCreadorNombre:
+      raw.pruebaCreadorNombre != null ? String(raw.pruebaCreadorNombre).trim() || null : null,
     auditoria: normalizeAuditoria(raw.auditoria),
     createdAt: String(raw.createdAt ?? nowIso()),
     updatedAt: String(raw.updatedAt ?? nowIso()),
@@ -428,6 +454,17 @@ export async function findOrCreateOpenConversation(contactId: string): Promise<W
     intencionAbierta: null,
     intencionConcluida: false,
     intencionPropuesta: null,
+    intencionCola: [],
+    advertenciasFuera: 0,
+    derivacionPendiente: false,
+    temasAnotados: [],
+    casos: [],
+    casoActivoId: null,
+    datoPedido: null,
+    historialDatos: [],
+    pilaTemas: [],
+    ultimoResultado: null,
+    pausa: null,
     prueba: false,
     pruebaResultado: null,
     pruebaNota: null,
@@ -446,7 +483,10 @@ function numeroFicticio(n: number): string {
   return String(n).padStart(8, "0");
 }
 
-export async function createPruebaConversation(): Promise<WaConversation> {
+export async function createPruebaConversation(creador?: {
+  id?: string | null;
+  nombre?: string | null;
+}): Promise<WaConversation> {
   const seqRef = doc(firestore, "ordenes_config", "whatsapp_prueba_seq");
   const seq = await runTransaction(firestore, async (tx) => {
     const snap = await tx.get(seqRef);
@@ -521,11 +561,24 @@ export async function createPruebaConversation(): Promise<WaConversation> {
     intencionAbierta: null,
     intencionConcluida: false,
     intencionPropuesta: null,
+    intencionCola: [],
+    advertenciasFuera: 0,
+    derivacionPendiente: false,
+    temasAnotados: [],
+    casos: [],
+    casoActivoId: null,
+    datoPedido: null,
+    historialDatos: [],
+    pilaTemas: [],
+    ultimoResultado: null,
+    pausa: null,
     prueba: true,
     pruebaResultado: null,
     pruebaNota: null,
     pruebaNotaEn: null,
     pruebaAclaraciones: [],
+    pruebaCreadorId: creador?.id?.trim() || null,
+    pruebaCreadorNombre: creador?.nombre?.trim() || null,
     auditoria: [],
     createdAt: now,
     updatedAt: now,
@@ -533,6 +586,48 @@ export async function createPruebaConversation(): Promise<WaConversation> {
   batch.set(doc(firestore, CONVERSATIONS, id), conversation);
   await batch.commit();
   return { ...conversation, contact };
+}
+
+export async function listConversacionesMetricas(
+  desde: string,
+  hasta: string,
+): Promise<
+  {
+    tagIds: string[];
+    assigneeKind: "none" | "bot" | "user";
+    assigneeUserId: string | null;
+    assigneeName: string | null;
+  }[]
+> {
+  const from = Date.parse(`${desde}T00:00:00-03:00`);
+  const to = Date.parse(`${hasta}T23:59:59.999-03:00`);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
+    throw new Error("Elegí un rango de fechas válido");
+  }
+  const snap = await getDocs(collection(firestore, CONVERSATIONS));
+  const filas: {
+    tagIds: string[];
+    assigneeKind: "none" | "bot" | "user";
+    assigneeUserId: string | null;
+    assigneeName: string | null;
+  }[] = [];
+  for (const item of snap.docs) {
+    const raw = item.data();
+    if (raw.prueba === true) continue;
+    const cuando = Date.parse(String(raw.lastMessageAt || raw.createdAt || ""));
+    if (!Number.isFinite(cuando) || cuando < from || cuando > to) continue;
+    const assigneeKind =
+      raw.assigneeKind === "bot" || raw.assigneeKind === "user" ? raw.assigneeKind : "none";
+    filas.push({
+      tagIds: Array.isArray(raw.tagIds)
+        ? [...new Set(raw.tagIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+        : [],
+      assigneeKind,
+      assigneeUserId: raw.assigneeUserId != null ? String(raw.assigneeUserId) : null,
+      assigneeName: raw.assigneeName != null ? String(raw.assigneeName).trim() || null : null,
+    });
+  }
+  return filas;
 }
 
 export async function getConversation(id: string): Promise<WaConversation | null> {
@@ -761,55 +856,57 @@ export type DatosVaciosContacto = {
   email?: string;
 };
 
-/** Campos a completar. No incluye los que ya tienen valor. */
+/** Completa vacíos y pisa un dato cuando el mensaje trae otro valor. */
 export function datosVaciosParaContacto(
   existing: WaContact,
   input: DatosVaciosContacto,
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   const consulta = normalizeConsultaPara(input.consultaPara);
-  const nextConsulta = existing.consultaPara ?? consulta;
-  if (!existing.consultaPara && consulta) patch.consultaPara = consulta;
+  const nextConsulta = consulta || existing.consultaPara;
+  if (consulta && consulta !== existing.consultaPara) patch.consultaPara = consulta;
 
   if (nextConsulta === "tercero") {
     const relacion = matchRelacion(input.relacionFamiliar ?? "");
-    if (!existing.relacionFamiliar && relacion) patch.relacionFamiliar = relacion;
+    if (relacion && relacion !== (existing.relacionFamiliar ?? "")) patch.relacionFamiliar = relacion;
     const contactoNombre = input.contactoNombre?.trim() ?? "";
     const contactoApellido = input.contactoApellido?.trim() ?? "";
-    if (!existing.contactoNombre && contactoNombre) patch.contactoNombre = contactoNombre;
-    if (!existing.contactoApellido && contactoApellido) patch.contactoApellido = contactoApellido;
+    if (contactoNombre && contactoNombre !== (existing.contactoNombre ?? "").trim()) {
+      patch.contactoNombre = contactoNombre;
+    }
+    if (contactoApellido && contactoApellido !== (existing.contactoApellido ?? "").trim()) {
+      patch.contactoApellido = contactoApellido;
+    }
   }
 
   const pacienteNombre = input.pacienteNombre?.trim() ?? "";
   const pacienteApellido = input.pacienteApellido?.trim() ?? "";
-  if (!existing.firstName && pacienteNombre) {
-    patch.firstName = pacienteNombre;
-    patch.displayName = [pacienteNombre, existing.lastName || pacienteApellido]
-      .filter(Boolean)
-      .join(" ");
-  }
-  if (!existing.lastName && pacienteApellido) {
+  if (pacienteNombre && pacienteNombre !== (existing.firstName ?? "").trim()) patch.firstName = pacienteNombre;
+  if (pacienteApellido && pacienteApellido !== (existing.lastName ?? "").trim()) {
     patch.lastName = pacienteApellido;
+  }
+  if (patch.firstName || patch.lastName) {
     const first = String(patch.firstName ?? existing.firstName ?? "");
-    if (first) patch.displayName = [first, pacienteApellido].filter(Boolean).join(" ");
+    const last = String(patch.lastName ?? existing.lastName ?? "");
+    patch.displayName = [first, last].filter(Boolean).join(" ");
   }
 
   const grupo = normalizeGrupoEtario(input.grupoEtario);
-  if (!existing.grupoEtario && grupo) patch.grupoEtario = grupo;
+  if (grupo && grupo !== existing.grupoEtario) patch.grupoEtario = grupo;
   const cobertura = input.cobertura?.trim() ?? "";
-  if (!existing.cobertura && cobertura) patch.cobertura = cobertura;
+  if (cobertura && cobertura !== (existing.cobertura ?? "").trim()) patch.cobertura = cobertura;
   if (existing.esPaciente == null && input.esPaciente === "si") patch.esPaciente = true;
   if (existing.esPaciente == null && input.esPaciente === "no") patch.esPaciente = false;
   const dni = (input.dni ?? "").replace(/\D/g, "");
-  if (!existing.dni && dni.length >= 7 && dni.length <= 9) patch.dni = dni;
+  if (dni.length >= 7 && dni.length <= 9 && dni !== (existing.dni ?? "")) patch.dni = dni;
   const sexo = normalizeSexo(input.sexo);
-  if (!existing.sexo && sexo) patch.sexo = sexo;
+  if (sexo && sexo !== existing.sexo) patch.sexo = sexo;
   const email = input.email?.trim() ?? "";
-  if (!existing.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) patch.email = email;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email !== (existing.email ?? "").trim()) patch.email = email;
   return patch;
 }
 
-/** Completa solo campos vacíos. No pisa lo que ya cargó una persona. */
+/** Completa vacíos y pisa un dato cuando el mensaje trae otro valor. */
 export async function fillEmptyContactFields(
   id: string,
   input: DatosVaciosContacto,
@@ -829,14 +926,63 @@ export async function setConversationIntencion(
     intencionAbierta: string | null;
     intencionConcluida: boolean;
     intencionPropuesta: string | null;
+    intencionCola?: string[];
+    advertenciasFuera?: number;
+    derivacionPendiente?: boolean;
+    temasAnotados?: string[];
+    casos?: WaConversation["casos"];
+    casoActivoId?: string | null;
+    datoPedido?: string | null;
+    historialDatos?: WaConversation["historialDatos"];
+    pilaTemas?: WaConversation["pilaTemas"];
+    ultimoResultado?: WaConversation["ultimoResultado"];
+    pausa?: WaConversation["pausa"];
   },
 ): Promise<void> {
   await updateDoc(doc(firestore, CONVERSATIONS, id), {
     intencionAbierta: input.intencionAbierta,
     intencionConcluida: input.intencionConcluida,
     intencionPropuesta: input.intencionPropuesta,
+    intencionCola: (input.intencionCola ?? []).slice(0, 6),
+    advertenciasFuera: input.advertenciasFuera ?? 0,
+    derivacionPendiente: input.derivacionPendiente === true,
+    temasAnotados: (input.temasAnotados ?? []).slice(0, 8),
+    casos: normalizarCasos(input.casos),
+    casoActivoId: input.casoActivoId ?? null,
+    datoPedido: input.datoPedido ?? null,
+    historialDatos: normalizarHistorial(input.historialDatos),
+    pilaTemas: normalizarPila(input.pilaTemas),
+    ultimoResultado: input.ultimoResultado ?? null,
+    pausa: input.pausa ?? null,
     updatedAt: nowIso(),
   });
+}
+
+export async function replaceContactPatientFields(
+  id: string,
+  input: WaFichaCaso,
+): Promise<WaContact | null> {
+  const existing = await getContact(id);
+  if (!existing) return null;
+  const nombre = input.pacienteNombre.trim();
+  const apellido = input.pacienteApellido.trim();
+  const grupo = input.grupoEtario === "infanto" || input.grupoEtario === "adulto" ? input.grupoEtario : null;
+  const sexo = input.sexo === "masculino" || input.sexo === "femenino" ? input.sexo : null;
+  const consulta = input.consultaPara === "propio" || input.consultaPara === "tercero" ? input.consultaPara : null;
+  await updateDoc(doc(firestore, CONTACTS, id), {
+    firstName: nombre || null,
+    lastName: apellido || null,
+    displayName: [nombre, apellido].filter(Boolean).join(" ") || null,
+    consultaPara: consulta,
+    relacionFamiliar: input.relacionFamiliar.trim() || null,
+    contactoNombre: input.contactoNombre.trim() || null,
+    contactoApellido: input.contactoApellido.trim() || null,
+    grupoEtario: grupo,
+    dni: input.dni.trim() || null,
+    sexo,
+    updatedAt: nowIso(),
+  });
+  return getContact(id);
 }
 
 export async function setConversationResumen(
@@ -1013,14 +1159,15 @@ export async function createMessage(input: {
   const { mediaUrl: _mediaUrl, ...toStore } = message;
   await setDoc(doc(firestore, MESSAGES, id), toStore);
 
-  const unreadInc = input.direction === "INBOUND" ? 1 : 0;
   const convSnap = await getDoc(doc(firestore, CONVERSATIONS, input.conversationId));
-  const prevUnread = Number(convSnap.data()?.unreadCount ?? 0) || 0;
+  const convData = convSnap.data();
+  const esPrueba = convData?.prueba === true;
+  const prevUnread = Number(convData?.unreadCount ?? 0) || 0;
   await updateDoc(doc(firestore, CONVERSATIONS, input.conversationId), {
     lastMessagePreview: input.text.slice(0, 200),
     lastMessageAt: createdAt,
     updatedAt: nowIso(),
-    unreadCount: input.direction === "INBOUND" ? prevUnread + unreadInc : prevUnread,
+    unreadCount: esPrueba ? 0 : input.direction === "INBOUND" ? prevUnread + 1 : prevUnread,
   });
 
   return message;

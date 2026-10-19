@@ -35,9 +35,10 @@ import {
   createPruebaConversation,
   sendPruebaInbound,
 } from "../whatsapp/runtime.js";
-import { setPruebaNota, updateContact } from "../whatsapp/firestore-store.js";
+import { listConversacionesMetricas, setPruebaNota, updateContact } from "../whatsapp/firestore-store.js";
 import { listLlmUsageByConversation } from "../whatsapp/llm-usage.js";
 import { getAccesosRapidos, saveAccesosRapidos } from "../whatsapp/accesos-rapidos.js";
+import { getMetricaTablero, saveMetricaTablero } from "../whatsapp/metricas-tablero.js";
 import {
   createWhatsappTag,
   createWhatsappTagGroup,
@@ -536,9 +537,12 @@ router.patch("/contacts/:id", async (req, res) => {
   }
 });
 
-router.post("/pruebas", async (_req, res) => {
+router.post("/pruebas", async (req: AuthedRequest, res) => {
   try {
-    const data = await createPruebaConversation();
+    const data = await createPruebaConversation({
+      id: req.user?.id ?? "",
+      nombre: req.user?.nombre?.trim() || req.user?.email || "",
+    });
     res.status(201).json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudo crear la prueba");
@@ -569,6 +573,65 @@ router.post("/pruebas/:id/nota", async (req, res) => {
     res.json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudo guardar la nota");
+  }
+});
+
+router.get("/metricas-tablero", async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.id?.trim() ?? "";
+    if (!userId) {
+      res.status(401).json({ ok: false, message: "No autenticado" });
+      return;
+    }
+    const data = await getMetricaTablero(userId);
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo leer el tablero");
+  }
+});
+
+router.put("/metricas-tablero", async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.id?.trim() ?? "";
+    if (!userId) {
+      res.status(401).json({ ok: false, message: "No autenticado" });
+      return;
+    }
+    const data = await saveMetricaTablero(userId, req.body?.agrupaciones);
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar el tablero");
+  }
+});
+
+router.get("/metricas", async (req, res) => {
+  try {
+    const desde = typeof req.query.desde === "string" ? req.query.desde.trim() : "";
+    const hasta = typeof req.query.hasta === "string" ? req.query.hasta.trim() : "";
+    const [filas, catalogo] = await Promise.all([
+      listConversacionesMetricas(desde, hasta),
+      listWhatsappTagCatalog(),
+    ]);
+    res.json({
+      ok: true,
+      data: {
+        filas,
+        grupos: catalogo.groups.map((group) => ({
+          id: group.id,
+          name: group.name,
+          color: group.color,
+        })),
+        etiquetas: catalogo.items.map((tag) => ({
+          id: tag.id,
+          name: tag.name,
+          groupId: tag.groupId,
+        })),
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudieron leer las métricas";
+    const status = message.includes("fechas") ? 400 : 500;
+    res.status(status).json({ ok: false, message });
   }
 });
 

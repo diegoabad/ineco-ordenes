@@ -64,6 +64,7 @@
 }
 
 .fl-date-picker__icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -155,6 +156,7 @@
 }
 
 .fl-date-picker__nav {
+  position: relative;
   width: 2rem;
   height: 2rem;
   padding: 0;
@@ -261,6 +263,18 @@
 .fl-date-picker--compact .fl-date-picker__icon-btn svg {
   width: clamp(0.68rem, 0.64rem + 0.07vw, 0.78rem);
   height: clamp(0.68rem, 0.64rem + 0.07vw, 0.78rem);
+}
+
+.fl-date-picker__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .fl-date-picker__popover--compact {

@@ -681,3 +681,66 @@ export async function deleteIntencion(id: string): Promise<void> {
     { method: "DELETE" },
   );
 }
+
+export type WaMetricaFila = {
+  tagIds: string[];
+  assigneeKind: "none" | "bot" | "user";
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+};
+
+export type WaMetricas = {
+  filas: WaMetricaFila[];
+  grupos: { id: string; name: string; color: string }[];
+  etiquetas: { id: string; name: string; groupId: string }[];
+};
+
+export type WaMetricaContador = {
+  id: string;
+  nombre: string;
+  color: string;
+  modo: "etiquetas" | "grupo";
+  tagIds: string[];
+  groupId: string | null;
+};
+
+export type WaMetricaAgrupacion = {
+  id: string;
+  nombre: string;
+  contadores: WaMetricaContador[];
+};
+
+export type WaMetricaTablero = {
+  agrupaciones: WaMetricaAgrupacion[];
+};
+
+export async function fetchWaMetricaTablero(): Promise<WaMetricaTablero> {
+  const res = await apiFetch<{ ok: boolean; data: WaMetricaTablero }>(
+    "/api/whatsapp-crm/metricas-tablero",
+  );
+  return {
+    agrupaciones: Array.isArray(res.data?.agrupaciones) ? res.data.agrupaciones : [],
+  };
+}
+
+export async function saveWaMetricaTablero(agrupaciones: WaMetricaAgrupacion[]): Promise<WaMetricaTablero> {
+  const res = await apiFetch<{ ok: boolean; data: WaMetricaTablero }>(
+    "/api/whatsapp-crm/metricas-tablero",
+    { method: "PUT", body: JSON.stringify({ agrupaciones }) },
+  );
+  return {
+    agrupaciones: Array.isArray(res.data?.agrupaciones) ? res.data.agrupaciones : [],
+  };
+}
+
+export async function fetchWaMetricas(desde: string, hasta: string): Promise<WaMetricas> {
+  const params = new URLSearchParams({ desde, hasta });
+  const res = await apiFetch<{ ok: boolean; data: WaMetricas }>(
+    `/api/whatsapp-crm/metricas?${params.toString()}`,
+  );
+  return {
+    filas: Array.isArray(res.data?.filas) ? res.data.filas : [],
+    grupos: Array.isArray(res.data?.grupos) ? res.data.grupos : [],
+    etiquetas: Array.isArray(res.data?.etiquetas) ? res.data.etiquetas : [],
+  };
+}

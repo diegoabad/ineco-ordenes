@@ -1,3 +1,11 @@
+import type {
+  WaCasoTurno,
+  WaEventoDato,
+  WaPausaDialogo,
+  WaResultadoAccion,
+  WaTemaPila,
+} from "./estado-dialogo.js";
+
 export type WaConnectionStatus =
   | "DISCONNECTED"
   | "CONNECTING"
@@ -84,6 +92,21 @@ export type WaConversation = {
   intencionConcluida: boolean;
   /** Otra intención detectada mientras la abierta no está concluida. */
   intencionPropuesta: string | null;
+  /** Trámites más largos, en orden, para seguir cuando se cierra el de ahora. */
+  intencionCola?: string[];
+  /** Veces seguidas que escribió algo que no es de INECO. A la segunda se deriva. */
+  advertenciasFuera?: number;
+  /** Un tema quedó para el equipo y el bot sigue si hay otra consulta. */
+  derivacionPendiente?: boolean;
+  /** Pedidos distintos aunque compartan la misma intención: dos turnos, dos tratamientos. */
+  temasAnotados?: string[];
+  casos?: WaCasoTurno[];
+  casoActivoId?: string | null;
+  datoPedido?: string | null;
+  historialDatos?: WaEventoDato[];
+  pilaTemas?: WaTemaPila[];
+  ultimoResultado?: WaResultadoAccion | null;
+  pausa?: WaPausaDialogo | null;
   /** Charla local, con número ficticio. No sale por WhatsApp. */
   prueba: boolean;
   /** correctá o incorrecta, según la revisión de la prueba. */
@@ -92,7 +115,10 @@ export type WaConversation = {
   pruebaNota: string | null;
   pruebaNotaEn: string | null;
   /** Aclaración por cada mensaje enviado a la IA que se marcó mal. */
-  pruebaAclaraciones: WaPruebaAclaracion[];
+    pruebaAclaraciones: WaPruebaAclaracion[];
+  /** Quien abrió la prueba. */
+  pruebaCreadorId?: string | null;
+  pruebaCreadorNombre?: string | null;
   /** Una entrada por turno, para revisar qué detectó el bot. */
   auditoria: WaAuditoriaPaso[];
   createdAt: string;

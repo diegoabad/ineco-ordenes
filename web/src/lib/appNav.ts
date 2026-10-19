@@ -12,6 +12,7 @@ export type PamiSection = "historial" | "analisis";
 export type BuscaTurnoSection = "turnos" | "config";
 export type WhatsappSection =
   | "conversaciones"
+  | "metricas"
   | "prueba"
   | "contactos"
   | "operadoras"
@@ -72,6 +73,7 @@ export const BUSCA_TURNO_SECTIONS: { id: BuscaTurnoSection; label: string }[] = 
 
 export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "conversaciones", label: "Conversaciones" },
+  { id: "metricas", label: "Métricas" },
   { id: "prueba", label: "Prueba" },
   { id: "contactos", label: "Contactos" },
   { id: "operadoras", label: "Operadoras" },

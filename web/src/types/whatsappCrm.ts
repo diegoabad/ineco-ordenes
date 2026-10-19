@@ -51,11 +51,20 @@ export type WaConversation = {
   intencionAbierta?: string | null;
   intencionConcluida?: boolean;
   intencionPropuesta?: string | null;
+  intencionCola?: string[];
+  advertenciasFuera?: number;
+  derivacionPendiente?: boolean;
+  temasAnotados?: string[];
+  casos?: { id: string; etiqueta: string; estado: string }[];
+  casoActivoId?: string | null;
+  datoPedido?: string | null;
   prueba?: boolean;
   pruebaResultado?: "correcta" | "incorrecta" | null;
   pruebaNota?: string | null;
   pruebaNotaEn?: string | null;
   pruebaAclaraciones?: { messageId: string; texto: string }[];
+  pruebaCreadorId?: string | null;
+  pruebaCreadorNombre?: string | null;
   auditoria?: {
     en: string;
     intencion: string;
@@ -153,6 +162,14 @@ export function waContactLabel(contact?: WaContact | null): string {
   if (full) return full;
   if (contact.whatsappName?.trim()) return contact.whatsappName.trim();
   return contact.phoneNumber || "Contacto";
+}
+
+export function waPruebaTitulo(contact?: WaContact | null): string {
+  const phone = String(contact?.phoneNumber ?? "").replace(/\D/g, "");
+  if (/^(\d)\1{7}$/.test(phone)) return `Prueba ${phone[0]}`;
+  const numero = Number(phone);
+  if (phone && Number.isFinite(numero) && numero > 0) return `Prueba ${numero}`;
+  return "Prueba";
 }
 
 /** Nombre del paciente (datos clínicos / agenda). */
