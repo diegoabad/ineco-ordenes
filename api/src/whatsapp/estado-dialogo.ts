@@ -13,7 +13,7 @@ export type WaFichaCaso = {
 export type WaCasoTurno = WaFichaCaso & {
   id: string;
   etiqueta: string;
-  estado: "juntando" | "fallo" | "derivado";
+  estado: "juntando" | "completo" | "fallo" | "derivado";
 };
 
 export type WaEventoDato = {
@@ -34,6 +34,16 @@ export type WaResultadoAccion = {
   accion: string;
   ok: boolean;
   motivo: string;
+  /** Próximo día a buscar, sin repetir los anteriores. */
+  hastaDia?: number;
+  /** Profesional y prestación de esa búsqueda. */
+  busqueda?: string;
+  /** Horarios ya encontrados, para sumarlos al ampliar. */
+  horarios?: string;
+  /** anular o cambiar, mientras se elige y se confirma ese turno. */
+  objetivo?: string;
+  /** Turno ya confirmado para anular cuando el nuevo quede dado. */
+  anularLuego?: string;
 };
 
 export type WaPausaDialogo = {
@@ -392,7 +402,8 @@ export function normalizarCasos(value: unknown): WaCasoTurno[] {
       if (!id || !etiqueta) return null;
       const base = fichaVacia();
       for (const campo of CAMPOS) base[campo] = String(item[campo] ?? "").trim();
-      const estado = item.estado === "fallo" || item.estado === "derivado" ? item.estado : "juntando";
+      const estado =
+        item.estado === "fallo" || item.estado === "derivado" || item.estado === "completo" ? item.estado : "juntando";
       return { ...base, id, etiqueta, estado } satisfies WaCasoTurno;
     })
     .filter((caso): caso is WaCasoTurno => caso !== null)
@@ -442,7 +453,21 @@ export function normalizarResultado(value: unknown): WaResultadoAccion | null {
   const item = value as Record<string, unknown>;
   const accion = String(item.accion ?? "").trim();
   if (!accion) return null;
-  return { accion, ok: item.ok === true, motivo: String(item.motivo ?? "").slice(0, 240) };
+  const hasta = Number(item.hastaDia);
+  const busqueda = String(item.busqueda ?? "").trim();
+  const horarios = String(item.horarios ?? "").trim();
+  const objetivo = String(item.objetivo ?? "").trim();
+  const anularLuego = String(item.anularLuego ?? "").trim();
+  return {
+    accion,
+    ok: item.ok === true,
+    motivo: String(item.motivo ?? "").slice(0, 1500),
+    ...(Number.isFinite(hasta) && hasta > 0 ? { hastaDia: hasta } : {}),
+    ...(busqueda ? { busqueda } : {}),
+    ...(horarios ? { horarios: horarios.slice(0, 4000) } : {}),
+    ...(objetivo === "anular" || objetivo === "cambiar" ? { objetivo } : {}),
+    ...(anularLuego ? { anularLuego: anularLuego.slice(0, 400) } : {}),
+  };
 }
 
 export function normalizarPausa(value: unknown): WaPausaDialogo | null {
