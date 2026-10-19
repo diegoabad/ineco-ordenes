@@ -74,7 +74,7 @@ export const BUSCA_TURNO_SECTIONS: { id: BuscaTurnoSection; label: string }[] = 
 export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "conversaciones", label: "Conversaciones" },
   { id: "metricas", label: "Métricas" },
-  { id: "prueba", label: "Prueba" },
+  { id: "prueba", label: "Prueba IA" },
   { id: "contactos", label: "Contactos" },
   { id: "operadoras", label: "Operadoras" },
   { id: "etiquetas", label: "Etiquetas" },
