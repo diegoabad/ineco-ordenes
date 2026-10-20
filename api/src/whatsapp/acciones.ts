@@ -1,5 +1,6 @@
 import { getBuscaTurnoConfig } from "../services/db.service.js";
 import type { BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional } from "../types.js";
+import { documentoDePersona } from "./estado-dialogo.js";
 import { detalle, medexisPost } from "./medexis-client.js";
 
 export type AccionClave =
@@ -138,6 +139,10 @@ export function textoAcciones(): string {
 
 function solo(texto: string): SalidaAccion {
   return { texto };
+}
+
+export async function consultarPaciente(dni: string): Promise<{ texto: string; ficha: FichaPersona }> {
+  return leerPersona(dni.replace(/\D/g, ""));
 }
 
 export async function ejecutarAccion(
@@ -455,7 +460,9 @@ function profesionalesNombrados(config: BuscaTurnoConfig, consulta: string, pers
     Object.entries(config.prestaciones).flatMap(([codigo, item]) => tokens(`${item.nombre} ${codigo}`)),
   );
   const origen = persona.trim() ? persona : consulta;
-  const pedidos = tokens(origen).filter((token) => token.length >= 3 && !deTratamiento.has(token));
+  const pedidos = tokens(origen).filter(
+    (token) => token.length >= 3 && !/^\d+$/.test(token) && !deTratamiento.has(token),
+  );
   if (!pedidos.length) return [];
   if (pedidos.some((token) => ![...deAlguien].some((nombre) => tokenParecido(token, nombre)))) return [];
   let candidatos = lista;
@@ -575,11 +582,24 @@ function horaLocal(cuando: Date): string {
 const BLOQUE = 20;
 const TOPE_DIAS = 120;
 
+/** Igual que Busca Turno: Medexis no filtra la modalidad en Disponible. Virtual es el edificio. */
+export function esSlotVirtual(row: Record<string, unknown>): boolean {
+  const edificio = String(row.edificio ?? row.Edificio ?? "");
+  return /video\s*-?\s*consulta\s*medexis/i.test(edificio);
+}
+
+export function modalidadDePrestacion(nombre: string): "virtual" | "presencial" {
+  const texto = norm(nombre);
+  if (/\bonline\b|\bvirtual\b|\bvideoconsulta\b|\bvideo consulta\b/.test(texto)) return "virtual";
+  return "presencial";
+}
+
 async function diasLibres(
-  par: { codigo: string; profesional: BuscaTurnoProfesional },
+  par: { codigo: string; prestacion: BuscaTurnoPrestacion; profesional: BuscaTurnoProfesional },
   desde: number,
   hasta: number,
 ): Promise<{ cuando: Date; texto: string }[]> {
+  const modalidad = modalidadDePrestacion(par.prestacion.nombre || par.codigo);
   const vistos = new Set<string>();
   const libres: { cuando: Date; texto: string }[] = [];
   const listas = await Promise.all(
@@ -611,6 +631,8 @@ async function diasLibres(
     for (const item of lista) {
       if (!item || typeof item !== "object") continue;
       const row = item as Record<string, unknown>;
+      const virtual = esSlotVirtual(row);
+      if (modalidad === "virtual" ? !virtual : virtual) continue;
       const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || "");
       const cuando = new Date(crudo);
       if (!crudo || Number.isNaN(cuando.getTime()) || vistos.has(crudo)) continue;
@@ -623,7 +645,8 @@ async function diasLibres(
         hour: "2-digit",
         minute: "2-digit",
       }).format(cuando);
-      libres.push({ cuando, texto: `${hora} (${horaLocal(cuando)})` });
+      const modo = virtual ? "virtual" : "presencial";
+      libres.push({ cuando, texto: `${hora}, ${modo} (${horaLocal(cuando)})` });
     }
   }
   libres.sort((a, b) => a.cuando.getTime() - b.cuando.getTime());
@@ -807,12 +830,9 @@ function unirHorarios(previas: string[], nuevas: string[]): string[] {
 
 /** DNI de la ficha o dicho en el mensaje. No usa el documento de un profesional, que viene entre paréntesis. */
 function dniDicho(consulta: string, ctxDni: string): string {
-  const propio = ctxDni.replace(/\D/g, "");
-  if (propio.length >= 7 && propio.length <= 9) return propio;
-  const explicito = consulta.match(/\bdni\D{0,8}(\d{7,9})\b/i);
-  if (explicito?.[1]) return explicito[1];
-  const sueltos = [...consulta.matchAll(/(^|[^\d(])(\d{7,9})(?!\d)/g)].map((item) => item[2] ?? "");
-  return sueltos.length === 1 ? sueltos[0]! : "";
+  const propio = documentoDePersona(ctxDni);
+  if (propio) return propio;
+  return documentoDePersona(consulta);
 }
 
 function horaPedida(consulta: string): string {
@@ -843,7 +863,7 @@ export function textoOpcionInvalida(texto: string, previo: string): string {
   if (opciones.length < 2) return "";
   const t = sinTildes(texto);
   if (/\bprimer[ao]?\b|\bsegund[ao]\b|\btercer[ao]?\b|\bcuart[ao]\b|\bquint[ao]\b/.test(t)) return "";
-  if (/\bdni\b/.test(t) || /\b\d{7,9}\b/.test(texto)) return "";
+  if (/\bdni\b/.test(t) || documentoDePersona(texto)) return "";
   const valida = opciones.some((linea) => {
     const hora = linea.match(/\d{1,2}:\d{2}/);
     if (hora?.[0] && t.includes(hora[0])) return true;
@@ -941,7 +961,7 @@ async function cancelarTurno(
   const cuando = horaPedida(consulta);
   if (!cuando) return "No hay un turno dado en esta charla para cancelar.";
   const dni = dniDicho(consulta, ctx.dni || "");
-  if (dni.length < 7) return "Falta el DNI del turno a cancelar.";
+  if (!dni) return "Falta el DNI del turno a cancelar.";
   const data = await medexisPost("api/Turno", {
     query: { Fecha: cuando.slice(0, 10), PrestadorDocumento: String(profesional.doc) },
   });
@@ -999,7 +1019,7 @@ async function turnosDelPaciente(
   config: BuscaTurnoConfig | null,
 ): Promise<string> {
   const dni = dniDicho(consulta, ctx.dni || "");
-  if (dni.length < 7) return "Falta el DNI del paciente para buscar sus turnos.";
+  if (!dni) return "Falta el DNI del paciente para buscar sus turnos.";
   const data = await medexisPost("api/Turno", {
     query: {
       PersonaDocumento: dni,

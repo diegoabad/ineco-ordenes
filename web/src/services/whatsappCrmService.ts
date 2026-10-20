@@ -348,6 +348,7 @@ export async function fetchWaConversations(params?: {
   dateFrom?: string;
   dateTo?: string;
   prueba?: boolean;
+  motor?: "ia" | "menu";
 }): Promise<WaConversationListPage> {
   const q = new URLSearchParams();
   if (params?.search?.trim()) q.set("search", params.search.trim());
@@ -359,6 +360,7 @@ export async function fetchWaConversations(params?: {
   if (params?.dateFrom?.trim()) q.set("dateFrom", params.dateFrom.trim());
   if (params?.dateTo?.trim()) q.set("dateTo", params.dateTo.trim());
   if (params?.prueba) q.set("prueba", "1");
+  if (params?.prueba && params.motor === "menu") q.set("motor", "menu");
   const qs = q.toString();
   const res = await apiFetch<{
     ok: boolean;
@@ -431,9 +433,10 @@ export async function fetchWaLlmUsage(conversationId: string): Promise<WaLlmUsag
   return Array.isArray(res.items) ? res.items : [];
 }
 
-export async function createWaPrueba(): Promise<WaConversation> {
+export async function createWaPrueba(motor: "ia" | "menu" = "ia"): Promise<WaConversation> {
   const res = await apiFetch<{ ok: boolean; data: WaConversation }>("/api/whatsapp-crm/pruebas", {
     method: "POST",
+    body: JSON.stringify({ motor }),
   });
   return res.data;
 }

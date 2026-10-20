@@ -74,6 +74,57 @@ export type WaPruebaAclaracion = {
   texto: string;
 };
 
+export type MenuPaso =
+  | "sede"
+  | "menu"
+  | "turnos"
+  | "info"
+  | "infoTema"
+  | "queja"
+  | "dni"
+  | "nombre"
+  | "apellido"
+  | "sexo"
+  | "email"
+  | "profesional"
+  | "tratamiento"
+  | "horarios"
+  | "elegirTurno"
+  | "confirmar";
+
+export type MenuModo =
+  | ""
+  | "sacar"
+  | "ver"
+  | "cancelar"
+  | "cambiar"
+  | "sucursales"
+  | "coberturas"
+  | "profesionales"
+  | "tratamientos"
+  | "institucion"
+  | "queja";
+
+export type MenuEstado = {
+  paso: MenuPaso;
+  modo: MenuModo;
+  dni: string;
+  nombre: string;
+  apellido: string;
+  sexo: "" | "masculino" | "femenino";
+  email: string;
+  esPaciente: "" | "si" | "no";
+  profesional: string;
+  tratamiento: string;
+  pendiente: string;
+  opciones: string[];
+  horarios: string;
+  hastaDia: number;
+  busqueda: string;
+  anularLuego: string;
+  pila: { paso: MenuPaso; opciones: string[] }[];
+};
+
 export type WaConversation = {
   id: string;
   contactId: string;
@@ -109,6 +160,12 @@ export type WaConversation = {
   pausa?: WaPausaDialogo | null;
   /** Charla local, con número ficticio. No sale por WhatsApp. */
   prueba: boolean;
+  /** ia: el bot con modelo. menu: el bot de opciones, sin modelo. */
+  pruebaMotor?: "ia" | "menu";
+  /** Paso del bot de opciones. */
+  menuPaso?: string | null;
+  /** Datos que el bot de opciones ya juntó, un campo por vez. */
+  menuEstado?: MenuEstado | null;
   /** correctá o incorrecta, según la revisión de la prueba. */
   pruebaResultado: "correcta" | "incorrecta" | null;
   /** Resumen de las aclaraciones, para lecturas viejas. */

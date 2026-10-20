@@ -14,7 +14,10 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { documentoDePersona } from "./estado-dialogo.js";
 import type {
+  MenuEstado,
+  MenuPaso,
   WaContact,
   WaContactConsultaPara,
   WaContactGrupoEtario,
@@ -89,6 +92,89 @@ function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
     lastInteractionAt: raw.lastInteractionAt != null ? String(raw.lastInteractionAt) : null,
     createdAt: String(raw.createdAt ?? nowIso()),
     updatedAt: String(raw.updatedAt ?? nowIso()),
+  };
+}
+
+function menuPasoDe(raw: unknown): MenuPaso | null {
+  const paso = String(raw ?? "");
+  const validos: MenuPaso[] = [
+    "sede",
+    "menu",
+    "turnos",
+    "info",
+    "infoTema",
+    "queja",
+    "dni",
+    "nombre",
+    "apellido",
+    "sexo",
+    "email",
+    "profesional",
+    "tratamiento",
+    "horarios",
+    "elegirTurno",
+    "confirmar",
+  ];
+  return validos.includes(paso as MenuPaso) ? (paso as MenuPaso) : null;
+}
+
+function normalizarMenuEstado(raw: unknown, pasoRaw: unknown): MenuEstado | null {
+  const paso = menuPasoDe(
+    raw && typeof raw === "object" ? (raw as { paso?: unknown }).paso : pasoRaw,
+  );
+  if (!paso) return null;
+  const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const sexo = row.sexo === "femenino" || row.sexo === "masculino" ? row.sexo : "";
+  const modos = [
+    "sacar",
+    "ver",
+    "cancelar",
+    "cambiar",
+    "sucursales",
+    "coberturas",
+    "profesionales",
+    "tratamientos",
+    "institucion",
+    "queja",
+  ];
+  const modo = modos.includes(String(row.modo)) ? (row.modo as MenuEstado["modo"]) : "";
+  const esPaciente = row.esPaciente === "si" || row.esPaciente === "no" ? row.esPaciente : "";
+  const pila = Array.isArray(row.pila)
+    ? row.pila.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const fila = item as { paso?: unknown; opciones?: unknown };
+        const pasoPila = menuPasoDe(fila.paso);
+        if (!pasoPila) return [];
+        return [
+          {
+            paso: pasoPila,
+            opciones: Array.isArray(fila.opciones)
+              ? fila.opciones.map((opcion) => String(opcion ?? "").trim()).filter(Boolean).slice(0, 20)
+              : [],
+          },
+        ];
+      }).slice(-8)
+    : [];
+  return {
+    paso,
+    modo,
+    dni: documentoDePersona(String(row.dni ?? "")) || String(row.dni ?? "").replace(/[\s.\-_/]/g, "").toUpperCase().slice(0, 15),
+    nombre: String(row.nombre ?? "").trim().slice(0, 80),
+    apellido: String(row.apellido ?? "").trim().slice(0, 80),
+    sexo,
+    email: String(row.email ?? "").trim().slice(0, 120),
+    esPaciente,
+    profesional: String(row.profesional ?? "").trim().slice(0, 120),
+    tratamiento: String(row.tratamiento ?? "").trim().slice(0, 160),
+    pendiente: String(row.pendiente ?? "").trim().slice(0, 500),
+    opciones: Array.isArray(row.opciones)
+      ? row.opciones.map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, 20)
+      : [],
+    horarios: String(row.horarios ?? "").slice(0, 4000),
+    hastaDia: Number(row.hastaDia ?? 0) || 0,
+    busqueda: String(row.busqueda ?? "").slice(0, 80),
+    anularLuego: String(row.anularLuego ?? "").slice(0, 400),
+    pila,
   };
 }
 
@@ -169,6 +255,9 @@ function normalizeConversation(id: string, raw: Record<string, unknown>): WaConv
     ultimoResultado: normalizarResultado(raw.ultimoResultado),
     pausa: normalizarPausa(raw.pausa),
     prueba: raw.prueba === true,
+    pruebaMotor: raw.pruebaMotor === "menu" ? "menu" : "ia",
+    menuPaso: menuPasoDe(raw.menuPaso),
+    menuEstado: normalizarMenuEstado(raw.menuEstado, raw.menuPaso),
     pruebaResultado:
       raw.pruebaResultado === "correcta" || raw.pruebaResultado === "incorrecta"
         ? raw.pruebaResultado
@@ -466,6 +555,9 @@ export async function findOrCreateOpenConversation(contactId: string): Promise<W
     ultimoResultado: null,
     pausa: null,
     prueba: false,
+    pruebaMotor: "ia",
+    menuPaso: null,
+    menuEstado: null,
     pruebaResultado: null,
     pruebaNota: null,
     pruebaNotaEn: null,
@@ -483,10 +575,13 @@ function numeroFicticio(n: number): string {
   return String(n).padStart(8, "0");
 }
 
-export async function createPruebaConversation(creador?: {
-  id?: string | null;
-  nombre?: string | null;
-}): Promise<WaConversation> {
+export async function createPruebaConversation(
+  creador?: {
+    id?: string | null;
+    nombre?: string | null;
+  },
+  motor: "ia" | "menu" = "ia",
+): Promise<WaConversation> {
   const seqRef = doc(firestore, "ordenes_config", "whatsapp_prueba_seq");
   const seq = await runTransaction(firestore, async (tx) => {
     const snap = await tx.get(seqRef);
@@ -573,6 +668,9 @@ export async function createPruebaConversation(creador?: {
     ultimoResultado: null,
     pausa: null,
     prueba: true,
+    pruebaMotor: motor,
+    menuPaso: null,
+    menuEstado: null,
     pruebaResultado: null,
     pruebaNota: null,
     pruebaNotaEn: null,
@@ -664,6 +762,7 @@ export async function listConversations(opts?: {
   dateFrom?: string;
   dateTo?: string;
   prueba?: boolean;
+  pruebaMotor?: "ia" | "menu";
 }): Promise<ConversationListResult> {
   const status = opts?.status?.trim() || "OPEN";
   const pageSize = Math.min(Math.max(Number(opts?.limit ?? 40) || 40, 1), 100);
@@ -673,6 +772,10 @@ export async function listConversations(opts?: {
   let items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
   const onlyPrueba = opts?.prueba === true;
   items = items.filter((item) => item.prueba === onlyPrueba);
+  if (onlyPrueba) {
+    const motor = opts?.pruebaMotor === "menu" ? "menu" : "ia";
+    items = items.filter((item) => (item.pruebaMotor === "menu" ? "menu" : "ia") === motor);
+  }
   items.sort((a, b) => {
     const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
     const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
@@ -897,8 +1000,8 @@ export function datosVaciosParaContacto(
   if (cobertura && cobertura !== (existing.cobertura ?? "").trim()) patch.cobertura = cobertura;
   if (existing.esPaciente == null && input.esPaciente === "si") patch.esPaciente = true;
   if (existing.esPaciente == null && input.esPaciente === "no") patch.esPaciente = false;
-  const dni = (input.dni ?? "").replace(/\D/g, "");
-  if (dni.length >= 7 && dni.length <= 9 && dni !== (existing.dni ?? "")) patch.dni = dni;
+  const dni = documentoDePersona(input.dni ?? "");
+  if (dni && dni !== (existing.dni ?? "").replace(/[\s.\-_/]/g, "").toUpperCase()) patch.dni = dni;
   const sexo = normalizeSexo(input.sexo);
   if (sexo && sexo !== existing.sexo) patch.sexo = sexo;
   const email = input.email?.trim() ?? "";
@@ -1051,6 +1154,16 @@ export async function setConversationTags(
   const patch = { tagIds: unique, updatedAt: now };
   await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
   return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+export async function setConversationMenu(id: string, estado: MenuEstado): Promise<void> {
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return;
+  await updateDoc(doc(firestore, CONVERSATIONS, id), {
+    menuPaso: estado.paso,
+    menuEstado: estado,
+    updatedAt: nowIso(),
+  });
 }
 
 export async function findMessageByExternalId(externalMessageId: string): Promise<WaMessage | null> {

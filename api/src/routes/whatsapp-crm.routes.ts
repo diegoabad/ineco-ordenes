@@ -539,10 +539,21 @@ router.patch("/contacts/:id", async (req, res) => {
 
 router.post("/pruebas", async (req: AuthedRequest, res) => {
   try {
-    const data = await createPruebaConversation({
-      id: req.user?.id ?? "",
-      nombre: req.user?.nombre?.trim() || req.user?.email || "",
-    });
+    const motor = req.body?.motor === "menu" ? "menu" : "ia";
+    const data = await createPruebaConversation(
+      {
+        id: req.user?.id ?? "",
+        nombre: req.user?.nombre?.trim() || req.user?.email || "",
+      },
+      motor,
+    );
+    if (motor === "menu") {
+      const { abrirBotMenu } = await import("../whatsapp/bot-menu.js");
+      await abrirBotMenu(data.id);
+      const refreshed = await getConversation(data.id);
+      res.status(201).json({ ok: true, data: refreshed ?? data });
+      return;
+    }
     res.status(201).json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudo crear la prueba");
@@ -666,6 +677,7 @@ router.get("/conversations", async (req, res) => {
       dateFrom,
       dateTo,
       prueba: req.query.prueba === "1" || req.query.prueba === "true",
+      pruebaMotor: req.query.motor === "menu" ? "menu" : req.query.prueba === "1" || req.query.prueba === "true" ? "ia" : undefined,
     });
     res.json({ ok: true, data: data.items, total: data.total, hasMore: data.hasMore, nextOffset: data.nextOffset });
   } catch (error) {

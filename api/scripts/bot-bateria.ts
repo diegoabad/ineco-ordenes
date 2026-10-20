@@ -246,6 +246,7 @@ function sesion(caso: Caso, nombresEtiqueta: Map<string, string>) {
         conversation.contact?.grupoEtario,
         conversation.contact?.dni,
         conversation.contact?.sexo,
+        conversation.contact?.email,
         conversation.contact?.consultaPara,
       ]
         .filter(Boolean)

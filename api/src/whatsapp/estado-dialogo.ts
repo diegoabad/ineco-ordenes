@@ -271,6 +271,25 @@ export function precargarCaso(
   }
 }
 
+/** Documento de la persona: DNI con o sin puntos, más corto, o de otro país. */
+export function documentoDePersona(texto: string): string {
+  const sinParentesis = texto.replace(/\([^)]*\)/g, " ");
+  const sirve = (valor: string): string => {
+    const compacto = valor.replace(/[\s.\-_/]/g, "").toUpperCase();
+    if (!/^[A-Z0-9]{5,15}$/.test(compacto)) return "";
+    const digitos = compacto.replace(/\D/g, "");
+    if (!digitos) return "";
+    if (/^\d+$/.test(compacto)) return digitos.length <= 12 ? compacto : "";
+    if (digitos.length < 3) return "";
+    return compacto;
+  };
+  for (const parte of sinParentesis.split(/[\s,;:]+/)) {
+    const doc = sirve(parte);
+    if (doc) return doc;
+  }
+  return "";
+}
+
 export function vincularDatoPedido(
   campo: string,
   texto: string,
@@ -290,8 +309,8 @@ export function vincularDatoPedido(
   if (campo === "pacienteNombre" && !datos.pacienteNombre && palabra) datos.pacienteNombre = capitalizar(t);
   if (campo === "pacienteApellido" && !datos.pacienteApellido && palabra) datos.pacienteApellido = capitalizar(t);
   if (campo === "dni" && !datos.dni) {
-    const dni = crudo.replace(/\D/g, "");
-    if (dni.length >= 7 && dni.length <= 9) datos.dni = dni;
+    const doc = documentoDePersona(crudo);
+    if (doc) datos.dni = doc;
   }
   if (campo === "sexo" && !datos.sexo) {
     if (/\bmasculino\b/.test(t)) datos.sexo = "masculino";

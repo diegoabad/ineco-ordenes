@@ -43,6 +43,7 @@ import {
   precargarCaso,
   preguntaDelCaso,
   textoEstadoDialogo,
+  documentoDePersona,
   vincularDatoPedido,
   type WaPausaDialogo,
 } from "./estado-dialogo.js";
@@ -155,6 +156,26 @@ function etiquetasDelModelo(nombres: string[]): string[] {
 }
 
 const BANDAS_EDAD = ["infanto", "adolescente", "adulto", "+60"];
+
+/** Si el mensaje nombra más de una sede, queda la última: es la corrección. */
+function sedeFinalDelMensaje(texto: string, sedes: { name: string }[]): string {
+  const t = sinTildes(texto);
+  let mejor = "";
+  let pos = -1;
+  const ordenadas = [...sedes].sort((a, b) => sinTildes(b.name).length - sinTildes(a.name).length);
+  for (const sede of ordenadas) {
+    const nombre = sinTildes(sede.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    const re = new RegExp(`(?:^|[^a-z0-9+])${nombre}(?=$|[^a-z0-9])`, "g");
+    let ultimo = -1;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(t))) ultimo = match.index;
+    if (ultimo > pos) {
+      pos = ultimo;
+      mejor = sede.name;
+    }
+  }
+  return mejor;
+}
 
 function mencionaFrase(texto: string, frase: string): boolean {
   const escaped = frase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
@@ -335,7 +356,35 @@ const ETIQUETA_DATO: Record<string, string> = {
   dni: "el DNI del paciente",
   sexo: "si el paciente es masculino o femenino",
   email: "el email",
+  profesional: "el nombre del profesional con el que busca el turno",
+  tratamiento: "el tratamiento o la consulta que quiere",
+  horario: "cuál de los horarios ofrecidos elige",
+  confirmaProfesional: "si confirma el profesional que le propusimos (sí o no)",
 };
+
+/** Pedidos de la búsqueda de turnos: no van a la ficha del paciente. */
+const PEDIDOS_BUSQUEDA = new Set(["profesional", "tratamiento", "horario", "confirmaProfesional"]);
+
+/** Según la pregunta que acabamos de hacer, qué responde el próximo mensaje. */
+export function datoPedidoDePregunta(pregunta: string, resultado = ""): string {
+  const t = sinTildes(`${pregunta}\n${resultado}`);
+  if (!t.trim()) return "";
+  if (/buscas a /.test(t)) return "confirmaProfesional";
+  if (/con que profesional|falta el profesional|cual buscabas|profesionales con ese/.test(t)) return "profesional";
+  if (/para que tratamiento|estos son los tratamientos|cual de estos tratamientos|falta el tratamiento|hay mas de un cruce/.test(t)) {
+    return "tratamiento";
+  }
+  if (/cual de estos horarios|falta el horario|horarios libres|busco mas adelante/.test(t)) return "horario";
+  if (/pasas (tu |el )?dni|falta el dni/.test(t)) return "dni";
+  if (/cual es (tu |el )?email|falta el email/.test(t)) return "email";
+  if (/cual es (tu |el )?nombre|hay que pedir nombre/.test(t) && !/profesional/.test(t)) return "pacienteNombre";
+  if (/cual es (tu |el )?apellido/.test(t)) return "pacienteApellido";
+  if (/masculino o femenino|sexo/.test(t)) return "sexo";
+  if (/que edad|nino o adulto|grupo etario/.test(t)) return "grupoEtario";
+  if (/para vos o para otra|consulta es para/.test(t)) return "consultaPara";
+  if (/tratamiento y con que profesional/.test(t)) return "profesional";
+  return "";
+}
 
 function fichaDesdeContacto(contact: {
   phoneNumber?: string | null;
@@ -604,6 +653,181 @@ function edadDicha(texto: string): number | null {
   return n;
 }
 
+function respuestaEsCorta(texto: string): boolean {
+  const t = sinTildes(texto);
+  if (t.includes("?")) return false;
+  if (/\b(turno|precio|cuanto|donde|direccion|sede|sucursal|cobertura|obra social|queja|cancel|profesional|tratamiento|programa|horario|whatsapp|telefono)\b/.test(t)) {
+    return false;
+  }
+  return texto.trim().split(/\s+/).filter(Boolean).length <= 6;
+}
+
+/** El mensaje responde el dato que pedimos, con la forma de ese dato. */
+export function datoTieneForma(campo: string, texto: string): boolean {
+  const t = sinTildes(texto).trim();
+  if (!t) return false;
+  if (campo === "dni") return Boolean(documentoDePersona(texto));
+  if (campo === "email") return /[^\s@]+@[^\s@]+\.[^\s@]+/.test(texto);
+  if (campo === "confirmaProfesional") {
+    if (/\b(si|sí|no|nop|dale|ok)\b/.test(t) && t.split(/\s+/).length <= 3) return true;
+    // Otro nombre: está corrigiendo al profesional, no confirmando.
+    return /^[a-zñáéíóúü]+(?:\s+[a-zñáéíóúü]+){0,4}$/i.test(texto.trim()) && !/\d|@/.test(texto);
+  }
+  if (campo === "profesional" || campo === "tratamiento") {
+    if (/^(si|sí|no|ok|hola|chau|gracias)$/.test(t)) return false;
+    // Un documento suelto no es un profesional.
+    if (documentoDePersona(texto) && !/[a-záéíóúñ]/i.test(texto)) return false;
+    return /^[a-zñáéíóúü0-9]+(?:[\s\-./]+[a-zñáéíóúü0-9]+){0,6}$/i.test(texto.trim()) || /^\d{1,2}$/.test(t);
+  }
+  if (campo === "horario") {
+    return (
+      /^\d{1,2}$/.test(t) ||
+      /\bprimer|\bsegund|\btercer|\bmas adelante|\balgo antes|\d{1,2}:\d{2}/.test(t) ||
+      /\d{4}-\d{2}-\d{2}/.test(texto)
+    );
+  }
+  if (campo === "sexo") return /\b(masculino|femenino|hombre|mujer|varon)\b/.test(t);
+  if (campo === "grupoEtario") {
+    const edad = t.match(/\b(\d{1,3})\b/);
+    if (edad) {
+      const n = Number(edad[1]);
+      if (n >= 1 && n <= 120) return true;
+    }
+    return /\b(nino|nena|nene|infante|bebe|adolescente|adulto|mayor)\b/.test(t);
+  }
+  if (
+    campo === "pacienteNombre" ||
+    campo === "pacienteApellido" ||
+    campo === "contactoNombre" ||
+    campo === "contactoApellido"
+  ) {
+    if (/\d|@/.test(texto)) return false;
+    if (/^(hola|chau|si|no|ok|dale|gracias|bueno)$/.test(t)) return false;
+    return /^[a-zñáéíóúü]+(?:\s+[a-zñáéíóúü]+){0,3}$/i.test(texto.trim());
+  }
+  if (campo === "consultaPara") {
+    return /\b(para mi|yo|mio|otra persona|familiar|hij|espos|mama|papa|madre|padre|abuel)\b/.test(t);
+  }
+  return true;
+}
+
+export function avisoDato(campo: string): string {
+  if (campo === "dni") return "Eso no parece un documento. Puede ser el DNI, con o sin puntos, o uno de otro país. ¿Me lo pasás de nuevo?";
+  if (campo === "email") return "Ese email no es válido. Necesito uno con formato nombre@dominio.com. ¿Me lo pasás de nuevo?";
+  if (campo === "profesional") return "Necesito el nombre del profesional. ¿Me lo decís de nuevo?";
+  if (campo === "tratamiento") return "Necesito el tratamiento o el número de la lista. ¿Me lo decís de nuevo?";
+  if (campo === "horario") return "Elegí un horario de la lista, o escribí más adelante.";
+  if (campo === "confirmaProfesional") return "Respondé sí o no: ¿buscás a esa persona?";
+  if (campo === "sexo") return "Necesito saber si es masculino o femenino. ¿Me lo decís de nuevo?";
+  if (campo === "grupoEtario") return "Necesito la edad en números, o si es un niño o un adulto. ¿Me la decís de nuevo?";
+  if (campo === "pacienteNombre" || campo === "contactoNombre") return "Necesito el nombre en letras. ¿Me lo repetís?";
+  if (campo === "pacienteApellido" || campo === "contactoApellido") return "Necesito el apellido en letras. ¿Me lo repetís?";
+  if (campo === "consultaPara") return "¿La consulta es para vos o para otra persona?";
+  return "Ese dato no coincide con lo que te pedí. ¿Me lo repetís?";
+}
+
+/** Frases de corrección: "perdón no era Marcelo era Pablo", "el apellido es García". */
+export function esCorreccion(texto: string): boolean {
+  const t = sinTildes(texto);
+  return /\b(perdon|perdona|me equivoqu\w*|me confundi\w*|no era|en realidad|mejor|prefiero|corrijo|corrigo|el apellido(?:\s+correcto)?\s+es|el nombre(?:\s+correcto)?\s+es|el dni(?:\s+correcto)?\s+es|mi dni(?:\s+correcto)?\s+es|la edad(?:\s+correcta)?\s+es|el mail(?:\s+correcto)?\s+es|el email(?:\s+correcto)?\s+es)\b/.test(
+    t,
+  );
+}
+
+function capitalizarPalabra(valor: string): string {
+  const limpio = valor.trim().replace(/\s+/g, " ");
+  if (!limpio) return "";
+  return limpio
+    .split(" ")
+    .map((parte) => parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/** Saca el valor nuevo de una corrección explícita. */
+export function extraerCorreccion(texto: string): {
+  profesional: string;
+  pacienteNombre: string;
+  pacienteApellido: string;
+  dni: string;
+  sexo: "" | "masculino" | "femenino";
+  grupoEtario: "" | "infanto" | "adulto";
+  email: string;
+} {
+  const vacio: {
+    profesional: string;
+    pacienteNombre: string;
+    pacienteApellido: string;
+    dni: string;
+    sexo: "" | "masculino" | "femenino";
+    grupoEtario: "" | "infanto" | "adulto";
+    email: string;
+  } = {
+    profesional: "",
+    pacienteNombre: "",
+    pacienteApellido: "",
+    dni: "",
+    sexo: "",
+    grupoEtario: "",
+    email: "",
+  };
+  if (!esCorreccion(texto)) return vacio;
+  const t = sinTildes(texto);
+  const out = { ...vacio };
+
+  const apellido =
+    t.match(/\bapellido(?:\s+correcto)?\s+(?:es|seria)\s+([a-zñ]{2,})/) ||
+    t.match(/\bno(?:\s+era)?\s+[a-zñ]{2,}\s*[;,.]?\s*(?:era|es|sino)\s+([a-zñ]{2,}).*\bapellido/) ||
+    t.match(/\bapellido\b.*\bno(?:\s+era)?\s+[a-zñ]{2,}\s*[;,.]?\s*(?:era|es|sino)\s+([a-zñ]{2,})/);
+  if (apellido?.[1] && /\bapellido\b/.test(t)) out.pacienteApellido = capitalizarPalabra(apellido[1]);
+
+  const nombre =
+    t.match(/\bnombre(?:\s+correcto)?\s+(?:es|seria)\s+([a-zñ]{2,})/) ||
+    t.match(/\bme llamo\s+([a-zñ]{2,})/);
+  if (nombre?.[1] && (/\bnombre\b/.test(t) || /\bme llamo\b/.test(t)) && !/\bapellido\b/.test(t)) {
+    out.pacienteNombre = capitalizarPalabra(nombre[1]);
+  }
+
+  const dni = documentoDePersona(texto);
+  if (dni && /\b(dni|documento)\b/.test(t)) out.dni = dni;
+
+  if (/\bsexo\b/.test(t) || /\bmasculino\b|\bfemenino\b/.test(t)) {
+    if (/\bmasculino\b|\bhombre\b|\bvaron\b/.test(t)) out.sexo = "masculino";
+    if (/\bfemenino\b|\bmujer\b/.test(t)) out.sexo = "femenino";
+  }
+
+  const edad = edadDicha(texto);
+  if (edad != null) out.grupoEtario = edad >= 18 ? "adulto" : "infanto";
+  else if (/\badult/.test(t)) out.grupoEtario = "adulto";
+  else if (/\b(nino|nena|nene|infanto)\b/.test(t)) out.grupoEtario = "infanto";
+
+  const email = texto.match(/[^\s@]+@[^\s@]+\.[^\s@]+/)?.[0];
+  if (email && /\b(mail|email|correo)\b/.test(t)) out.email = email.toLowerCase();
+
+  const hablaProf =
+    /\b(profesional|doctor|doctora|dr\b|dra\b|medico|medica)\b/.test(t) ||
+    /\bcon\s+[a-zñ]/.test(t) ||
+    /\bno era\s+[a-zñ].*\b(?:era|es|sino)\s+(?:con\s+)?[a-zñ]/.test(t);
+  if (hablaProf && !/\bapellido\b|\bnombre\b|\bdni\b|\bdocumento\b|\bedad\b|\bsexo\b|\bmail\b|\bemail\b/.test(t)) {
+    const cambio =
+      t.match(
+        /\bno era\s+(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)\s*[;,.]?\s*(?:era|es|sino|sino que|mejor)\s+(?:con\s+)?(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
+      ) ||
+      t.match(
+        /\b(?:mejor|prefiero|en realidad|ahora)\s+(?:con\s+)?(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
+      );
+    if (cambio) {
+      const nuevo = (cambio[2] || cambio[1] || "").trim();
+      if (nuevo) out.profesional = capitalizarPalabra(nuevo);
+    }
+  }
+
+  // "Perdón, el apellido es García, no López"
+  const apellidoSolo = t.match(/\bel apellido(?:\s+correcto)?\s+es\s+([a-zñ]{2,})/);
+  if (apellidoSolo?.[1]) out.pacienteApellido = capitalizarPalabra(apellidoSolo[1]);
+
+  return out;
+}
+
 /** Deja en datos solo lo que este mensaje dice, y pisa edad o apellido si los corrige. */
 function acotarDatosAlTexto(
   texto: string,
@@ -627,9 +851,15 @@ function acotarDatosAlTexto(
   if (!dicho(datos.pacienteApellido)) datos.pacienteApellido = "";
   if (!dicho(datos.contactoNombre)) datos.contactoNombre = "";
   if (!dicho(datos.contactoApellido)) datos.contactoApellido = "";
-  if (!dicho(datos.email)) datos.email = "";
-  const dni = datos.dni.replace(/\D/g, "");
-  if (!dni || !t.includes(dni)) datos.dni = "";
+  if (!dicho(datos.email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.email.trim())) datos.email = "";
+  else datos.email = datos.email.trim().toLowerCase();
+  const doc = documentoDePersona(datos.dni);
+  const docEnTexto = documentoDePersona(texto);
+  datos.dni = doc && (doc === docEnTexto || texto.replace(/[\s.\-_/]/g, "").toUpperCase().includes(doc)) ? doc : "";
+  if (/\d/.test(datos.pacienteNombre)) datos.pacienteNombre = "";
+  if (/\d/.test(datos.pacienteApellido)) datos.pacienteApellido = "";
+  if (/\d/.test(datos.contactoNombre)) datos.contactoNombre = "";
+  if (/\d/.test(datos.contactoApellido)) datos.contactoApellido = "";
   if (datos.sexo && !t.includes(datos.sexo)) datos.sexo = "";
   const apellido = t.match(/\bapellido\s+(?:es|seria|correcto(?:\s+es)?)\s+([a-zñ]{2,})/);
   if (apellido?.[1]) {
@@ -1112,6 +1342,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Si nombra una obra social, prepaga o certificado que está en las etiquetas, poné esa etiqueta sí o sí, con el nombre exacto del catálogo. No pongas una cobertura que no nombró.",
       "preguntaAclaracion dejala vacía. La pregunta por datos faltantes la arma el otro paso, solo si el campo no está en la ficha.",
       "datos: completá solo lo que este mensaje dice sobre el caso activo. Si hay varias personas, datos es solo de esa persona: no pongas ahí el nombre, el apellido ni la edad de otra. Si corrige un dato que ya estaba, poné el valor nuevo. Si este mensaje no habla de ese campo, dejalo vacío. No inventes. El teléfono ya viene de WhatsApp: no lo pidas ni lo cambies.",
+      "Correcciones: si dice perdón, me equivoqué, no era, en realidad, mejor, el apellido es, el nombre es, el DNI es o la edad es, actualizá solo el campo corregido con el valor nuevo. Ejemplo: «perdón, el apellido es García, no López» → pacienteApellido=García. «me equivoqué, tiene 19» → grupoEtario adulto.",
+      "Si corrige el profesional («perdón no era Marcelo era Pablo», «mejor con Pablo»), no pongas Pablo en pacienteNombre: es el profesional. accion=turnos.libres y consulta con el nombre nuevo para verificar si existe.",
+      "Cuando dan un nombre de profesional (o lo corrigen), siempre buscá si está habilitado: no asumas que existe ni inventes horarios.",
       "dni: solo dígitos, si la persona lo dijo. email: solo si lo dijo.",
       "sexo=masculino o femenino solo si el texto lo dice. Si no se sabe, vacío.",
       "consultaPara=tercero si escribe por otra persona (por ejemplo \"para mi hijo\"). propio si la consulta es para quien escribe.",
@@ -1159,7 +1392,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       }),
       "datos se completa solo para el caso activo. Si todavía no hay casos y el mensaje pide turnos para más de una persona, datos es el de quien escribe: soy, yo soy o me llamo son su nombre y su apellido. La edad de un familiar no va en grupoEtario.",
       conversation.datoPedido
-        ? `El dato que pedimos recién es ${ETIQUETA_DATO[conversation.datoPedido] ?? conversation.datoPedido}. Si este mensaje lo responde, completalo en ese campo y no en otro.`
+        ? PEDIDOS_BUSQUEDA.has(conversation.datoPedido)
+          ? `El dato que pedimos recién es ${ETIQUETA_DATO[conversation.datoPedido] ?? conversation.datoPedido}. Este mensaje responde eso: si pedimos el profesional, es el nombre del profesional (no el del paciente). No completes pacienteNombre ni pacienteApellido salvo que diga explícitamente me llamo, soy o mi nombre es. La acción debe usar ese texto para buscar el turno.`
+          : `El dato que pedimos recién es ${ETIQUETA_DATO[conversation.datoPedido] ?? conversation.datoPedido}. Si este mensaje lo responde, completalo en ese campo y no en otro.`
         : "",
       `Mensajes anteriores:\n${previos}`,
       "Mensajes nuevos de la persona:",
@@ -1180,8 +1415,90 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     if (!detection.datos.consultaPara) detection.datos.consultaPara = "tercero";
   }
   const textoLote = batch.map((message) => message.text).join("\n");
+  const ultimaPregunta =
+    lastOutbound >= 0 && messages[lastOutbound]?.direction === "OUTBOUND"
+      ? messages[lastOutbound]!.text
+      : "";
+  const pedidoPrevio =
+    conversation.datoPedido?.trim() || datoPedidoDePregunta(ultimaPregunta) || "";
+  const correccion = extraerCorreccion(textoLote);
+  // Si estábamos pidiendo profesional y corrige "no era X era Y", es el profesional nuevo.
+  if (
+    !correccion.profesional &&
+    esCorreccion(textoLote) &&
+    (pedidoPrevio === "profesional" || pedidoPrevio === "confirmaProfesional")
+  ) {
+    const t = sinTildes(textoLote);
+    const cambio = t.match(
+      /\bno era\s+(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*[a-zñ]+(?:\s+[a-zñ]+)?\s*[;,.]?\s*(?:era|es|sino|sino que|mejor)\s+(?:con\s+)?(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
+    ) || t.match(/\b(?:mejor|prefiero|en realidad|ahora)\s+(?:con\s+)?(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/);
+    if (cambio?.[1]) correccion.profesional = capitalizarPalabra(cambio[1]);
+  }
+  let rechazoDato = "";
   if (detection.datos) {
     acotarDatosAlTexto(textoLote, detection.datos);
+    if (correccion.pacienteNombre) detection.datos.pacienteNombre = correccion.pacienteNombre;
+    if (correccion.pacienteApellido) detection.datos.pacienteApellido = correccion.pacienteApellido;
+    if (correccion.dni) detection.datos.dni = correccion.dni;
+    if (correccion.sexo) detection.datos.sexo = correccion.sexo;
+    if (correccion.grupoEtario) detection.datos.grupoEtario = correccion.grupoEtario;
+    if (correccion.email) detection.datos.email = correccion.email;
+    // Si preguntamos profesional/tratamiento/horario, un nombre corto no es la ficha
+    // (salvo corrección explícita de nombre/apellido/dni).
+    if (
+      PEDIDOS_BUSQUEDA.has(pedidoPrevio) &&
+      !correccion.pacienteNombre &&
+      !correccion.pacienteApellido &&
+      !correccion.dni &&
+      !correccion.sexo &&
+      !correccion.grupoEtario &&
+      !correccion.email &&
+      !/\b(me llamo|yo soy|mi nombre es|soy [a-záéíóúñ])/i.test(textoLote)
+    ) {
+      detection.datos.pacienteNombre = "";
+      detection.datos.pacienteApellido = "";
+      detection.datos.contactoNombre = "";
+      detection.datos.contactoApellido = "";
+      if (!(pedidoPrevio === "profesional" && documentoDePersona(textoLote))) detection.datos.dni = "";
+      detection.datos.email = "";
+      detection.datos.sexo = "";
+      detection.datos.grupoEtario = "";
+    }
+    // Pidieron profesional y mandaron solo el documento: lo anoto y sigo pidiendo el profesional.
+    if (
+      !correccion.profesional &&
+      !esCorreccion(textoLote) &&
+      pedidoPrevio === "profesional" &&
+      documentoDePersona(textoLote) &&
+      !/[a-záéíóúñ]/i.test(textoLote)
+    ) {
+      detection.datos.dni = documentoDePersona(textoLote);
+      rechazoDato = "Anoté el documento. ¿Con qué profesional busco el turno?";
+    } else if (
+      !correccion.profesional &&
+      !esCorreccion(textoLote) &&
+      pedidoPrevio &&
+      respuestaEsCorta(textoLote) &&
+      !datoTieneForma(pedidoPrevio, textoLote)
+    ) {
+      rechazoDato = avisoDato(pedidoPrevio);
+      detection.datos.pacienteNombre = "";
+      detection.datos.pacienteApellido = "";
+      detection.datos.contactoNombre = "";
+      detection.datos.contactoApellido = "";
+      detection.datos.dni = "";
+      detection.datos.email = "";
+      detection.datos.sexo = "";
+      detection.datos.grupoEtario = "";
+      detection.datos.cobertura = "";
+      detection.datos.consultaPara = "";
+      detection.datos.relacionFamiliar = "";
+      detection.datos.esPaciente = "";
+    } else if (pedidoPrevio === "dni" && datoTieneForma("dni", textoLote)) {
+      detection.datos.dni = documentoDePersona(textoLote) || detection.datos.dni;
+    } else if (pedidoPrevio === "email" && datoTieneForma("email", textoLote)) {
+      detection.datos.email = textoLote.match(/[^\s@]+@[^\s@]+\.[^\s@]+/)?.[0]?.toLowerCase() ?? detection.datos.email;
+    }
     const dicho = sinTildes(textoLote);
     const familiar = /\b(hij[oa]|nene|nena|espos[oa]|mama|papa|madre|padre|abuel[oa]|tio|tia|sobrin[oa]|para otra|familiar)\b/.test(dicho);
     const propio = /\bpara mi\b(?!\s+(hij|nen|espos|mama|papa|madre|padre|abuel))/.test(dicho);
@@ -1191,18 +1508,47 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
 
   let casosTurno = incorporarPersonas(
     asegurarCasos(conversation.casos ?? [], textoLote),
-    Array.isArray(detection.personas) ? detection.personas : [],
+    rechazoDato || !Array.isArray(detection.personas) ? [] : detection.personas,
   );
   let activo = casoActivo(casosTurno, conversation.casoActivoId ?? "");
-  if (detection.datos && activo) {
-    vincularDatoPedido(conversation.datoPedido ?? "", textoLote, detection.datos);
+  const corrigeFicha = Boolean(
+    correccion.pacienteNombre ||
+      correccion.pacienteApellido ||
+      correccion.dni ||
+      correccion.sexo ||
+      correccion.grupoEtario ||
+      correccion.email,
+  );
+  if (detection.datos && activo && !rechazoDato && (!PEDIDOS_BUSQUEDA.has(pedidoPrevio) || corrigeFicha)) {
+    if (!PEDIDOS_BUSQUEDA.has(pedidoPrevio)) {
+      vincularDatoPedido(pedidoPrevio, textoLote, detection.datos);
+    }
     precargarCaso(detection.datos, activo, casosTurno, textoLote);
     if (activo.consultaPara === "tercero" && /\bmi dni\b/.test(sinTildes(textoLote))) detection.datos.dni = "";
   }
 
   const fichaPrevia = fichaDesdeContacto(contact);
   const contactoActual =
-    contact && detection.datos ? await fillContact(contact.id, detection.datos) : contact;
+    contact && detection.datos
+      ? PEDIDOS_BUSQUEDA.has(pedidoPrevio) && !corrigeFicha
+        ? detection.datos.dni
+          ? await fillContact(contact.id, {
+              consultaPara: "",
+              relacionFamiliar: "",
+              pacienteNombre: "",
+              pacienteApellido: "",
+              contactoNombre: "",
+              contactoApellido: "",
+              grupoEtario: "",
+              cobertura: "",
+              esPaciente: "",
+              dni: detection.datos.dni,
+              sexo: "",
+              email: "",
+            })
+          : contact
+        : await fillContact(contact.id, detection.datos)
+      : contact;
   let fichaActual = fichaDesdeContacto(contactoActual ?? contact);
   if (activo) {
     casosTurno = casosTurno.map((caso) => (caso.id === activo?.id ? copiarFichaEnCaso(caso, fichaActual) : caso));
@@ -1386,6 +1732,15 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   }
   const sedeGroup = catalog.groups.find((group) => sinTildes(group.name) === "sedes");
   const sedes = catalog.items.filter((item) => item.groupId === sedeGroup?.id);
+  const sedeDeAhora = sedeFinalDelMensaje(textoLote, sedes);
+  if (sedeDeAhora) {
+    for (const sede of sedes) {
+      if (sinTildes(sede.name) === sinTildes(sedeDeAhora)) continue;
+      wantedNames.delete(sede.name.toLowerCase());
+      nextTagIds.delete(sede.id);
+    }
+    wantedNames.add(sedeDeAhora.toLowerCase());
+  }
   const tieneSede = sedes.some(
     (sede) => wantedNames.has(sede.name.toLowerCase()) || nextTagIds.has(sede.id),
   );
@@ -1604,7 +1959,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     quiereCambiar ||
     confirmaPendiente ||
     eleccionPendiente ||
-    (/falta el dni/i.test(previoAccion) && /\d{7,9}/.test(textoLote)) ||
+    (/falta el dni/i.test(previoAccion) && Boolean(documentoDePersona(textoLote))) ||
     Boolean(turnosFuturosDe(previoAccion).length && turnoNombrado(textoLote, previoAccion));
   const modoPedido: "" | "anular" | "cambiar" = !sigueGestion
     ? ""
@@ -1632,12 +1987,21 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     claveAccion = "";
     resultadoForzado = "Falta el profesional. Decime el nombre y el apellido.";
   } else if (/busc[aá]s a /i.test(previoAccion) && pideAfirmacion(textoLote)) claveAccion = "turnos.libres";
+  else if (
+    (/busc[aá]s a /i.test(previoAccion) || pedidoPrevio === "confirmaProfesional") &&
+    !pideAfirmacion(textoLote) &&
+    !pideNegacion(textoLote) &&
+    datoTieneForma("profesional", textoLote)
+  ) {
+    // Pidió confirmación y mandó otro nombre: busca ese profesional.
+    claveAccion = "turnos.libres";
+  }
   else if (pideCancelar(textoLote) || quiereCambiar) claveAccion = "turnos.delPaciente";
   else if (pideSusTurnos(textoLote)) claveAccion = "turnos.delPaciente";
   else if ((pideMasFechas(textoLote) || pideMasTemprano(textoLote)) && conversation.ultimoResultado?.busqueda) {
     claveAccion = "turnos.libres";
   }
-  else if (/falta el dni/i.test(previoAccion) && /\d{7,9}/.test(textoLote)) {
+  else if (/falta el dni/i.test(previoAccion) && documentoDePersona(textoLote)) {
     claveAccion = conversation.ultimoResultado?.accion === "turnos.delPaciente" ? "turnos.delPaciente" : "turnos.libres";
   }
   else if (
@@ -1646,6 +2010,24 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     (/\b(turno|horario|libre|disponib)\b/.test(sinTildes(textoLote)) ||
       (/—/.test(previoAccion) &&
         /\bprimer[ao]?\b|\bsegund[ao]\b|\btercer[ao]?\b|\bcuart[ao]\b|\bquint[ao]\b/.test(sinTildes(textoLote))))
+  ) {
+    claveAccion = "turnos.libres";
+  }
+  if (sedeAjena || rechazoDato) claveAccion = "";
+  if (correccion.profesional && !sedeAjena && !rechazoDato) {
+    claveAccion = "turnos.libres";
+  }
+  if (
+    !claveAccion &&
+    !sedeAjena &&
+    !rechazoDato &&
+    (pedidoPrevio === "profesional" ||
+      pedidoPrevio === "tratamiento" ||
+      (pedidoPrevio === "confirmaProfesional" &&
+        datoTieneForma("profesional", textoLote) &&
+        !pideAfirmacion(textoLote) &&
+        !pideNegacion(textoLote))) &&
+    (chosen?.clave === "TURNOS" || previa === "TURNOS" || conversation.intencionAbierta === "TURNOS")
   ) {
     claveAccion = "turnos.libres";
   }
@@ -1658,6 +2040,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       ? previoAccion
       : "",
     consultaAccionBase,
+    correccion.profesional ? correccion.profesional : "",
     claveAccion === "turnos.libres" ||
     claveAccion === "turnos.reservar" ||
     claveAccion === "turnos.delPaciente" ||
@@ -1800,11 +2183,14 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (!conflicto && esInfo && faltan.length === 0) estadoSiguiente.intencionConcluida = true;
   await anotar(estadoSiguiente.intencionAbierta, estadoSiguiente.intencionConcluida);
   const preguntaAccion = preguntaDeResultado(resultadoAccion, chosen?.clave === "TURNOS" ? (accion?.clave ?? "") : "");
-  if (preguntaAccion) seguimiento.datoPedido = null;
+  if (preguntaAccion) {
+    seguimiento.datoPedido = datoPedidoDePregunta(preguntaAccion, resultadoAccion) || null;
+  }
   if (/falta el dni/i.test(resultadoAccion)) seguimiento.datoPedido = "dni";
   if (/no es paciente|hay que pedir nombre/i.test(resultadoAccion) && !fichaActual.pacienteNombre) {
     seguimiento.datoPedido = "pacienteNombre";
   }
+  if (/falta el email/i.test(resultadoAccion)) seguimiento.datoPedido = "email";
   if (soloConfirma && !resultadoAccion) {
     seguimiento.derivacionPendiente = true;
     const derivado = tagsByName.get("derivado a asesor");
@@ -1839,6 +2225,16 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     bot.conversacion && typeof bot.conversacion === "object"
       ? stringField(bot.conversacion as Record<string, unknown>, "estiloRespuesta")
       : "";
+  if (rechazoDato) {
+    seguimiento.datoPedido = pedidoPrevio;
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+    await send(conversationId, rechazoDato);
+    await guardar(estadoSiguiente);
+    if (conversation.assigneeKind === "none") {
+      await saveAssignee(conversationId, { kind: "bot", name: identidad.nombre });
+    }
+    return;
+  }
   const reply = await completeStructured<{ partes?: string[]; pregunta?: string }>({
     conversacionId: conversationId,
     paso: "responder",
@@ -1869,6 +2265,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Una sede nombrada para pedir dirección, teléfono u horario es solo un dato. No la uses como sede de un turno, de una cancelación ni de una reserva, salvo que digan que ese turno es ahí.",
       "Si piden confirmar una reserva y además otra cosa, la confirmación es una frase y el resto se responde. No tapes el resto del mensaje.",
       "Si el estado lista correcciones ya hechas y preguntan cuál era el dato anterior, respondé con ese valor. No lo inventes.",
+      "Si corrige un dato de la ficha, confirmá el valor nuevo en una frase corta y seguí con lo que faltaba. Si corrige el profesional, buscá si el nuevo existe y no digas que quedó el anterior.",
       stringField(plazos, "seInforma") ? `Sí se puede informar: ${stringField(plazos, "seInforma")}` : "",
       stringField(plazos, "noSeInforma") ? `No se informa: ${stringField(plazos, "noSeInforma")}` : "",
       objetivo ? `Objetivo: ${objetivo}` : "",
@@ -2043,6 +2440,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     seguimiento.derivacionPendiente = true;
     if (!faltan.length) pregunta = PREGUNTA_ALGO_MAS;
   } else if (sedeAjena) pregunta = "";
+  const pedidoDePregunta = datoPedidoDePregunta(pregunta, resultadoAccion);
+  if (pedidoDePregunta) seguimiento.datoPedido = pedidoDePregunta;
+  else if (faltan[0] && !preguntaAccion) seguimiento.datoPedido = faltan[0];
   if (seguimiento.derivacionPendiente) {
     const derivado = tagsByName.get("derivado a asesor");
     if (derivado && !nextTagIds.has(derivado.id)) {

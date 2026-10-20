@@ -322,7 +322,7 @@ export type WaConnectionBanner = {
 type Props = {
   onConnectionChange?: (status: WaConnectionBanner) => void;
   connectRef?: MutableRefObject<(() => void) | null>;
-  mode?: "live" | "prueba";
+  mode?: "live" | "prueba" | "prueba-bot";
   createPruebaRef?: MutableRefObject<(() => void) | null>;
 };
 
@@ -443,7 +443,8 @@ export function WhatsAppConversationsPanel({
   mode = "live",
   createPruebaRef,
 }: Props) {
-  const pruebaMode = mode === "prueba";
+  const pruebaMode = mode === "prueba" || mode === "prueba-bot";
+  const pruebaMotor = mode === "prueba-bot" ? "menu" : "ia";
   const { user } = useAuth();
   const [ready, setReady] = useState(false);
   const [waStatus, setWaStatus] = useState<string>("");
@@ -599,6 +600,7 @@ export function WhatsAppConversationsPanel({
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: 0,
         prueba: pruebaMode,
+        motor: pruebaMode ? pruebaMotor : undefined,
         ...waFiltersQuery(applied),
       });
       setConversations(page.items);
@@ -612,7 +614,7 @@ export function WhatsAppConversationsPanel({
     } finally {
       setLoadingList(false);
     }
-  }, [filters, pruebaMode]);
+  }, [filters, pruebaMode, pruebaMotor]);
 
   const loadMoreConversations = useCallback(async () => {
     if (loadingMoreRef.current || loadingList || !hasMoreConversations || nextConversationsOffset == null) {
@@ -627,6 +629,7 @@ export function WhatsAppConversationsPanel({
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: nextConversationsOffset,
         prueba: pruebaMode,
+        motor: pruebaMode ? pruebaMotor : undefined,
         ...filtersQuery,
       });
       setConversations((prev) => {
@@ -732,6 +735,7 @@ export function WhatsAppConversationsPanel({
             limit: Math.max(snap.loadedCount, CONVERSATIONS_PAGE_SIZE),
             offset: 0,
             prueba: pruebaMode,
+        motor: pruebaMode ? pruebaMotor : undefined,
             ...waFiltersQuery(snap.filters),
           })
             .then((page) => {
@@ -1882,11 +1886,12 @@ export function WhatsAppConversationsPanel({
     setDraft("");
     setAttachment(null);
     try {
-      const created = await createWaPrueba();
+      const created = await createWaPrueba(pruebaMotor);
+      const msgs = pruebaMotor === "menu" ? await fetchWaMessages(created.id) : [];
       skipThreadLoad.current = created.id;
       setConversations((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
       setSelected(created);
-      setMessages([]);
+      setMessages(msgs);
       setSelectedId(created.id);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo crear la prueba");
@@ -2078,6 +2083,7 @@ export function WhatsAppConversationsPanel({
           limit: Math.max(conversations.length, CONVERSATIONS_PAGE_SIZE),
           offset: 0,
           prueba: pruebaMode,
+        motor: pruebaMode ? pruebaMotor : undefined,
           ...filtersQuery,
         }),
       ]);

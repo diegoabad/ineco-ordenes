@@ -47,7 +47,7 @@ export function WhatsAppModule({ section }: Props) {
   return (
     <div className="app-shell">
       <header
-        className={`app-header${section === "conversaciones" || section === "prueba" ? " wa-header" : ""}`}
+        className={`app-header${section === "conversaciones" || section === "prueba" || section === "prueba-bot" ? " wa-header" : ""}`}
       >
         <div className="app-header__brand">
           <div>
@@ -56,6 +56,8 @@ export function WhatsAppModule({ section }: Props) {
               <p>Chats del WhatsApp vinculado</p>
             ) : section === "prueba" ? (
               <p>Números ficticios para hablarle al bot y ver la ficha. No sale por WhatsApp.</p>
+            ) : section === "prueba-bot" ? (
+              <p>Números ficticios para probar el bot de opciones. No sale por WhatsApp.</p>
             ) : section === "operadoras" ? (
               <p>Usuarios a los que se pueden derivar las conversaciones</p>
             ) : section === "respuestas-rapidas" ? (
@@ -100,7 +102,7 @@ export function WhatsAppModule({ section }: Props) {
               </button>
             ) : null}
           </div>
-        ) : section === "prueba" ? (
+        ) : section === "prueba" || section === "prueba-bot" ? (
           <div className="app-header__actions wa-header-actions">
             <button
               type="button"
@@ -189,6 +191,12 @@ export function WhatsAppModule({ section }: Props) {
         <WhatsAppConversationsPanel
           key="prueba"
           mode="prueba"
+          createPruebaRef={createPruebaRef}
+        />
+      ) : section === "prueba-bot" ? (
+        <WhatsAppConversationsPanel
+          key="prueba-bot"
+          mode="prueba-bot"
           createPruebaRef={createPruebaRef}
         />
       ) : section === "operadoras" ? (

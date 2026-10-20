@@ -59,6 +59,7 @@ export type WaConversation = {
   casoActivoId?: string | null;
   datoPedido?: string | null;
   prueba?: boolean;
+  pruebaMotor?: "ia" | "menu";
   pruebaResultado?: "correcta" | "incorrecta" | null;
   pruebaNota?: string | null;
   pruebaNotaEn?: string | null;

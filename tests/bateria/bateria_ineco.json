@@ -1306,6 +1306,87 @@
       "titulo": "Nombre y apellido juntos",
       "contexto": { "fechaHora": "lunes 19/10/2026 16:25", "datosConocidos": { "telefono": "5491100000203" }, "primerContacto": true },
       "turnos": [{ "lote": ["Quiero un turno de psiquiatría con Marcelo Cetkovich"] }]
+    },
+    {
+      "id": "AD01",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el profesional: no era Marcelo, era otro nombre",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:00", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Quiero un turno"] },
+        { "lote": ["Marcelo"] },
+        { "lote": ["Perdón, no era Marcelo, era Pablo"] }
+      ]
+    },
+    {
+      "id": "AD02",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el profesional con mejor con",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:05", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Quiero turno con Musich"] },
+        { "lote": ["Mejor con Cetkovich"] }
+      ]
+    },
+    {
+      "id": "AD03",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el nombre del paciente",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:10", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Quiero turno para mí, soy Ana López, DNI 30111222, femenino, 34 años"] },
+        { "lote": ["Perdón, el nombre es María, no Ana"] }
+      ]
+    },
+    {
+      "id": "AD04",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el apellido del paciente",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:15", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Quiero turno para mí, soy Ana López"] },
+        { "lote": ["Perdón, el apellido es García, no López"] }
+      ]
+    },
+    {
+      "id": "AD05",
+      "categoria": "Correcciones",
+      "titulo": "Corrige la edad de 17 a 19",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:20", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Turno para mi hijo Pedro Ruiz, tiene 17"] },
+        { "lote": ["Me equivoqué, tiene 19"] }
+      ]
+    },
+    {
+      "id": "AD06",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el DNI",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:25", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Quiero turno para mí, soy Juan Pérez, DNI 20111222"] },
+        { "lote": ["El DNI correcto es 20999888"] }
+      ]
+    },
+    {
+      "id": "AD07",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el sexo",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:30", "datosConocidos": {}, "primerContacto": true },
+      "turnos": [
+        { "lote": ["Quiero turno para mí, soy Alex Ruiz, DNI 32111222, masculino, 28 años"] },
+        { "lote": ["Perdón, el sexo es femenino"] }
+      ]
+    },
+    {
+      "id": "AD08",
+      "categoria": "Correcciones",
+      "titulo": "Corrige el email",
+      "contexto": { "fechaHora": "lunes 19/10/2026 18:35", "datosConocidos": { "email": "viejo@mail.com" }, "primerContacto": false },
+      "turnos": [
+        { "lote": ["Quiero un turno para mí"] },
+        { "lote": ["El email correcto es nuevo@ineco.test"] }
+      ]
     }
   ]
 }

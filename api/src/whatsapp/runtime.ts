@@ -295,6 +295,11 @@ export async function sendPruebaInbound(conversationId: string, text: string): P
     externalMessageId: `prueba-${randomUUID()}`,
     status: "RECEIVED",
   });
+  if (conversation.pruebaMotor === "menu") {
+    const { runMenuTurn } = await import("./bot-menu.js");
+    await runMenuTurn(conversationId);
+    return;
+  }
   scheduleBotTurn(conversationId);
 }
 
