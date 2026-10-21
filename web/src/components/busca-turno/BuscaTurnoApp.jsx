@@ -373,13 +373,83 @@ function mismoBloque(a, b) {
   );
 }
 
+function mismoDiaMinutos(a, b) {
+  const da = new Date(a * 60000);
+  const db = new Date(b * 60000);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+function gcdMin(a, b) {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x;
+}
+
 /**
- * Ofertas que caben en `duracionMin`. El paso sale de los huecos reales del profesional:
- * si están cada 45 min, 45 es un módulo y 90 ocupa dos (ej. 9:00 y 9:45).
- * Si están cada 30, 60 ocupa 10:00 y 10:30, y 9:00 no entra si falta 9:30.
+ * Paso de la agenda de ESTE bloque, sin mirar otros profesionales.
+ * 15, 30 o 45 si aparecen. Si solo se ven huecos más grandes (el módulo del medio
+ * está ocupado), el paso es 15, 30 o 45 según el máximo común divisor.
+ * Un hueco de 60 en una agenda de 30 no es un módulo de 60.
  */
-function armarOfertasPorDuracion(slots, duracionMin) {
+function detectarPaso(minutos) {
+  const counts = new Map();
+  const gaps = [];
+  for (let i = 1; i < minutos.length; i++) {
+    const gap = minutos[i] - minutos[i - 1];
+    if (gap <= 0 || gap % PASO_MIN !== 0) continue;
+    if (!mismoDiaMinutos(minutos[i - 1], minutos[i])) continue;
+    gaps.push(gap);
+    if (gap === 15 || gap === 30 || gap === 45) {
+      counts.set(gap, (counts.get(gap) || 0) + 1);
+    }
+  }
+  let paso = null;
+  let veces = 0;
+  for (const p of [15, 30, 45]) {
+    const n = counts.get(p) || 0;
+    if (n > veces || (n === veces && n > 0 && paso != null && p > paso)) {
+      paso = p;
+      veces = n;
+    }
+  }
+  if (paso) return paso;
+  if (!gaps.length) return null;
+  let g = gaps[0];
+  for (let i = 1; i < gaps.length; i++) g = gcdMin(g, gaps[i]);
+  for (const p of [45, 30, 15]) {
+    if (g % p === 0) return p;
+  }
+  return null;
+}
+
+function ofertasDeUnModulo(byMin, moduloMin) {
+  const out = [];
+  for (const start of byMin.values()) {
+    out.push({ ...start, modulos: [start], moduloMin });
+  }
+  return out;
+}
+
+/**
+ * Ofertas que caben en `duracionMin` para los huecos que ya son de un solo
+ * profesional y una sola duración. No se mezclan acá con otra agenda.
+ * 45 es un módulo y 90 ocupa 9:00 y 9:45. En una agenda de 30, 60 ocupa
+ * 10:00 y 10:30; 9:00 no entra si falta 9:30.
+ * Sin regla, si esa duración no entra en la agenda, se muestran igual los huecos
+ * para no hacer desaparecer al profesional.
+ */
+function armarOfertasPorDuracion(slots, duracionMin, opts) {
   const duracion = Number(duracionMin);
+  const conservar = !!opts?.conservarSiNoEntra;
   if (!Number.isFinite(duracion) || duracion <= 0) return [];
   const byBloque = new Map();
   for (const s of slots) {
@@ -393,6 +463,7 @@ function armarOfertasPorDuracion(slots, duracionMin) {
     byBloque.get(k).push(s);
   }
   const ofertas = [];
+  const duracionDeUnModulo = duracion === 15 || duracion === 30 || duracion === 45;
   for (const list of byBloque.values()) {
     const byMin = new Map();
     for (const s of list) {
@@ -401,53 +472,84 @@ function armarOfertasPorDuracion(slots, duracionMin) {
       byMin.set(min, s);
     }
     const minutos = [...byMin.keys()].sort((a, b) => a - b);
-    let modulo = null;
-    for (let i = 1; i < minutos.length; i++) {
-      const gap = minutos[i] - minutos[i - 1];
-      if (gap > 0 && gap % PASO_MIN === 0 && (modulo == null || gap < modulo)) modulo = gap;
+    const paso = detectarPaso(minutos);
+    if (!paso) {
+      if (conservar || duracionDeUnModulo) {
+        ofertas.push(...ofertasDeUnModulo(byMin, duracion));
+      }
+      continue;
     }
-    const paso = modulo || (duracion % PASO_MIN === 0 ? duracion : null);
-    if (!paso || duracion % paso !== 0) continue;
+    if (duracion % paso !== 0) {
+      if (conservar) ofertas.push(...ofertasDeUnModulo(byMin, paso));
+      continue;
+    }
     const needed = duracion / paso;
+    const delBloque = [];
     for (const startMin of minutos) {
       const start = byMin.get(startMin);
       const modulos = [start];
       let ok = true;
       for (let i = 1; i < needed; i++) {
-        const next = byMin.get(startMin + i * paso);
-        if (!next || !mismoBloque(start, next)) {
+        const nextMin = startMin + i * paso;
+        const next = byMin.get(nextMin);
+        if (!next || !mismoBloque(start, next) || !mismoDiaMinutos(startMin, nextMin)) {
           ok = false;
           break;
         }
         modulos.push(next);
       }
-      if (ok) ofertas.push({ ...start, modulos, moduloMin: paso });
+      if (ok) delBloque.push({ ...start, modulos, moduloMin: paso });
     }
+    if (delBloque.length) ofertas.push(...delBloque);
+    else if (conservar) ofertas.push(...ofertasDeUnModulo(byMin, paso));
   }
   return ofertas;
 }
 
-/** La regla (profesional + prestación + modalidad del hueco) pisa la duración general. */
+function duracionDeSlot(slot, prestacionId, duracionGeneral, index) {
+  const mod = isSlotVirtual(slot.edificio) ? 'VIRTUAL' : 'PRESENCIAL';
+  const prest = prestacionId || slot.prestacionId;
+  const especifica = index.get(reglaKey(slot.profesionalDoc, prest, mod));
+  const todas = index.get(reglaKey(slot.profesionalDoc, prest, 'TODAS'));
+  const porRegla = especifica != null || todas != null;
+  const dur = porRegla ? (especifica != null ? especifica : todas) : duracionGeneral;
+  return { mod, porRegla, dur };
+}
+
+/**
+ * La duración se aplica después de la modalidad, y nunca mezclada:
+ * cada profesional usa la suya (la regla si tiene, si no la del selector).
+ * La grilla de uno no cambia el paso ni los huecos de otro.
+ */
 function armarOfertasConReglas(slots, prestacionId, duracionGeneral, reglas) {
   const index = new Map();
   for (const r of normalizeReglas(reglas)) {
     index.set(reglaKey(r.profesionalDoc, r.prestacionCodigo, r.modalidad), r.duracionMin);
   }
-  const groups = new Map();
+  const porProf = new Map();
   for (const s of slots) {
-    const mod = isSlotVirtual(s.edificio) ? 'VIRTUAL' : 'PRESENCIAL';
-    const prest = prestacionId || s.prestacionId;
-    const especifica = index.get(reglaKey(s.profesionalDoc, prest, mod));
-    const todas = index.get(reglaKey(s.profesionalDoc, prest, 'TODAS'));
-    const porRegla = especifica != null || todas != null;
-    const dur = porRegla ? (especifica != null ? especifica : todas) : duracionGeneral;
-    const tagged = { ...s, porRegla, duracionMin: dur };
-    if (!groups.has(dur)) groups.set(dur, []);
-    groups.get(dur).push(tagged);
+    const doc = String(s.profesionalDoc);
+    if (!porProf.has(doc)) porProf.set(doc, []);
+    porProf.get(doc).push(s);
   }
   const out = [];
-  for (const [dur, list] of groups) {
-    out.push(...armarOfertasPorDuracion(list, dur));
+  for (const list of porProf.values()) {
+    const porDuracion = new Map();
+    for (const s of list) {
+      const info = duracionDeSlot(s, prestacionId, duracionGeneral, index);
+      const k = `${info.mod}|${info.dur}|${info.porRegla ? '1' : '0'}`;
+      if (!porDuracion.has(k)) porDuracion.set(k, { dur: info.dur, porRegla: info.porRegla, slots: [] });
+      porDuracion.get(k).slots.push({ ...s, porRegla: info.porRegla, duracionMin: info.dur });
+    }
+    for (const grupo of porDuracion.values()) {
+      // La regla solo recorta al profesional que la tiene. El resto usa la duración general
+      // y, si no entra en su agenda, igual se muestran sus huecos.
+      out.push(
+        ...armarOfertasPorDuracion(grupo.slots, grupo.dur, {
+          conservarSiNoEntra: !grupo.porRegla,
+        })
+      );
+    }
   }
   return out;
 }
@@ -711,26 +813,13 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   );
 
   const slotsFiltered = useMemo(() => {
+    // 1) los turnos ya vinieron por prestación y profesional.
+    // 2) modalidad. 3) duración, aparte: regla si ese profesional tiene, si no la general.
     let list = slotsRaw;
     if (modalidad === 'VIRTUAL') list = list.filter((s) => isSlotVirtual(s.edificio));
     else if (modalidad === 'PRESENCIAL') list = list.filter((s) => !isSlotVirtual(s.edificio));
     return armarOfertasConReglas(list, prestacionId, duracionMin, reglas);
   }, [slotsRaw, modalidad, duracionMin, prestacionId, reglas]);
-
-  const resultsSummaryDisplay = useMemo(() => {
-    if (!slotsRaw.length || !prestacionId) return '';
-    const nombrePrest = prestaciones[prestacionId]?.nombre || prestacionId;
-    const days = new Set(slotsFiltered.map((s) => fmtDateKey(s.fechaHora))).size;
-    const filtroLabel =
-      modalidad === 'VIRTUAL' ? ' virtuales' : modalidad === 'PRESENCIAL' ? ' presenciales' : '';
-    const durLabel = slotsFiltered.some((s) => s.porRegla)
-      ? ' · reglas de duración'
-      : ` de ${duracionMin} min`;
-    if (!slotsFiltered.length) {
-      return `0 turnos${filtroLabel}${durLabel} (de ${slotsRaw.length} módulos) para "${nombrePrest}"`;
-    }
-    return `${slotsFiltered.length} turno${slotsFiltered.length !== 1 ? 's' : ''}${filtroLabel}${durLabel} disponibles para "${nombrePrest}" · ${days} día${days !== 1 ? 's' : ''}`;
-  }, [slotsRaw, slotsFiltered, prestacionId, prestaciones, modalidad, duracionMin]);
 
   const enabledProfDocs = useMemo(
     () => new Set(profesionalesCatalog.filter((p) => p.enabled).map((p) => String(p.doc))),
@@ -1411,7 +1500,8 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       );
       const selected = selectedPrestadorDocsByPrestacion[prestacionId];
       if (selected !== undefined && selected.length > 0) {
-        profesionales = profesionales.filter((p) => selected.includes(p.doc));
+        const elegidos = new Set(selected.map((d) => String(d)));
+        profesionales = profesionales.filter((p) => elegidos.has(String(p.doc)));
       }
 
       if (!profesionales.length) {
@@ -1434,35 +1524,32 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
 
       try {
       let allSlots = [];
+      let falloBusqueda = null;
       const DAYS_PER_BLOCK = 21;
       const PARALLEL_DAYS = 7;
       const LIMITE_POR_DIA = 40;
-      const MAX_PRESTADORES_POR_REQUEST = 10;
-
-      const grupos = [];
-      for (let i = 0; i < profesionales.length; i += MAX_PRESTADORES_POR_REQUEST) {
-        grupos.push(profesionales.slice(i, i + MAX_PRESTADORES_POR_REQUEST));
-      }
+      const PROFESIONALES_EN_PARALELO = 4;
 
       const url = `${config.base}/Turno/Disponible`;
 
-      const parseSlotList = (data) => {
+      const parseSlotList = (data, profPedido) => {
         const slotList = Array.isArray(data) ? data : (data.Turnos || data.turnos || []);
         return slotList.map((s) => {
-          const doc = s.profesionalDocumento ?? s.PrestadorDocumento;
+          const docRaw = s.profesionalDocumento ?? s.PrestadorDocumento;
+          const doc =
+            docRaw != null && String(docRaw).trim() !== ''
+              ? String(docRaw).trim()
+              : String(profPedido.doc);
           const prof =
-            profesionales.find((p) => String(p.doc) === String(doc)) || {
-              nombre: s.profesionalNombre || s.PrestadorNombre || '',
-              sede: s.sede || s.Sede || '',
-            };
+            profesionales.find((p) => String(p.doc) === String(doc)) || profPedido;
           const fechaHora = s.turnoFechaHora || s.TurnoFechaHora;
           const edificio = String(s.edificio ?? s.Edificio ?? '').trim();
           const sector = String(s.sector ?? s.Sector ?? '').trim();
           return {
             fechaHora: new Date(fechaHora),
-            profesional: prof.nombre || s.profesionalNombre || s.PrestadorNombre || '',
-            profesionalDoc: String(doc),
-            sede: prof.sede || s.sede || s.Sede || '',
+            profesional: prof.nombre || s.profesionalNombre || s.PrestadorNombre || profPedido.nombre || '',
+            profesionalDoc: String(prof.doc || doc),
+            sede: prof.sede || s.sede || s.Sede || profPedido.sede || '',
             edificio,
             sector,
             prestacionId,
@@ -1479,44 +1566,54 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         // y filtramos Virtual/Presencial en el cliente según `edificio`.
         const modalidadValor = 'PRESENCIAL';
 
-        const requests = grupos.map(async (grupo) => {
-          const body = {
-            prestacionCodigo: prestacionId,
-            profesionalDocumentos: grupo.map((p) => String(p.doc)),
-            modalidad: modalidadValor,
-            filtros: {
-              fechaDesde,
-              fechaHasta,
-              turnoEstado: 'D',
+        const fetchProf = async (prof) => {
+          try {
+            const body = {
+              prestacionCodigo: prestacionId,
+              profesionalDocumentos: [String(prof.doc)],
               modalidad: modalidadValor,
-            },
-            // Un día por request: con ventana semanal + limite bajo Medexis solo
-            // devolvía el primer día (ej. 7/9) y ocultaba el resto (8/9…).
-            limite: LIMITE_POR_DIA,
-          };
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify(body),
-          });
-          const data = await res.json().catch(() => null);
-          if (!res.ok) {
-            const msg =
-              data?.Detalle || data?.Mensaje || data?.Message || `HTTP ${res.status}`;
-            throw new Error(msg);
+              filtros: {
+                fechaDesde,
+                fechaHasta,
+                turnoEstado: 'D',
+                modalidad: modalidadValor,
+              },
+              // Un día y un profesional: el límite de Medexis es del request entero.
+              // Si iban varios juntos, los huecos de uno se comían el cupo y el resto no volvía.
+              limite: LIMITE_POR_DIA,
+            };
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+              body: JSON.stringify(body),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+              const msg =
+                data?.Detalle || data?.Mensaje || data?.Message || `HTTP ${res.status}`;
+              throw new Error(msg);
+            }
+            if (data?.Respuesta === 'ERROR') {
+              throw new Error(data.Detalle || data.Mensaje || 'Error al consultar turnos');
+            }
+            return parseSlotList(data, prof);
+          } catch (e) {
+            falloBusqueda = e;
+            return [];
           }
-          if (data?.Respuesta === 'ERROR') {
-            throw new Error(data.Detalle || data.Mensaje || 'Error al consultar turnos');
-          }
-          return parseSlotList(data);
-        });
+        };
 
-        const results = await Promise.all(requests);
-        return results.flat();
+        const slotsDia = [];
+        for (let i = 0; i < profesionales.length; i += PROFESIONALES_EN_PARALELO) {
+          const tanda = profesionales.slice(i, i + PROFESIONALES_EN_PARALELO);
+          const results = await Promise.all(tanda.map((prof) => fetchProf(prof)));
+          for (const sl of results) slotsDia.push(...sl);
+        }
+        return slotsDia;
       };
 
       for (let i = 0; i < DAYS_PER_BLOCK; i += PARALLEL_DAYS) {
@@ -1537,6 +1634,8 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           allSlots.push(...sl);
         }
       }
+
+      if (allSlots.length === 0 && falloBusqueda) throw falloBusqueda;
 
       if (allSlots.length === 0) {
         if (!append) {
@@ -2177,13 +2276,11 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           </div>
         </div>
 
-        {(resultsSummaryDisplay || (searchReturnedEmpty && slotsRaw.length === 0)) && (
+        {(slotsRaw.length > 0 || searchReturnedEmpty) && (
           <div className="results-summary-row">
-            {resultsSummaryDisplay ? (
-              <div className="results-summary visible">{resultsSummaryDisplay}</div>
-            ) : (
+            {searchReturnedEmpty && slotsRaw.length === 0 ? (
               <div className="results-summary visible">Sin turnos en este rango</div>
-            )}
+            ) : null}
             <button
               type="button"
               className="btn btn-limpiar"
@@ -2398,15 +2495,10 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                         </div>
                         <div className="slot-grid slot-grid-by-prof">
                           {profSlots.map((s, i) => {
-                            const sede = (s.sede && String(s.sede).trim()) || 'INECO';
                             const virtual = isSlotVirtual(s.edificio);
-                            const modLabel = slotModalidadLabel(s.edificio);
-                            const lugarBits = [
-                              s.edificio,
-                              s.sector,
-                              sede !== 'INECO' ? sede : '',
-                            ].filter(Boolean);
-                            const lugar = lugarBits.join(' · ');
+                            const tooltip = virtual
+                              ? 'Virtual'
+                              : [s.edificio, s.sector].filter(Boolean).join(' · ') || 'Presencial';
                             const modulos = s.modulos?.length ? s.modulos : [s];
                             const ocupa =
                               modulos.length > 1
@@ -2422,13 +2514,13 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                                 type="button"
                                 className={`slot-card slot-card-compact${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalle ? ' slot-card--multi' : ''}`}
                                 onClick={() => openAssignModal(s)}
-                                title={`Elegir este horario (${modLabel}${detalle ? ` · ${detalle}` : ''}${lugar ? ` · ${lugar}` : ''})`}
-                                aria-label={`Asignar turno ${fmtTime(s.fechaHora)}${detalle ? `. ${detalle}` : ''} · ${modLabel}${lugar ? ` · ${lugar}` : ''}`}
+                                title={tooltip}
+                                aria-label={`Asignar turno ${fmtTime(s.fechaHora)}. ${tooltip}${detalle ? `. ${detalle}` : ''}`}
                               >
                                 <span className="slot-time-row">
                                   <span
                                     className="slot-mod-icon"
-                                    title={modLabel}
+                                    title={tooltip}
                                     aria-hidden
                                   >
                                     {virtual ? (

@@ -571,6 +571,7 @@
 
 .results-summary-row .btn-limpiar {
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* --- Prestadores list --- */
