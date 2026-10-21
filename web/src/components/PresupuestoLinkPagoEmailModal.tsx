@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import {
   buildPresupuestoEmailVarsFromPresupuesto,
-  renderLinkPagoEmailPreview,
+  renderPresupuestoEmailByKind,
 } from "../lib/presupuestoEmail";
 import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
 import {
@@ -11,6 +11,11 @@ import {
   prepararPresupuestoLinkPago,
 } from "../services/dataService";
 import type { Presupuesto } from "../types";
+import type { PresupuestoEmailConfig, PresupuestoEmailTemplateKind } from "../types/presupuestoEmail";
+import {
+  PRESUPUESTO_EMAIL_KIND_LABEL,
+  PRESUPUESTO_EMAIL_KINDS,
+} from "../types/presupuestoEmail";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
 import { EmailChipsInput } from "./EmailChipsInput";
 import { Modal } from "./Modal";
@@ -34,6 +39,21 @@ export function PresupuestoLinkPagoEmailModal({
   const [body, setBody] = useState("");
   const [toEmails, setToEmails] = useState("");
   const [editorKey, setEditorKey] = useState(0);
+  const [kind, setKind] = useState<PresupuestoEmailTemplateKind>("linkPago");
+  const configRef = useRef<PresupuestoEmailConfig | null>(null);
+  const varsRef = useRef<ReturnType<typeof buildPresupuestoEmailVarsFromPresupuesto> | null>(null);
+  const suggestedKind: PresupuestoEmailTemplateKind = "linkPago";
+
+  function applyKind(next: PresupuestoEmailTemplateKind) {
+    const config = configRef.current;
+    const vars = varsRef.current;
+    if (!config || !vars) return;
+    const rendered = renderPresupuestoEmailByKind(config, next, vars);
+    setKind(next);
+    setSubject(rendered.subject);
+    setBody(rendered.body);
+    setEditorKey((k) => k + 1);
+  }
 
   useEffect(() => {
     if (!open || !presupuesto) return;
@@ -58,7 +78,10 @@ export function PresupuestoLinkPagoEmailModal({
           withLink,
           withLink.mpInitPoint ?? "",
         );
-        const rendered = renderLinkPagoEmailPreview(config, vars);
+        configRef.current = config;
+        varsRef.current = vars;
+        const rendered = renderPresupuestoEmailByKind(config, "linkPago", vars);
+        setKind("linkPago");
         setSubject(rendered.subject);
         setBody(rendered.body);
         setEditorKey((k) => k + 1);
@@ -165,6 +188,23 @@ export function PresupuestoLinkPagoEmailModal({
         <p className="text-muted">Preparando link de pago y plantilla…</p>
       ) : (
         <div className="form-stack">
+          <div className="form-group">
+            <label htmlFor="presup-link-pago-kind">Plantilla</label>
+            <select
+              id="presup-link-pago-kind"
+              value={kind}
+              disabled={disabled}
+              onChange={(e) => applyKind(e.target.value as PresupuestoEmailTemplateKind)}
+            >
+              {PRESUPUESTO_EMAIL_KINDS.map((option) => (
+                <option key={option} value={option}>
+                  {PRESUPUESTO_EMAIL_KIND_LABEL[option]}
+                  {option === suggestedKind ? " (sugerida)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="form-group">
             <label htmlFor="presup-link-pago-to">Para</label>
             <EmailChipsInput

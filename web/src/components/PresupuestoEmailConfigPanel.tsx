@@ -26,6 +26,7 @@ import type {
 import {
   EMAIL_TEMPLATE_VARS_BY_KIND,
   EMPTY_PRESUPUESTO_EMAIL_CONFIG,
+  PRESUPUESTO_EMAIL_KIND_LABEL,
   PRESUPUESTO_EMAIL_TEMPLATE_VAR_LABELS,
 } from "../types/presupuestoEmail";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
@@ -41,6 +42,8 @@ function sameConfig(a: PresupuestoEmailConfig, b: PresupuestoEmailConfig): boole
     richHtmlEquivalent(a.body, b.body) &&
     a.externoSubject === b.externoSubject &&
     richHtmlEquivalent(a.externoBody, b.externoBody) &&
+    a.reenvioSubject === b.reenvioSubject &&
+    richHtmlEquivalent(a.reenvioBody, b.reenvioBody) &&
     a.linkPagoSubject === b.linkPagoSubject &&
     richHtmlEquivalent(a.linkPagoBody, b.linkPagoBody)
   );
@@ -51,6 +54,7 @@ function normalizeConfig(config: PresupuestoEmailConfig): PresupuestoEmailConfig
     ...config,
     body: canonicalRichHtml(config.body),
     externoBody: canonicalRichHtml(config.externoBody),
+    reenvioBody: canonicalRichHtml(config.reenvioBody),
     linkPagoBody: canonicalRichHtml(config.linkPagoBody),
   };
 }
@@ -75,6 +79,12 @@ const VAR_GROUPS_BY_KIND: Record<PresupuestoEmailTemplateKind, VarGroup[]> = {
     { title: "Presupuesto", keys: ["fechaPresupuesto", "totalEfectivo"] },
     { title: "Prestaciones", keys: ["cantidadPrestaciones", "listaPrestaciones"] },
   ],
+  reenvio: [
+    { title: "Paciente", keys: ["nombrePaciente", "email"] },
+    { title: "Profesional", keys: ["nombreProfesional"] },
+    { title: "Presupuesto", keys: ["fechaPresupuesto", "totalEfectivo", "total3Cuotas"] },
+    { title: "Prestaciones", keys: ["cantidadPrestaciones", "listaPrestaciones"] },
+  ],
   linkPago: [
     { title: "Paciente", keys: ["nombrePaciente", "email"] },
     { title: "Profesional", keys: ["nombreProfesional"] },
@@ -82,12 +92,6 @@ const VAR_GROUPS_BY_KIND: Record<PresupuestoEmailTemplateKind, VarGroup[]> = {
     { title: "Prestaciones", keys: ["cantidadPrestaciones", "listaPrestaciones"] },
     { title: "Pago", keys: ["linkPago", "linkPagoHipervinculo"] },
   ],
-};
-
-const KIND_LABEL: Record<PresupuestoEmailTemplateKind, string> = {
-  presupuesto: "Presupuesto",
-  presupuestoExterno: "Presupuesto externo",
-  linkPago: "Link de pago",
 };
 
 function collectUsedVars(subject: string, body: string): Set<string> {
@@ -103,12 +107,14 @@ function collectUsedVars(subject: string, body: string): Set<string> {
 
 function activeSubject(config: PresupuestoEmailConfig, kind: PresupuestoEmailTemplateKind): string {
   if (kind === "linkPago") return config.linkPagoSubject;
+  if (kind === "reenvio") return config.reenvioSubject;
   if (kind === "presupuestoExterno") return config.externoSubject;
   return config.subject;
 }
 
 function activeBody(config: PresupuestoEmailConfig, kind: PresupuestoEmailTemplateKind): string {
   if (kind === "linkPago") return config.linkPagoBody;
+  if (kind === "reenvio") return config.reenvioBody;
   if (kind === "presupuestoExterno") return config.externoBody;
   return config.body;
 }
@@ -176,6 +182,7 @@ export function PresupuestoEmailConfigPanel() {
   function setActiveSubject(value: string) {
     setForm((prev) => {
       if (kind === "linkPago") return { ...prev, linkPagoSubject: value };
+      if (kind === "reenvio") return { ...prev, reenvioSubject: value };
       if (kind === "presupuestoExterno") return { ...prev, externoSubject: value };
       return { ...prev, subject: value };
     });
@@ -184,6 +191,7 @@ export function PresupuestoEmailConfigPanel() {
   function setActiveBody(value: string) {
     setForm((prev) => {
       if (kind === "linkPago") return { ...prev, linkPagoBody: value };
+      if (kind === "reenvio") return { ...prev, reenvioBody: value };
       if (kind === "presupuestoExterno") return { ...prev, externoBody: value };
       return { ...prev, body: value };
     });
@@ -340,6 +348,10 @@ export function PresupuestoEmailConfigPanel() {
       toast.warning("Completá el cuerpo del mail de presupuesto externo");
       return;
     }
+    if (!normalizeRichHtml(form.reenvioBody).trim()) {
+      toast.warning("Completá el cuerpo del mail de reenvío");
+      return;
+    }
     if (!normalizeRichHtml(form.linkPagoBody).trim()) {
       toast.warning("Completá el cuerpo del mail de link de pago");
       return;
@@ -352,6 +364,10 @@ export function PresupuestoEmailConfigPanel() {
       toast.warning("Completá el asunto del mail de presupuesto externo");
       return;
     }
+    if (!form.reenvioSubject.trim()) {
+      toast.warning("Completá el asunto del mail de reenvío");
+      return;
+    }
     if (!form.linkPagoSubject.trim()) {
       toast.warning("Completá el asunto del mail de link de pago");
       return;
@@ -362,6 +378,7 @@ export function PresupuestoEmailConfigPanel() {
         ...form,
         body: normalizeRichHtml(form.body),
         externoBody: normalizeRichHtml(form.externoBody),
+        reenvioBody: normalizeRichHtml(form.reenvioBody),
         linkPagoBody: normalizeRichHtml(form.linkPagoBody),
       });
       const next = normalizeConfig(await savePresupuestoEmailConfig(payload));
@@ -432,9 +449,12 @@ export function PresupuestoEmailConfigPanel() {
                       }
                       aria-label="Tipo de plantilla"
                     >
-                      <option value="presupuesto">{KIND_LABEL.presupuesto}</option>
-                      <option value="presupuestoExterno">{KIND_LABEL.presupuestoExterno}</option>
-                      <option value="linkPago">{KIND_LABEL.linkPago}</option>
+                      <option value="presupuesto">{PRESUPUESTO_EMAIL_KIND_LABEL.presupuesto}</option>
+                      <option value="presupuestoExterno">
+                        {PRESUPUESTO_EMAIL_KIND_LABEL.presupuestoExterno}
+                      </option>
+                      <option value="reenvio">{PRESUPUESTO_EMAIL_KIND_LABEL.reenvio}</option>
+                      <option value="linkPago">{PRESUPUESTO_EMAIL_KIND_LABEL.linkPago}</option>
                     </select>
                   </label>
                 </header>
@@ -453,7 +473,9 @@ export function PresupuestoEmailConfigPanel() {
                     placeholder={
                       kind === "linkPago"
                         ? "Link de pago - {{nombrePaciente}}"
-                        : "Presupuesto - {{nombrePaciente}}"
+                        : kind === "reenvio"
+                          ? "Reenvío de presupuesto - {{nombrePaciente}}"
+                          : "Presupuesto - {{nombrePaciente}}"
                     }
                   />
                 </div>
@@ -480,7 +502,7 @@ export function PresupuestoEmailConfigPanel() {
             <aside className="config-panel__aside" aria-label="Variables de plantilla">
               <header className="config-section__head">
                 <h3 className="config-section__title">Variables</h3>
-                <p className="config-section__hint">{KIND_LABEL[kind]}</p>
+                <p className="config-section__hint">{PRESUPUESTO_EMAIL_KIND_LABEL[kind]}</p>
               </header>
               <div className="config-vars-groups">
                 {varGroups.map((group) => (

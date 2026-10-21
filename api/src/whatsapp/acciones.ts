@@ -212,7 +212,12 @@ export function preguntaDeResultado(resultado: string, clave = ""): string {
   }
   if (texto.includes("profesionales con ese nombre")) return "¿Cuál buscabas?";
   if (texto.includes("tenemos estos profesionales")) return "¿Cuál de estos profesionales preferís?";
-  if (texto.includes("falta el profesional")) return "¿Tenés algún profesional en especial?";
+  if (texto.includes("falta el profesional") && !texto.includes("no hay uno habilitado")) {
+    return "¿Tenés algún profesional en especial?";
+  }
+  if (texto.includes("no hay uno habilitado") || texto.includes("no tiene tratamientos habilitados")) {
+    return "¿Qué preferís?";
+  }
   if (texto.includes("falta el tratamiento") || texto.includes("no hace ese tratamiento")) return "¿Para qué tratamiento?";
   if (texto.includes("estos son los tratamientos") || texto.includes("hay más de un cruce")) return "¿Cuál de estos tratamientos querés?";
   if (texto.includes("falta el horario")) return "¿Cuál de estos horarios querés?";
@@ -246,8 +251,13 @@ export function preguntaDeResultado(resultado: string, clave = ""): string {
     return "¿Cuál de estos horarios querés?";
   }
   if (/\d{4}-\d{2}-\d{2}/.test(resultado)) return "¿Cuál de estos horarios querés?";
-  if (clave === "turnos.listarProfesionales") return "¿Cuál de estos profesionales preferís?";
-  if (clave === "turnos.listarTratamientos") return "¿Para qué tratamiento?";
+  // Solo preguntar por la lista si el resultado realmente trajo opciones.
+  if (clave === "turnos.listarProfesionales" && /tenemos estos profesionales|profesionales para/i.test(resultado)) {
+    return "¿Cuál de estos profesionales preferís?";
+  }
+  if (clave === "turnos.listarTratamientos" && /estos son los tratamientos|tratamientos de/i.test(resultado)) {
+    return "¿Para qué tratamiento?";
+  }
   return "";
 }
 
@@ -571,6 +581,9 @@ function topeParecido(token: string): number {
 
 function tokenParecido(token: string, candidato: string): boolean {
   if (token === candidato) return true;
+  // «marcelocetkovich» pegado: el apellido o el nombre van adentro del token.
+  if (token.length >= 8 && candidato.length >= 4 && token.includes(candidato)) return true;
+  if (candidato.length >= 8 && token.length >= 4 && candidato.includes(token)) return true;
   const tope = topeParecido(token);
   if (!tope || Math.abs(token.length - candidato.length) > tope) return false;
   return distancia(token, candidato) <= tope;
@@ -938,15 +951,18 @@ async function turnosLibres(
   const par = guardado ?? parDeConsulta(config, textoNombre, ctx.textoPersona ?? "");
   if (typeof par === "string") {
     if (par.startsWith("Falta el profesional")) {
+      if (/no hay uno habilitado/i.test(par)) {
+        return solo(`${par}\n${TEXTO_ORIENTACION_TURNO}`);
+      }
       const sugeridos = profesionalesDePrestacion(config, consulta);
       // Si no mencionó un tratamiento, no mezclar "sin prestación" con "sin profesional".
-      if (sugeridos.startsWith("No hay una prestación")) return solo(par);
+      if (sugeridos.startsWith("No hay una prestación")) return solo(`${par}\n${TEXTO_ORIENTACION_TURNO}`);
       return solo(`${par}\n${sugeridos}`);
     }
     if (par.startsWith("Falta el tratamiento") || par.startsWith("Ese profesional no hace")) {
       const lista = tratamientosDeProfesional(config, consulta);
       if (lista.startsWith("Estos son los tratamientos")) return solo(lista);
-      return solo(`${par}\n${lista}`);
+      return solo(`${par}\n${lista}\n${TEXTO_ORIENTACION_TURNO}`);
     }
     return solo(par);
   }
@@ -956,10 +972,8 @@ async function turnosLibres(
   }
   const dni = dniDicho(consulta, ctx.dni || "");
   const pareja = `${par.profesional.nombre} — ${par.prestacion.nombre || par.codigo} (${par.codigo})`;
-  if (!dni) {
-    return solo(`Falta el DNI del paciente para ver si ya está en INECO.\n${pareja}`);
-  }
-  const persona = await leerPersona(dni);
+  // Mostrar turnos libres sin exigir DNI; el DNI se pide al reservar.
+  const persona = dni ? await leerPersona(dni) : { texto: "", ficha: undefined };
   const misma = ctx.busqueda === busqueda;
   const desde = misma ? Math.max(0, ctx.desdeDia ?? 0) : 0;
   const previas = misma ? lineasHorario(ctx.horariosPrevios ?? "") : [];
@@ -972,7 +986,7 @@ async function turnosLibres(
             "Antes de estas fechas no hay otros turnos libres. Estos son los que ya tenía:",
             previas,
           )
-        : `${persona.texto}\nAntes de estas fechas no hay turnos libres de ${pareja}.`,
+        : [persona.texto, `Antes de estas fechas no hay turnos libres de ${pareja}.`].filter(Boolean).join("\n"),
       hastaDia: desde,
       busqueda,
       horarios: lista,
@@ -988,7 +1002,9 @@ async function turnosLibres(
             `Ya busqué hasta el ${fechaBa(TOPE_DIAS - 1)}. Siguen estos horarios:`,
             previas,
           )
-        : `${persona.texto}\nYa busqué hasta el ${fechaBa(TOPE_DIAS - 1)}. No hay turnos libres de ${pareja}.`,
+        : [persona.texto, `Ya busqué hasta el ${fechaBa(TOPE_DIAS - 1)}. No hay turnos libres de ${pareja}.`]
+            .filter(Boolean)
+            .join("\n"),
       hastaDia: desde,
       busqueda,
       horarios: lista,
@@ -1010,7 +1026,9 @@ async function turnosLibres(
   const periodo = `entre el ${fechaBa(desde)} y el ${fechaBa(Math.max(desde, hasta - 1))}`;
   if (!juntos.length) {
     return {
-      texto: `${persona.texto}\nNo hay turnos libres de ${pareja} ${periodo}.`,
+      texto: [persona.texto, `No hay turnos libres de ${pareja} ${periodo}.`, TEXTO_ORIENTACION_TURNO]
+        .filter(Boolean)
+        .join("\n"),
       hastaDia: hasta,
       busqueda,
       ficha: persona.ficha,

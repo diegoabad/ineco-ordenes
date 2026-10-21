@@ -6,7 +6,13 @@ import {
   fetchPrestaciones,
   updatePrestacion,
 } from "../services/dataService";
-import type { Prestacion, PrestacionFormData, TipoPrestacion } from "../types";
+import {
+  esTipoTratamiento,
+  etiquetaFrecuencia,
+  type Prestacion,
+  type PrestacionFormData,
+  type TipoPrestacion,
+} from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IconEye, IconPencil, IconSearch, IconTrash } from "./Icons";
 import { LoadingBlock } from "./InecoMark";
@@ -32,6 +38,28 @@ function formatDuracion(minutos: number): string {
   return `${minutos} min`;
 }
 
+type PestanaPrestacion = "evaluacion" | "tratamiento" | "otras";
+
+const PESTANAS: { id: Exclude<PestanaPrestacion, "otras">; label: string }[] = [
+  { id: "evaluacion", label: "Evaluación" },
+  { id: "tratamiento", label: "Tratamiento" },
+];
+
+function normalizarTipo(nombre: string): string {
+  return nombre
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function pestanaDeTipo(nombre: string): PestanaPrestacion {
+  const tipo = normalizarTipo(nombre);
+  if (tipo === "evaluacion") return "evaluacion";
+  if (tipo === "tratamiento") return "tratamiento";
+  return "otras";
+}
+
 type Props = {
   /** Incrementar para abrir el modal de alta desde el header. */
   addRequestKey?: number;
@@ -42,6 +70,7 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
   const [items, setItems] = useState<Prestacion[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
+  const [pestana, setPestana] = useState<PestanaPrestacion>("evaluacion");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Prestacion | null>(null);
   const [viewing, setViewing] = useState<Prestacion | null>(null);
@@ -71,28 +100,49 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
     void cargar();
   }, [cargar]);
 
+  const hayOtras = useMemo(
+    () => items.some((p) => pestanaDeTipo(p.tipo) === "otras"),
+    [items],
+  );
+
+  const tipoInicial = useMemo(() => {
+    if (pestana === "otras") return tiposPrestacion[0]?.nombre ?? "Evaluación";
+    const encontrada = tiposPrestacion.find((t) => pestanaDeTipo(t.nombre) === pestana);
+    return encontrada?.nombre ?? (pestana === "evaluacion" ? "Evaluación" : "Tratamiento");
+  }, [pestana, tiposPrestacion]);
+
   const filtradas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((p) =>
-      [p.titulo, p.descripcion].join(" ").toLowerCase().includes(q),
-    );
-  }, [items, busqueda]);
+    return items.filter((p) => {
+      if (pestanaDeTipo(p.tipo) !== pestana) return false;
+      if (!q) return true;
+      return [p.titulo, p.descripcion].join(" ").toLowerCase().includes(q);
+    });
+  }, [items, busqueda, pestana]);
 
   const { page, setPage, pageItems, total, pageSize } = useClientPagination(
     filtradas,
-    busqueda.trim().toLowerCase(),
+    `${pestana}|${busqueda.trim().toLowerCase()}`,
   );
+
+  useEffect(() => {
+    if (pestana === "otras" && !hayOtras) setPestana("evaluacion");
+  }, [pestana, hayOtras]);
+
+  const etiquetaPestana =
+    pestana === "evaluacion" ? "evaluación" : pestana === "tratamiento" ? "tratamiento" : "otro tipo";
 
   async function handleSave(data: PrestacionFormData, id?: string) {
     try {
       if (id) {
         const updated = await updatePrestacion(id, data);
         setItems((prev) => prev.map((p) => (p.id === id ? updated : p)));
+        setPestana(pestanaDeTipo(updated.tipo));
         toast.success("Prestación actualizada");
       } else {
         const created = await createPrestacion(data);
         setItems((prev) => [created, ...prev]);
+        setPestana(pestanaDeTipo(created.tipo));
         toast.success("Prestación creada");
       }
       setFormOpen(false);
@@ -117,6 +167,32 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
 
   return (
     <>
+      <div className="app-tabs app-tabs--full" role="tablist" aria-label="Tipos de prestación">
+        {PESTANAS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={pestana === item.id}
+            className={`app-tabs__btn${pestana === item.id ? " is-active" : ""}`}
+            onClick={() => setPestana(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+        {hayOtras ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pestana === "otras"}
+            className={`app-tabs__btn${pestana === "otras" ? " is-active" : ""}`}
+            onClick={() => setPestana("otras")}
+          >
+            Otras
+          </button>
+        ) : null}
+      </div>
+
       <section className="fl-table-card">
         <div className="table-toolbar table-toolbar--filters">
           <div className="table-search">
@@ -148,8 +224,12 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
                 <th>Título</th>
                 <th>Tipo</th>
                 <th className="fl-col-prest-num">Duración</th>
-                <th className="fl-col-prest-num">Efect/Transf</th>
-                <th className="fl-col-prest-num">3 cuotas</th>
+                <th className="fl-col-prest-num">
+                  {pestana === "tratamiento" ? "Por sesión" : "Efect/Transf"}
+                </th>
+                <th className="fl-col-prest-num">
+                  {pestana === "tratamiento" ? "Frecuencia" : "3 cuotas"}
+                </th>
                 <th className="fl-col-actions fl-col-actions--3" aria-label="Acciones" />
               </tr>
             </thead>
@@ -168,7 +248,11 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
                     </td>
                     <td className="fl-col-prest-num">{formatDuracion(p.duracionMinutos ?? 0)}</td>
                     <td className="fl-col-prest-num">{formatMoney(p.precioEfectivo)}</td>
-                    <td className="fl-col-prest-num">{formatMoney(p.precio3Cuotas)}</td>
+                    <td className="fl-col-prest-num">
+                      {esTipoTratamiento(p.tipo)
+                        ? etiquetaFrecuencia(p.frecuencia, p.sesiones)
+                        : formatMoney(p.precio3Cuotas)}
+                    </td>
                     <td className="fl-col-actions fl-col-actions--3">
                       <div className="fl-table-actions fl-table-actions--3">
                         <button
@@ -212,12 +296,14 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
           ) : filtradas.length === 0 ? (
             <div className="fl-table-empty fl-table-empty--fill">
               <p className="fl-table-empty__title">
-                {items.length === 0 ? "Todavía no hay prestaciones" : "Sin resultados"}
+                {busqueda.trim()
+                  ? "Sin resultados"
+                  : `Todavía no hay prestaciones de ${etiquetaPestana}`}
               </p>
               <p className="fl-table-empty__hint">
-                {items.length === 0
-                  ? "Agregá la primera para empezar a armar presupuestos."
-                  : "Probá con otro término de búsqueda."}
+                {busqueda.trim()
+                  ? "Probá con otro término o cambiá de pestaña."
+                  : `Agregá una de ${etiquetaPestana} para empezar a armar presupuestos.`}
               </p>
             </div>
           ) : null}
@@ -236,6 +322,7 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
         open={formOpen}
         initial={editing}
         tiposPrestacion={tiposPrestacion}
+        tipoInicial={tipoInicial}
         onClose={() => {
           setFormOpen(false);
           setEditing(null);
@@ -253,6 +340,14 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
                 { label: "Título", value: viewing.titulo },
                 { label: "Tipo", value: <TipoPrestacionChip nombre={viewing.tipo} tipos={tiposPrestacion} /> },
                 { label: "Duración (min)", value: formatDuracion(viewing.duracionMinutos ?? 0) },
+                ...(esTipoTratamiento(viewing.tipo)
+                  ? [
+                      {
+                        label: "Frecuencia",
+                        value: etiquetaFrecuencia(viewing.frecuencia, viewing.sesiones),
+                      },
+                    ]
+                  : []),
                 {
                   label: "Descripción",
                   value: <RichTextContent html={viewing.descripcion} className="detail-list__multiline" />,
@@ -262,13 +357,17 @@ export function PrestacionesPanel({ addRequestKey = 0, tiposPrestacion }: Props)
                   value: (
                     <div className="detail-precios">
                       <div className="detail-precios__item">
-                        <span className="detail-precios__label">Efect/Transf</span>
+                        <span className="detail-precios__label">
+                          {esTipoTratamiento(viewing.tipo) ? "Honorarios por sesión" : "Efect/Transf"}
+                        </span>
                         <span>{formatMoney(viewing.precioEfectivo)}</span>
                       </div>
-                      <div className="detail-precios__item">
-                        <span className="detail-precios__label">3 cuotas</span>
-                        <span>{formatMoney(viewing.precio3Cuotas)}</span>
-                      </div>
+                      {esTipoTratamiento(viewing.tipo) ? null : (
+                        <div className="detail-precios__item">
+                          <span className="detail-precios__label">3 cuotas</span>
+                          <span>{formatMoney(viewing.precio3Cuotas)}</span>
+                        </div>
+                      )}
                     </div>
                   ),
                 },

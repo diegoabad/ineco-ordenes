@@ -28,6 +28,9 @@ import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
   TIPO_COLOR_PALETTE,
+  esTipoTratamiento,
+  parseFrecuenciaTratamiento,
+  parseSesionesTratamiento,
 } from "../types.js";
 import {
   emailConfigWithEnvDefaults,
@@ -118,7 +121,14 @@ function normalizePresupuestoItem(raw: unknown): PresupuestoItem | null {
     tipo: String(o.tipo ?? ""),
     duracionMinutos: toMinutes(o.duracionMinutos),
     precioEfectivo: toMoney(o.precioEfectivo),
-    precio3Cuotas: toMoney(o.precio3Cuotas),
+    precio3Cuotas: esTipoTratamiento(String(o.tipo ?? "")) ? 0 : toMoney(o.precio3Cuotas),
+    frecuencia: esTipoTratamiento(String(o.tipo ?? ""))
+      ? parseFrecuenciaTratamiento(o.frecuencia)
+      : null,
+    sesiones:
+      esTipoTratamiento(String(o.tipo ?? "")) && parseFrecuenciaTratamiento(o.frecuencia)
+        ? parseSesionesTratamiento(o.frecuencia, o.sesiones)
+        : null,
   };
 }
 
@@ -156,9 +166,9 @@ function estadoAnteriorGuardado(
   estado: PresupuestoEstado,
   ultimoEnvioAt: string | null,
 ): PresupuestoEstado | null {
-  if (estado !== "aceptado") return null;
+  if (estado !== "aceptado" && estado !== "rechazado") return null;
   const stored = parsePresupuestoEstado(raw.estadoAnterior);
-  if (stored && stored !== "aceptado") return stored;
+  if (stored && stored !== "aceptado" && stored !== "rechazado") return stored;
   return ultimoEnvioAt ? "enviado" : "pendiente";
 }
 
@@ -230,7 +240,8 @@ function presupuestoPayload(p: Presupuesto): Omit<Presupuesto, "id"> {
     totalEfectivo: p.totalEfectivo,
     total3Cuotas: p.total3Cuotas,
     estado: p.estado,
-    estadoAnterior: p.estado === "aceptado" ? p.estadoAnterior : null,
+    estadoAnterior:
+      p.estado === "aceptado" || p.estado === "rechazado" ? p.estadoAnterior : null,
     colorFila: p.colorFila,
     pdfUrl: p.pdfUrl,
     motivoRechazo: p.estado === "rechazado" ? p.motivoRechazo : null,
@@ -250,7 +261,9 @@ function prestacionToPresupuestoItem(p: Prestacion): PresupuestoItem {
     tipo: p.tipo,
     duracionMinutos: p.duracionMinutos,
     precioEfectivo: p.precioEfectivo,
-    precio3Cuotas: p.precio3Cuotas,
+    precio3Cuotas: esTipoTratamiento(p.tipo) ? 0 : p.precio3Cuotas,
+    frecuencia: esTipoTratamiento(p.tipo) ? p.frecuencia : null,
+    sesiones: esTipoTratamiento(p.tipo) ? p.sesiones : null,
   };
 }
 
@@ -441,15 +454,20 @@ function toMinutes(value: unknown): number {
 function normalizePrestacion(id: string, raw: Record<string, unknown>): Prestacion {
   const efectivo = toMoney(raw.precioEfectivo);
   const transferencia = toMoney(raw.precioTransferencia);
+  const tipo = String(raw.tipo ?? "").trim() || DEFAULT_TIPOS_PRESTACION[0]!.nombre;
+  const tratamiento = esTipoTratamiento(tipo);
+  const frecuencia = tratamiento ? parseFrecuenciaTratamiento(raw.frecuencia) : null;
   return {
     id,
     titulo: String(raw.titulo ?? ""),
     descripcion: String(raw.descripcion ?? ""),
-    tipo: String(raw.tipo ?? "").trim() || DEFAULT_TIPOS_PRESTACION[0]!.nombre,
+    tipo,
     duracionMinutos: toMinutes(raw.duracionMinutos),
     // Efectivo y transferencia son el mismo precio; fallback por datos viejos
     precioEfectivo: efectivo || transferencia,
-    precio3Cuotas: toMoney(raw.precio3Cuotas),
+    precio3Cuotas: tratamiento ? 0 : toMoney(raw.precio3Cuotas),
+    frecuencia,
+    sesiones: tratamiento && frecuencia ? parseSesionesTratamiento(raw.frecuencia, raw.sesiones) : null,
     creadoAt: readCreadoAt(raw),
   };
 }
@@ -486,7 +504,9 @@ function prestacionPayload(prestacion: Prestacion): Omit<Prestacion, "id"> {
     tipo: prestacion.tipo,
     duracionMinutos: prestacion.duracionMinutos,
     precioEfectivo: prestacion.precioEfectivo,
-    precio3Cuotas: prestacion.precio3Cuotas,
+    precio3Cuotas: esTipoTratamiento(prestacion.tipo) ? 0 : prestacion.precio3Cuotas,
+    frecuencia: esTipoTratamiento(prestacion.tipo) ? prestacion.frecuencia : null,
+    sesiones: esTipoTratamiento(prestacion.tipo) ? prestacion.sesiones : null,
     ...(prestacion.creadoAt ? { creadoAt: prestacion.creadoAt } : {}),
   };
 }
@@ -770,6 +790,8 @@ export async function getPresupuestoEmailConfig(): Promise<PresupuestoEmailConfi
     body: typeof data.body === "string" ? data.body : undefined,
     externoSubject: typeof data.externoSubject === "string" ? data.externoSubject : undefined,
     externoBody: typeof data.externoBody === "string" ? data.externoBody : undefined,
+    reenvioSubject: typeof data.reenvioSubject === "string" ? data.reenvioSubject : undefined,
+    reenvioBody: typeof data.reenvioBody === "string" ? data.reenvioBody : undefined,
     linkPagoSubject:
       typeof data.linkPagoSubject === "string" ? data.linkPagoSubject : undefined,
     linkPagoBody: typeof data.linkPagoBody === "string" ? data.linkPagoBody : undefined,
@@ -785,6 +807,8 @@ export async function savePresupuestoEmailConfig(
   const body = input.body.trim();
   const externoSubject = input.externoSubject.trim();
   const externoBody = input.externoBody.trim();
+  const reenvioSubject = input.reenvioSubject.trim();
+  const reenvioBody = input.reenvioBody.trim();
   const linkPagoSubject = input.linkPagoSubject.trim();
   const linkPagoBody = input.linkPagoBody.trim();
 
@@ -794,6 +818,8 @@ export async function savePresupuestoEmailConfig(
   if (!body) throw new Error("El cuerpo del presupuesto es obligatorio");
   if (!externoSubject) throw new Error("El asunto del presupuesto externo es obligatorio");
   if (!externoBody) throw new Error("El cuerpo del presupuesto externo es obligatorio");
+  if (!reenvioSubject) throw new Error("El asunto del reenvío es obligatorio");
+  if (!reenvioBody) throw new Error("El cuerpo del reenvío es obligatorio");
   if (!linkPagoSubject) throw new Error("El asunto del link de pago es obligatorio");
   if (!linkPagoBody) throw new Error("El cuerpo del link de pago es obligatorio");
 
@@ -804,6 +830,8 @@ export async function savePresupuestoEmailConfig(
     body,
     externoSubject,
     externoBody,
+    reenvioSubject,
+    reenvioBody,
     linkPagoSubject,
     linkPagoBody,
   };
@@ -1080,7 +1108,7 @@ export async function listPresupuestos(): Promise<Presupuesto[]> {
 }
 
 function presupuestoPermiteEdicion(estado: Presupuesto["estado"]): boolean {
-  return estado === "pendiente" || estado === "fallido";
+  return estado === "pendiente" || estado === "fallido" || estado === "enviado";
 }
 
 function presupuestoPermiteEnvio(estado: Presupuesto["estado"]): boolean {
@@ -1209,7 +1237,7 @@ export async function updatePresupuesto(
 
   const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
   if (!presupuestoPermiteEdicion(current.estado)) {
-    throw new Error("Solo se pueden editar presupuestos que no fueron enviados");
+    throw new Error("Solo se pueden editar presupuestos pendientes, enviados o con envío fallido");
   }
 
   const nombrePaciente = normalizeNombrePersona(input.nombrePaciente);
@@ -1247,6 +1275,9 @@ export async function updatePresupuesto(
     estadoAnterior: null,
     pdfUrl,
     motivoRechazo: null,
+    mpPreferenceId: null,
+    mpInitPoint: null,
+    linkPagoEnviadoAt: null,
   };
 
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
@@ -1367,11 +1398,11 @@ export async function updatePresupuestoEstado(
     ...current,
     estado,
     estadoAnterior:
-      estado === "aceptado"
-        ? current.estado === "aceptado"
-          ? current.estadoAnterior
-          : current.estado
-        : null,
+      current.estado === estado ||
+      current.estado === "aceptado" ||
+      current.estado === "rechazado"
+        ? current.estadoAnterior
+        : current.estado,
     motivoRechazo: motivo,
   };
   await setDoc(doc(firestore, PRESUPUESTOS_EMITIDOS, id), presupuestoPayload(presupuesto));
@@ -1540,8 +1571,8 @@ export async function revertirPresupuestoAceptado(id: string): Promise<Presupues
   if (!existingSnap.exists()) throw new Error("Presupuesto no encontrado");
 
   const current = normalizePresupuesto(id, existingSnap.data() as Record<string, unknown>);
-  if (current.estado !== "aceptado") {
-    throw new Error("Solo se puede volver atrás desde un presupuesto aceptado");
+  if (current.estado !== "aceptado" && current.estado !== "rechazado") {
+    throw new Error("Solo se puede volver atrás desde un presupuesto aceptado o rechazado");
   }
 
   const anterior = current.estadoAnterior ?? (current.ultimoEnvioAt ? "enviado" : "pendiente");

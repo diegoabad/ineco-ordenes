@@ -37,8 +37,45 @@ function stripDuracionFromDescripcion(text: string): string {
     .trim();
 }
 
+function fraseSesiones(n: number, periodo: "semanal" | "quincenal" | "mensual"): string {
+  const plural =
+    periodo === "semanal" ? "semanales" : periodo === "quincenal" ? "quincenales" : "mensuales";
+  if (n === 1) return `1 sesión ${periodo}`;
+  return `${n} sesiones ${plural}`;
+}
+
+function textoFrecuencia(frecuencia: string | null | undefined, sesiones: number | null | undefined): string {
+  if (!frecuencia?.trim()) return "";
+  const n = sesiones && sesiones >= 1 ? Math.round(sesiones) : 1;
+  const f = frecuencia.trim();
+  if (f === "Semanal") return `${fraseSesiones(n, "semanal")}, ${fraseSesiones(n * 4, "mensual")}`;
+  if (f === "Mensual") {
+    const semanales = n / 4;
+    if (Number.isInteger(semanales) && semanales >= 1) {
+      return `${fraseSesiones(semanales, "semanal")}, ${fraseSesiones(n, "mensual")}`;
+    }
+    return fraseSesiones(n, "mensual");
+  }
+  if (f === "Quincenal") {
+    return `${fraseSesiones(n, "quincenal")}, ${fraseSesiones(n * 2, "mensual")}`;
+  }
+  return n === 1 ? "1 sesión" : `${n} sesiones`;
+}
+
+function formatHonorariosSesion(value: number): string | null {
+  if (!value || value <= 0) return null;
+  const formatted = new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+  return `$${formatted}.-`;
+}
+
 function formatPrestacionBlock(
-  item: Pick<PresupuestoItem, "titulo" | "descripcion" | "duracionMinutos">,
+  item: Pick<
+    PresupuestoItem,
+    "titulo" | "descripcion" | "duracionMinutos" | "frecuencia" | "sesiones" | "precioEfectivo"
+  >,
   boldTitles = false,
 ): string {
   const lines: string[] = [];
@@ -48,14 +85,24 @@ function formatPrestacionBlock(
   const descripcion = stripDuracionFromDescripcion(descripcionToListaText(item.descripcion)).trim();
   if (descripcion) lines.push(descripcion);
 
-  const duracion = formatDuracionPresupuesto(item.duracionMinutos);
-  if (duracion) lines.push(`(Duración estimada: ${duracion})`);
+  const frecuencia = textoFrecuencia(item.frecuencia, item.sesiones);
+  if (frecuencia) {
+    lines.push(`Frecuencia: ${frecuencia}`);
+    const honorarios = formatHonorariosSesion(item.precioEfectivo);
+    if (honorarios) lines.push(`Honorarios por sesión: ${honorarios}`);
+  } else {
+    const duracion = formatDuracionPresupuesto(item.duracionMinutos);
+    if (duracion) lines.push(`(Duración estimada: ${duracion})`);
+  }
 
   return lines.join("\n\n");
 }
 
 export function formatListaPrestaciones(
-  items: Pick<PresupuestoItem, "titulo" | "descripcion" | "duracionMinutos">[],
+  items: Pick<
+    PresupuestoItem,
+    "titulo" | "descripcion" | "duracionMinutos" | "frecuencia" | "sesiones" | "precioEfectivo"
+  >[],
   options?: { boldTitles?: boolean },
 ): string {
   if (!items.length) return "";

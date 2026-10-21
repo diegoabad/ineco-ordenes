@@ -773,13 +773,39 @@ export function WhatsAppConversationsPanel({
   }, [ready, refreshStatus, qrModalOpen, waStatus, pruebaMode]);
 
   useEffect(() => {
+    abrirRef.current = selectedId;
+    // Si esta conversación se abrió con mensajes ya cargados (prueba nueva), no esperar loadThread.
+    // Tiene que correr antes del efecto que consume skipThreadLoad.
+    vioCargaRef.current = Boolean(selectedId && skipThreadLoad.current === selectedId);
+    vistosRef.current = new Set();
+    ultimoBotRef.current = 0;
+    waitingReplyRef.current = false;
+    typingAtRef.current = null;
+    esperaDesdeRef.current = null;
+    avisoFalloRef.current = false;
+    for (const id of typingTimersRef.current) window.clearTimeout(id);
+    typingTimersRef.current = [];
+    colaRef.current = [];
+    pumpingRef.current = false;
+    setOcultos([]);
+    setBotTyping(false);
+    return () => {
+      for (const id of typingTimersRef.current) window.clearTimeout(id);
+      typingTimersRef.current = [];
+    };
+  }, [selectedId]);
+
+  useEffect(() => {
     if (!selectedId) {
       setSelected(null);
       setMessages([]);
       return;
     }
     if (skipThreadLoad.current === selectedId) {
+      // La prueba nueva ya trae los mensajes: no re-cargar el hilo.
+      // Hay que marcar la carga como vista; si no, "escribiendo" queda trabado.
       skipThreadLoad.current = null;
+      vioCargaRef.current = true;
       return;
     }
     setMessages([]);
@@ -875,27 +901,6 @@ export function WhatsAppConversationsPanel({
   }, [pruebaMode]);
 
   useEffect(() => {
-    abrirRef.current = selectedId;
-    vioCargaRef.current = false;
-    vistosRef.current = new Set();
-    ultimoBotRef.current = 0;
-    waitingReplyRef.current = false;
-    typingAtRef.current = null;
-    esperaDesdeRef.current = null;
-    avisoFalloRef.current = false;
-    for (const id of typingTimersRef.current) window.clearTimeout(id);
-    typingTimersRef.current = [];
-    colaRef.current = [];
-    pumpingRef.current = false;
-    setOcultos([]);
-    setBotTyping(false);
-    return () => {
-      for (const id of typingTimersRef.current) window.clearTimeout(id);
-      typingTimersRef.current = [];
-    };
-  }, [selectedId]);
-
-  useEffect(() => {
     if (!pruebaMode) return;
     const id = window.setInterval(() => {
       if (!waitingReplyRef.current || typingAtRef.current == null) return;
@@ -954,7 +959,8 @@ export function WhatsAppConversationsPanel({
       const desde = esperaDesdeRef.current;
       if (desde == null) return false;
       const at = Date.parse(item.createdAt ?? "");
-      return Number.isFinite(at) && at >= desde - 2000;
+      // Margen chico por desfase de reloj; no usar 2s o toma respuestas viejas y corta mal la espera.
+      return Number.isFinite(at) && at >= desde - 500;
     };
 
     const cortarEsperaTyping = () => {
@@ -2031,12 +2037,14 @@ export function WhatsAppConversationsPanel({
     colaRef.current = [];
     pumpingRef.current = false;
     setOcultos([]);
+    const espera = esperaMsRef.current;
     const ahora = Date.now();
     esperaDesdeRef.current = ahora;
     avisoFalloRef.current = false;
-    typingAtRef.current = ahora;
+    // Solo mostrar "escribiendo" cerca del final de la espera del bot, no apenas se manda.
+    typingAtRef.current = ahora + Math.max(0, espera - 10_000);
     waitingReplyRef.current = true;
-    setBotTyping(true);
+    setBotTyping(espera <= 10_000);
   }
 
   async function handleSend(e: FormEvent) {
@@ -2082,6 +2090,8 @@ export function WhatsAppConversationsPanel({
       ]);
       try {
         const result = await sendWaPruebaMessage(conversationId, text);
+        // Por si la prueba se abrió sin loadThread: el efecto de typing necesita ver la carga.
+        vioCargaRef.current = true;
         setMessages((prev) =>
           mergeMensajesServidor(
             prev.filter((item) => item.id !== tempId),
@@ -2092,6 +2102,7 @@ export function WhatsAppConversationsPanel({
       } catch (error) {
         waitingReplyRef.current = false;
         typingAtRef.current = null;
+        esperaDesdeRef.current = null;
         setBotTyping(false);
         setMessages((prev) => prev.filter((item) => item.id !== tempId));
         toast.error(error instanceof Error ? error.message : "No se pudo enviar el mensaje");

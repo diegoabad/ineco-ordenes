@@ -1455,7 +1455,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "requierePersona=true solo si pide algo de INECO que este canal no puede cerrar: confirmar una reserva que no dimos en esta charla, un resultado, una historia clínica o un dato clínico. false si no sabe el tratamiento o el profesional (el sistema le ofrece buscar o hablar con el equipo). false si es un turno nuevo, cancelar, cambiar o reprogramar un turno, ver sus turnos, un precio, una sede, una cobertura, una lista, una queja o un dato de la ficha.",
       "enConflicto=true solo si los pedidos no se pueden hacer juntos: cancelar un turno y sacar otro distinto. false si uno se responde con información (precio, sede, cobertura, tratamiento, profesional) y el otro es un turno o una queja: esos van los dos, el trámite largo queda en cola. false también si se pueden responder los dos, por ejemplo un precio y una dirección.",
       "hayPedido=false si no hay un pedido concreto: saludo, despedida, o un mensaje del que no se entiende la intención. Un sí, un no, un nombre o un DNI que responde algo nuestro es hayPedido=true.",
-      "fueraDeIneco=true solo si el mensaje no tiene nada que ver con INECO: cultura general, tareas, clima, deportes, política, chistes, recetas, otras empresas o datos varios. false si habla de turnos, tratamientos, profesionales, sedes, precios, coberturas, pacientes, quejas, o responde un dato que pedimos. Un saludo o una despedida no son fuera de INECO.",
+      "fueraDeIneco=true solo si el mensaje no tiene nada que ver con INECO: cultura general, tareas, clima, deportes, política, chistes, recetas, otras empresas o datos varios. false si habla de turnos, tratamientos, profesionales, sedes, precios, coberturas, pacientes, quejas, o responde un dato que pedimos. Un saludo o una despedida no son fuera de INECO. Si fueraDeIneco=true y en el catálogo está «Fuera de tema», incluí esa etiqueta.",
       "Si pasaron varias horas desde el último mensaje, un hola no continúa la pregunta anterior: continuarAnterior=false e intencion vacía, salvo que vuelva a pedir el tema.",
       "cortesia=saludo si se presenta, dice hola o pregunta cómo estás, sin otro pedido. cierre si se despide o agradece y no pide nada más, aunque hubiera un turno u otra consulta abierta: en ese caso intencion vacía. Vacío si no hay cortesía o si en el mismo mensaje pide algo.",
       "No diagnostiques. Un síntoma no confirma una condición.",
@@ -1885,6 +1885,10 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     const derivado = tagsByName.get("derivado a asesor");
     if (derivado) wantedNames.add(derivado.name.toLowerCase());
   }
+  if (detection.fueraDeIneco === true && sinTema) {
+    const fuera = tagsByName.get("fuera de tema");
+    if (fuera) wantedNames.add(fuera.name.toLowerCase());
+  }
   if (chosen?.clave === "QUEJAS" || colaPlan.includes("QUEJAS") || datosDeClave === "QUEJAS") {
     const queja = tagsByName.get("queja");
     if (queja) wantedNames.add(queja.name.toLowerCase());
@@ -1929,12 +1933,20 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     }
     wantedNames.add(sedeDeAhora.toLowerCase());
   }
-  const tieneSede = sedes.some(
-    (sede) => wantedNames.has(sede.name.toLowerCase()) || nextTagIds.has(sede.id),
+  // No etiquetar sede por defecto ni por invento del modelo: solo si este mensaje la nombra.
+  const sedesDichas = new Set(
+    [
+      ...(sedeDeAhora ? [sedeDeAhora] : []),
+      ...etiquetasNombradas(textoLote, catalog.items, catalog.groups).filter((nombre) =>
+        sedes.some((sede) => sinTildes(sede.name) === sinTildes(nombre)),
+      ),
+    ].map((nombre) => sinTildes(nombre)),
   );
-  if (!tieneSede) {
-    const caba = sedes.find((sede) => sinTildes(sede.name) === "caba");
-    if (caba) wantedNames.add(caba.name.toLowerCase());
+  for (const sede of sedes) {
+    const key = sede.name.toLowerCase();
+    if (!wantedNames.has(key)) continue;
+    if (sedesDichas.has(sinTildes(sede.name))) continue;
+    wantedNames.delete(key);
   }
   for (const name of wantedNames) {
     const tag = tagsByName.get(name);
@@ -2021,9 +2033,11 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (detection.fueraDeIneco === true && sinTema) {
     if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
     if ((conversation.advertenciasFuera ?? 0) >= 1) {
+      const fuera = tagsByName.get("fuera de tema");
+      if (fuera) nextTagIds.add(fuera.id);
       const derivado = tagsByName.get("derivado a asesor");
-      if (derivado) {
-        nextTagIds.add(derivado.id);
+      if (derivado) nextTagIds.add(derivado.id);
+      if (fuera || derivado) {
         await saveTags(conversationId, [...nextTagIds]);
       }
       seguimiento.advertenciasFuera = (conversation.advertenciasFuera ?? 0) + 1;
@@ -2257,6 +2271,17 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (correccion.profesional && !sedeAjena && !rechazoDato) {
     claveAccion = "turnos.libres";
   }
+  // Pidió turno con un Dr concreto: buscar ya, sin pasar antes por edad / para quién.
+  if (
+    !claveAccion &&
+    !sedeAjena &&
+    !rechazoDato &&
+    (chosen?.clave === "TURNOS" || previa === "TURNOS") &&
+    (datoTieneForma("profesional", textoLote) ||
+      /\b(dr\.?|dra\.?|doctor(?:a)?)\s+[a-záéíóúñ]/i.test(sinTildes(textoLote)))
+  ) {
+    claveAccion = "turnos.libres";
+  }
   // Config «no dar turnos»: no buscar profesionales, libres ni reservar (sí ver/cancelar propios).
   if (
     !daTurnos &&
@@ -2270,7 +2295,12 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     claveAccion = "";
   }
   // Sin para quién / edad no buscamos turnos ni listamos Drs (salvo anular/ver propios).
-  const faltaFichaBusqueda = faltanteFichaAntesDeBuscar(fichaActual);
+  // Si ya nombró un profesional concreto, no frenamos: vamos directo a buscar.
+  const yaNombroProfesional =
+    Boolean(correccion.profesional) ||
+    datoTieneForma("profesional", textoLote) ||
+    /\b(dr\.?|dra\.?|doctor(?:a)?)\s+[a-záéíóúñ]/i.test(sinTildes(textoLote));
+  const faltaFichaBusqueda = yaNombroProfesional ? null : faltanteFichaAntesDeBuscar(fichaActual);
   if (
     faltaFichaBusqueda &&
     (claveAccion === "turnos.libres" ||
@@ -2999,6 +3029,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       .filter(Boolean);
   }
   // Primero para quién / relación / edad — pisa listados de Drs si todavía falta la ficha básica.
+  // Si ya pidió un Dr en especial, no anteponer edad/para quién: priorizar turnos u orientación.
   if (
     !conflicto &&
     !sedeAjena &&
@@ -3007,7 +3038,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     chosen?.clave === "TURNOS" &&
     !resultadoForzado
   ) {
-    const faltaBasica = faltanteFichaAntesDeBuscar(fichaActual);
+    const faltaBasica = yaNombroProfesional ? null : faltanteFichaAntesDeBuscar(fichaActual);
     if (faltaBasica) {
       // No mandar listados de profesionales mientras falta para quién / edad.
       bloques = bloques.filter(

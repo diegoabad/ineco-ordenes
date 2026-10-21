@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "react-toastify";
 import {
   buildPresupuestoEmailVarsFromPresupuesto,
-  renderPresupuestoEmailPreview,
+  plantillaSugeridaPresupuesto,
+  renderPresupuestoEmailByKind,
 } from "../lib/presupuestoEmail";
 import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
 import { enviarPresupuesto, fetchPresupuestoEmailConfig } from "../services/dataService";
 import { EmailChipsInput } from "./EmailChipsInput";
 import type { Presupuesto } from "../types";
+import type { PresupuestoEmailConfig, PresupuestoEmailTemplateKind } from "../types/presupuestoEmail";
+import {
+  PRESUPUESTO_EMAIL_KIND_LABEL,
+  PRESUPUESTO_EMAIL_KINDS,
+} from "../types/presupuestoEmail";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
 import { Modal } from "./Modal";
 
@@ -32,6 +38,21 @@ export function PresupuestoEmailPreviewModal({
   const [body, setBody] = useState("");
   const [toEmails, setToEmails] = useState("");
   const [editorKey, setEditorKey] = useState(0);
+  const [kind, setKind] = useState<PresupuestoEmailTemplateKind>("presupuesto");
+  const [suggestedKind, setSuggestedKind] = useState<PresupuestoEmailTemplateKind>("presupuesto");
+  const configRef = useRef<PresupuestoEmailConfig | null>(null);
+  const varsRef = useRef<ReturnType<typeof buildPresupuestoEmailVarsFromPresupuesto> | null>(null);
+
+  function applyKind(next: PresupuestoEmailTemplateKind) {
+    const config = configRef.current;
+    const vars = varsRef.current;
+    if (!config || !vars) return;
+    const rendered = renderPresupuestoEmailByKind(config, next, vars);
+    setKind(next);
+    setSubject(rendered.subject);
+    setBody(rendered.body);
+    setEditorKey((k) => k + 1);
+  }
 
   useEffect(() => {
     if (!open || !presupuesto) return;
@@ -47,10 +68,16 @@ export function PresupuestoEmailPreviewModal({
       try {
         const { data: config } = await fetchPresupuestoEmailConfig();
         if (cancelled) return;
-        const vars = buildPresupuestoEmailVarsFromPresupuesto(current);
-        const rendered = renderPresupuestoEmailPreview(config, vars, {
-          pacienteExterno: current.pacienteExterno === true,
-        });
+        const suggested = plantillaSugeridaPresupuesto(current);
+        const vars = buildPresupuestoEmailVarsFromPresupuesto(
+          current,
+          current.mpInitPoint ?? "",
+        );
+        configRef.current = config;
+        varsRef.current = vars;
+        const rendered = renderPresupuestoEmailByKind(config, suggested, vars);
+        setSuggestedKind(suggested);
+        setKind(suggested);
         setSubject(rendered.subject);
         setBody(rendered.body);
         setEditorKey((k) => k + 1);
@@ -150,6 +177,23 @@ export function PresupuestoEmailPreviewModal({
         <p className="text-muted">Cargando plantilla…</p>
       ) : (
         <div className="form-stack">
+          <div className="form-group">
+            <label htmlFor="presup-email-preview-kind">Plantilla</label>
+            <select
+              id="presup-email-preview-kind"
+              value={kind}
+              disabled={disabled}
+              onChange={(e) => applyKind(e.target.value as PresupuestoEmailTemplateKind)}
+            >
+              {PRESUPUESTO_EMAIL_KINDS.map((option) => (
+                <option key={option} value={option}>
+                  {PRESUPUESTO_EMAIL_KIND_LABEL[option]}
+                  {option === suggestedKind ? " (sugerida)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="form-group">
             <label htmlFor="presup-email-preview-to">Para</label>
             <EmailChipsInput

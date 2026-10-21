@@ -91,7 +91,12 @@ export type Prestacion = {
   duracionMinutos: number;
   /** Precio efectivo / transferencia (mismo valor). */
   precioEfectivo: number;
+  /** Solo evaluación. En tratamiento queda en 0. */
   precio3Cuotas: number;
+  /** Solo tratamiento: semanal, quincenal, mensual, etc. */
+  frecuencia: string | null;
+  /** Sesiones por esa frecuencia. Solo tratamiento, mínimo 1. */
+  sesiones: number | null;
   creadoAt?: string;
 };
 
@@ -160,6 +165,51 @@ export const DEFAULT_TIPOS_PRESTACION: TipoPrestacion[] = [
   { nombre: "Tratamiento", color: TIPO_COLOR_PALETTE[1]! },
 ];
 
+export const FRECUENCIAS_TRATAMIENTO = ["Semanal", "Quincenal", "Mensual", "Única"] as const;
+
+export type FrecuenciaTratamiento = (typeof FRECUENCIAS_TRATAMIENTO)[number];
+
+function fraseSesiones(n: number, periodo: "semanal" | "quincenal" | "mensual"): string {
+  const plural =
+    periodo === "semanal" ? "semanales" : periodo === "quincenal" ? "quincenales" : "mensuales";
+  if (n === 1) return `1 sesión ${periodo}`;
+  return `${n} sesiones ${plural}`;
+}
+
+/** Une semanal y mensual cuando el otro lado da un entero. */
+export function etiquetaFrecuencia(
+  frecuencia: string | null | undefined,
+  sesiones: number | null | undefined,
+): string {
+  if (!frecuencia?.trim()) return "—";
+  const n = sesiones && sesiones >= 1 ? Math.round(sesiones) : 1;
+  const f = frecuencia.trim();
+  if (f === "Semanal") {
+    return `${fraseSesiones(n, "semanal")}, ${fraseSesiones(n * 4, "mensual")}`;
+  }
+  if (f === "Mensual") {
+    const semanales = n / 4;
+    if (Number.isInteger(semanales) && semanales >= 1) {
+      return `${fraseSesiones(semanales, "semanal")}, ${fraseSesiones(n, "mensual")}`;
+    }
+    return fraseSesiones(n, "mensual");
+  }
+  if (f === "Quincenal") {
+    return `${fraseSesiones(n, "quincenal")}, ${fraseSesiones(n * 2, "mensual")}`;
+  }
+  return n === 1 ? "1 sesión" : `${n} sesiones`;
+}
+
+export function esTipoTratamiento(tipo: string): boolean {
+  return (
+    tipo
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") === "tratamiento"
+  );
+}
+
 export type PrestacionFormData = Omit<Prestacion, "id">;
 
 export const EMPTY_PRESTACION: PrestacionFormData = {
@@ -169,6 +219,8 @@ export const EMPTY_PRESTACION: PrestacionFormData = {
   duracionMinutos: 0,
   precioEfectivo: 0,
   precio3Cuotas: 0,
+  frecuencia: null,
+  sesiones: null,
 };
 
 export type PresupuestoEstado = "pendiente" | "enviado" | "aceptado" | "rechazado" | "fallido";
@@ -184,6 +236,8 @@ export type PresupuestoItem = {
   duracionMinutos: number;
   precioEfectivo: number;
   precio3Cuotas: number;
+  frecuencia: string | null;
+  sesiones: number | null;
 };
 
 export type Presupuesto = {

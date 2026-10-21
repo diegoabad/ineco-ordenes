@@ -15,6 +15,7 @@ export type WhatsappSection =
   | "metricas"
   | "prueba"
   | "prueba-bot"
+  | "flujos-bot"
   | "contactos"
   | "operadoras"
   | "etiquetas"
@@ -77,6 +78,7 @@ export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "metricas", label: "Métricas" },
   { id: "prueba", label: "Prueba IA" },
   { id: "prueba-bot", label: "Prueba bot" },
+  { id: "flujos-bot", label: "Flujos bot" },
   { id: "contactos", label: "Contactos" },
   { id: "operadoras", label: "Operadoras" },
   { id: "etiquetas", label: "Etiquetas" },

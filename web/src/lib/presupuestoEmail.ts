@@ -5,6 +5,7 @@ import { looksLikeRichHtml, normalizeRichHtml } from "./richText";
 import type { Presupuesto, PresupuestoItem } from "../types";
 import type {
   PresupuestoEmailConfig,
+  PresupuestoEmailTemplateKind,
   PresupuestoEmailTemplateVar,
 } from "../types/presupuestoEmail";
 
@@ -116,40 +117,54 @@ export function buildPresupuestoEmailVarsFromPresupuesto(
   });
 }
 
-export function renderPresupuestoEmailPreview(
-  config: Pick<
-    PresupuestoEmailConfig,
-    "subject" | "body" | "externoSubject" | "externoBody"
-  >,
-  vars: Record<PresupuestoEmailTemplateVar, string>,
-  options?: { pacienteExterno?: boolean },
-): { subject: string; body: string } {
-  const nombre = vars.nombrePaciente || "paciente";
-  const subjectTemplate = options?.pacienteExterno ? config.externoSubject : config.subject;
-  const bodyTemplate = options?.pacienteExterno ? config.externoBody : config.body;
-  return {
-    subject:
-      applyPresupuestoEmailTemplate(subjectTemplate, vars, { plainSubject: true }).trim() ||
-      `Presupuesto - ${nombre}`,
-    body: applyPresupuestoEmailTemplate(bodyTemplate, vars),
-  };
+const FALLBACK_SUBJECT: Record<PresupuestoEmailTemplateKind, string> = {
+  presupuesto: "Presupuesto",
+  presupuestoExterno: "Presupuesto",
+  reenvio: "Reenvío de presupuesto",
+  linkPago: "Link de pago",
+};
+
+export function plantillaSugeridaPresupuesto(p: {
+  estado: string;
+  ultimoEnvioAt: string | null;
+  pacienteExterno?: boolean;
+}): PresupuestoEmailTemplateKind {
+  if (p.estado === "enviado" || p.estado === "fallido" || p.ultimoEnvioAt) return "reenvio";
+  if (p.pacienteExterno) return "presupuestoExterno";
+  return "presupuesto";
 }
 
-export function renderLinkPagoEmailPreview(
-  config: Pick<PresupuestoEmailConfig, "linkPagoSubject" | "linkPagoBody">,
+export function presupuestoEmailPair(
+  config: PresupuestoEmailConfig,
+  kind: PresupuestoEmailTemplateKind,
+): { subject: string; body: string } {
+  switch (kind) {
+    case "presupuestoExterno":
+      return { subject: config.externoSubject, body: config.externoBody };
+    case "reenvio":
+      return { subject: config.reenvioSubject, body: config.reenvioBody };
+    case "linkPago":
+      return { subject: config.linkPagoSubject, body: config.linkPagoBody };
+    default:
+      return { subject: config.subject, body: config.body };
+  }
+}
+
+export function renderPresupuestoEmailByKind(
+  config: PresupuestoEmailConfig,
+  kind: PresupuestoEmailTemplateKind,
   vars: Record<PresupuestoEmailTemplateVar, string>,
 ): { subject: string; body: string } {
   const nombre = vars.nombrePaciente || "paciente";
-  let body = applyPresupuestoEmailTemplate(config.linkPagoBody, vars);
-  // Texto plano + <a> del hipervínculo: convertir saltos para el editor / mail.
-  if (looksLikeRichHtml(body) && body.includes("\n")) {
-    body = body.replace(/\r\n/g, "\n").replace(/\n/g, "<br>");
+  const pair = presupuestoEmailPair(config, kind);
+  let body = applyPresupuestoEmailTemplate(pair.body, vars);
+  if (kind === "linkPago" && looksLikeRichHtml(body) && body.includes("\n")) {
+    body = normalizeRichHtml(body.replace(/\r\n/g, "\n").replace(/\n/g, "<br>"));
   }
   return {
     subject:
-      applyPresupuestoEmailTemplate(config.linkPagoSubject, vars, {
-        plainSubject: true,
-      }).trim() || `Link de pago - ${nombre}`,
-    body: normalizeRichHtml(body),
+      applyPresupuestoEmailTemplate(pair.subject, vars, { plainSubject: true }).trim() ||
+      `${FALLBACK_SUBJECT[kind]} - ${nombre}`,
+    body,
   };
 }

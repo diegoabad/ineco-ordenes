@@ -13,6 +13,7 @@ import { WhatsAppMotorPanel } from "./WhatsAppMotorPanel";
 import { WhatsAppIntencionesPanel } from "./WhatsAppIntencionesPanel";
 import { WhatsAppConocimientoPanel } from "./WhatsAppConocimientoPanel";
 import { WhatsAppMetricasPanel } from "./WhatsAppMetricasPanel";
+import { WhatsAppMenuFlujosPanel } from "./WhatsAppMenuFlujosPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -58,6 +59,8 @@ export function WhatsAppModule({ section }: Props) {
               <p>Números ficticios para hablarle al bot y ver la ficha. No sale por WhatsApp.</p>
             ) : section === "prueba-bot" ? (
               <p>Números ficticios para probar el bot de opciones. No sale por WhatsApp.</p>
+            ) : section === "flujos-bot" ? (
+              <p>Mapa visual de menús, opciones, acciones y respuestas del bot sin IA</p>
             ) : section === "operadoras" ? (
               <p>Usuarios a los que se pueden derivar las conversaciones</p>
             ) : section === "respuestas-rapidas" ? (
@@ -225,6 +228,8 @@ export function WhatsAppModule({ section }: Props) {
         <WhatsAppMetricasPanel />
       ) : section === "conocimiento" ? (
         <WhatsAppConocimientoPanel />
+      ) : section === "flujos-bot" ? (
+        <WhatsAppMenuFlujosPanel />
       ) : (
         <div className="fl-table-empty fl-table-empty--fill">
           <p className="fl-table-empty__title">Próximamente</p>

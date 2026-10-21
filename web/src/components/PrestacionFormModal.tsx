@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { normalizeRichHtml } from "../lib/richText";
 import type { Prestacion, PrestacionFormData, TipoPrestacion } from "../types";
-import { EMPTY_PRESTACION } from "../types";
+import { EMPTY_PRESTACION, FRECUENCIAS_TRATAMIENTO, esTipoTratamiento } from "../types";
 import { BasicRichTextEditor } from "./BasicRichTextEditor";
 import { IconX } from "./Icons";
 import { MoneyInput } from "./MoneyInput";
@@ -9,6 +9,8 @@ type Props = {
   open: boolean;
   initial?: Prestacion | null;
   tiposPrestacion: TipoPrestacion[];
+  /** Tipo que queda elegido al crear, según la pestaña activa. */
+  tipoInicial?: string;
   onClose: () => void;
   onSave: (data: PrestacionFormData, id?: string) => void;
 };
@@ -21,10 +23,19 @@ function toFormData(p: Prestacion): PrestacionFormData {
     duracionMinutos: p.duracionMinutos,
     precioEfectivo: p.precioEfectivo,
     precio3Cuotas: p.precio3Cuotas,
+    frecuencia: p.frecuencia ?? null,
+    sesiones: p.sesiones ?? null,
   };
 }
 
-export function PrestacionFormModal({ open, initial, tiposPrestacion, onClose, onSave }: Props) {
+export function PrestacionFormModal({
+  open,
+  initial,
+  tiposPrestacion,
+  tipoInicial,
+  onClose,
+  onSave,
+}: Props) {
   const [form, setForm] = useState<PrestacionFormData>(EMPTY_PRESTACION);
 
   useEffect(() => {
@@ -33,11 +44,13 @@ export function PrestacionFormModal({ open, initial, tiposPrestacion, onClose, o
       setForm(toFormData(initial));
       return;
     }
+    const tipo = tipoInicial || tiposPrestacion[0]?.nombre || EMPTY_PRESTACION.tipo;
     setForm({
       ...EMPTY_PRESTACION,
-      tipo: tiposPrestacion[0]?.nombre ?? EMPTY_PRESTACION.tipo,
+      tipo,
+      sesiones: esTipoTratamiento(tipo) ? 1 : null,
     });
-  }, [open, initial, tiposPrestacion]);
+  }, [open, initial, tiposPrestacion, tipoInicial]);
 
   function set<K extends keyof PrestacionFormData>(key: K, value: PrestacionFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -46,16 +59,23 @@ export function PrestacionFormModal({ open, initial, tiposPrestacion, onClose, o
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!form.titulo.trim()) return;
+    const tratamiento = esTipoTratamiento(form.tipo);
+    const sesiones = Math.max(1, Math.round(form.sesiones || 1));
+    if (tratamiento && !form.frecuencia) return;
     onSave(
       {
         ...form,
         descripcion: normalizeRichHtml(form.descripcion),
+        precio3Cuotas: tratamiento ? 0 : form.precio3Cuotas,
+        frecuencia: tratamiento ? form.frecuencia : null,
+        sesiones: tratamiento ? sesiones : null,
       },
       initial?.id,
     );
   }
 
   const editing = Boolean(initial);
+  const tratamiento = esTipoTratamiento(form.tipo);
 
   return (
     <ModalShell
@@ -118,19 +138,67 @@ export function PrestacionFormModal({ open, initial, tiposPrestacion, onClose, o
             placeholder="Detalle de la prestación. Enter = nueva línea. Pegar solo texto."
           />
         </div>
-        <div className="form-grid">
+        <div className={`form-grid${tratamiento ? " form-grid--3" : ""}`}>
           <MoneyInput
             id="prest-efectivo"
             label="Efect/Transf"
             value={form.precioEfectivo}
             onChange={(n) => set("precioEfectivo", n)}
           />
-          <MoneyInput
-            id="prest-3cuotas"
-            label="3 cuotas"
-            value={form.precio3Cuotas}
-            onChange={(n) => set("precio3Cuotas", n)}
-          />
+          {tratamiento ? (
+            <>
+              <div className="form-group">
+                <label htmlFor="prest-frecuencia">Frecuencia *</label>
+                <select
+                  id="prest-frecuencia"
+                  value={form.frecuencia ?? ""}
+                  required
+                  onChange={(e) => set("frecuencia", e.target.value || null)}
+                >
+                  <option value="">Elegí la frecuencia</option>
+                  {FRECUENCIAS_TRATAMIENTO.map((frecuencia) => (
+                    <option key={frecuencia} value={frecuencia}>
+                      {frecuencia}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="prest-sesiones">Sesiones *</label>
+                <input
+                  id="prest-sesiones"
+                  type="number"
+                  min={1}
+                  step={1}
+                  required
+                  value={form.sesiones ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw.trim() === "") {
+                      set("sesiones", null);
+                      return;
+                    }
+                    const n = Number(raw);
+                    if (!Number.isFinite(n)) return;
+                    set("sesiones", Math.round(n));
+                  }}
+                  onBlur={() => {
+                    setForm((prev) => ({
+                      ...prev,
+                      sesiones: !prev.sesiones || prev.sesiones < 1 ? 1 : Math.round(prev.sesiones),
+                    }));
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <MoneyInput
+              id="prest-3cuotas"
+              label="3 cuotas"
+              value={form.precio3Cuotas}
+              onChange={(n) => set("precio3Cuotas", n)}
+            />
+          )}
         </div>
       </div>
     </ModalShell>

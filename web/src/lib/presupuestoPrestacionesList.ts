@@ -1,5 +1,6 @@
 import { richHtmlToPdfText } from "./richText";
 import type { PresupuestoItem } from "../types";
+import { etiquetaFrecuencia } from "../types";
 
 export function formatDuracionPresupuesto(minutos: number): string | null {
   if (!minutos || minutos <= 0) return null;
@@ -15,8 +16,20 @@ function stripDuracionFromDescripcion(text: string): string {
     .trim();
 }
 
+function formatHonorariosSesion(value: number): string | null {
+  if (!value || value <= 0) return null;
+  const formatted = new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+  return `$${formatted}.-`;
+}
+
 function formatPrestacionBlock(
-  item: Pick<PresupuestoItem, "titulo" | "descripcion" | "duracionMinutos">,
+  item: Pick<
+    PresupuestoItem,
+    "titulo" | "descripcion" | "duracionMinutos" | "frecuencia" | "sesiones" | "precioEfectivo"
+  >,
   boldTitles = false,
 ): string {
   const lines: string[] = [];
@@ -26,14 +39,24 @@ function formatPrestacionBlock(
   const descripcion = stripDuracionFromDescripcion(richHtmlToPdfText(item.descripcion)).trim();
   if (descripcion) lines.push(descripcion);
 
-  const duracion = formatDuracionPresupuesto(item.duracionMinutos);
-  if (duracion) lines.push(`(Duración estimada: ${duracion})`);
+  const frecuencia = etiquetaFrecuencia(item.frecuencia, item.sesiones);
+  if (item.frecuencia?.trim() && frecuencia !== "—") {
+    lines.push(`Frecuencia: ${frecuencia}`);
+    const honorarios = formatHonorariosSesion(item.precioEfectivo);
+    if (honorarios) lines.push(`Honorarios por sesión: ${honorarios}`);
+  } else {
+    const duracion = formatDuracionPresupuesto(item.duracionMinutos);
+    if (duracion) lines.push(`(Duración estimada: ${duracion})`);
+  }
 
   return lines.join("\n\n");
 }
 
 export function formatListaPrestaciones(
-  items: Pick<PresupuestoItem, "titulo" | "descripcion" | "duracionMinutos">[],
+  items: Pick<
+    PresupuestoItem,
+    "titulo" | "descripcion" | "duracionMinutos" | "frecuencia" | "sesiones" | "precioEfectivo"
+  >[],
   options?: { boldTitles?: boolean },
 ): string {
   if (!items.length) return "";

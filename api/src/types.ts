@@ -54,7 +54,12 @@ export type Prestacion = {
   duracionMinutos: number;
   /** Precio efectivo / transferencia (mismo valor). */
   precioEfectivo: number;
+  /** Solo evaluación. En tratamiento queda en 0. */
   precio3Cuotas: number;
+  /** Solo tratamiento: semanal, quincenal, mensual, etc. */
+  frecuencia: string | null;
+  /** Sesiones por esa frecuencia. Solo tratamiento, mínimo 1. */
+  sesiones: number | null;
   creadoAt?: string;
 };
 
@@ -127,6 +132,8 @@ export type PresupuestoItem = {
   duracionMinutos: number;
   precioEfectivo: number;
   precio3Cuotas: number;
+  frecuencia: string | null;
+  sesiones: number | null;
 };
 
 export type Presupuesto = {
@@ -179,6 +186,48 @@ export const DEFAULT_TIPOS_PRESTACION: TipoPrestacion[] = [
   { nombre: "Evaluación", color: TIPO_COLOR_PALETTE[0]! },
   { nombre: "Tratamiento", color: TIPO_COLOR_PALETTE[1]! },
 ];
+
+export const FRECUENCIAS_TRATAMIENTO = [
+  "Semanal",
+  "Quincenal",
+  "Mensual",
+  "Única",
+] as const;
+
+const FRECUENCIA_LEGACY: Record<string, { frecuencia: FrecuenciaTratamiento; sesiones: number }> = {
+  "2 veces por semana": { frecuencia: "Semanal", sesiones: 2 },
+  "3 veces por semana": { frecuencia: "Semanal", sesiones: 3 },
+};
+
+export type FrecuenciaTratamiento = (typeof FRECUENCIAS_TRATAMIENTO)[number];
+
+export function esTipoTratamiento(tipo: string): boolean {
+  return (
+    tipo
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") === "tratamiento"
+  );
+}
+
+export function parseFrecuenciaTratamiento(value: unknown): FrecuenciaTratamiento | null {
+  const raw = String(value ?? "").trim();
+  if ((FRECUENCIAS_TRATAMIENTO as readonly string[]).includes(raw)) {
+    return raw as FrecuenciaTratamiento;
+  }
+  return FRECUENCIA_LEGACY[raw]?.frecuencia ?? null;
+}
+
+export function parseSesionesTratamiento(frecuenciaRaw: unknown, sesionesRaw: unknown): number {
+  const legacy = FRECUENCIA_LEGACY[String(frecuenciaRaw ?? "").trim()];
+  const n =
+    typeof sesionesRaw === "number" && Number.isFinite(sesionesRaw)
+      ? sesionesRaw
+      : Number(String(sesionesRaw ?? "").trim());
+  if (Number.isFinite(n) && n >= 1) return Math.round(n);
+  return legacy?.sesiones ?? 1;
+}
 
 export type AppDb = {
   version: number;

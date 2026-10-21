@@ -23,12 +23,14 @@ import {
   updatePresupuesto,
 } from "../services/dataService";
 import { calcPresupuestoTotales } from "../lib/presupuestoTotales";
-import type {
-  ModalidadPresupuesto,
-  Prestacion,
-  Presupuesto,
-  PresupuestoFormData,
-  ProfesionalPresupuesto,
+import {
+  esTipoTratamiento,
+  etiquetaFrecuencia,
+  type ModalidadPresupuesto,
+  type Prestacion,
+  type Presupuesto,
+  type PresupuestoFormData,
+  type ProfesionalPresupuesto,
 } from "../types";
 import type { PresupuestoPlantillaVar } from "../types/presupuestoPlantilla";
 import { PRESUPUESTO_PLANTILLA_VAR_LABELS } from "../types/presupuestoPlantilla";
@@ -92,7 +94,12 @@ function formatMoney(value: number): string {
   }).format(value);
 }
 
-function prestacionTienePrecios(p: Pick<Prestacion, "precioEfectivo" | "precio3Cuotas">): boolean {
+function prestacionTienePrecios(
+  p: Pick<Prestacion, "tipo" | "precioEfectivo" | "precio3Cuotas" | "frecuencia" | "sesiones">,
+): boolean {
+  if (esTipoTratamiento(p.tipo)) {
+    return p.precioEfectivo > 0 && Boolean(p.frecuencia) && (p.sesiones ?? 0) >= 1;
+  }
   return p.precioEfectivo > 0 || p.precio3Cuotas > 0;
 }
 
@@ -104,7 +111,9 @@ function prestacionToItem(p: Prestacion) {
     tipo: p.tipo,
     duracionMinutos: p.duracionMinutos,
     precioEfectivo: p.precioEfectivo,
-    precio3Cuotas: p.precio3Cuotas,
+    precio3Cuotas: esTipoTratamiento(p.tipo) ? 0 : p.precio3Cuotas,
+    frecuencia: esTipoTratamiento(p.tipo) ? p.frecuencia : null,
+    sesiones: esTipoTratamiento(p.tipo) ? p.sesiones : null,
   };
 }
 
@@ -119,6 +128,7 @@ export function PresupuestoFormModal({
   onRequestEnviar,
 }: Props) {
   const isEditing = initial !== null;
+  const reiniciaEnvio = initial?.estado === "enviado";
   const [form, setForm] = useState<PresupuestoFormData>(EMPTY_FORM);
   const [prestaciones, setPrestaciones] = useState<Prestacion[]>([]);
   const [loadingPrestaciones, setLoadingPrestaciones] = useState(false);
@@ -495,9 +505,11 @@ export function PresupuestoFormModal({
         onSaved(guardado);
         onClose();
         toast.success(
-          isEditing
-            ? "Presupuesto actualizado. Revisá el email antes de enviar."
-            : "Presupuesto creado. Revisá el email antes de enviar.",
+          reiniciaEnvio
+            ? "Presupuesto actualizado. Revisá el email para volver a enviarlo."
+            : isEditing
+              ? "Presupuesto actualizado. Revisá el email antes de enviar."
+              : "Presupuesto creado. Revisá el email antes de enviar.",
         );
         onRequestEnviar?.(guardado);
         return;
@@ -510,7 +522,13 @@ export function PresupuestoFormModal({
       setPdfPreview(null);
       onSaved(saved);
       onClose();
-      toast.success(isEditing ? "Presupuesto actualizado" : "Presupuesto creado");
+      toast.success(
+        reiniciaEnvio
+          ? "Presupuesto actualizado. Volvió a pendiente para enviarlo de nuevo."
+          : isEditing
+            ? "Presupuesto actualizado"
+            : "Presupuesto creado",
+      );
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -535,12 +553,18 @@ export function PresupuestoFormModal({
   const disabled = saving || loadingPrestaciones;
   const accionesDeshabilitadas = disabled || !puedeGuardar;
   const tituloModal = isEditing ? "Editar presupuesto" : "Crear presupuesto";
-  const labelGuardar = "Revisar PDF y guardar";
-  const labelEnviar = "Revisar PDF y email";
+  const labelGuardar = reiniciaEnvio ? "Revisar PDF y dejar pendiente" : "Revisar PDF y guardar";
+  const labelEnviar = reiniciaEnvio ? "Revisar PDF y reenviar" : "Revisar PDF y email";
   const labelGuardando = "Generando PDF…";
   const labelEnviando = "Generando PDF…";
   const confirmLabel =
-    pdfPreview?.modo === "enviar" ? "Confirmar y revisar email" : "Confirmar y guardar";
+    pdfPreview?.modo === "enviar"
+      ? reiniciaEnvio
+        ? "Confirmar y reenviar"
+        : "Confirmar y revisar email"
+      : reiniciaEnvio
+        ? "Confirmar y dejar pendiente"
+        : "Confirmar y guardar";
   const usedPlantillaVars = collectUsedPlantillaVars(pdfPreview?.plantillaHtml ?? "");
 
   return (
@@ -682,30 +706,45 @@ export function PresupuestoFormModal({
                             <span className="presup-prest-card__title">{p.titulo}</span>
                             <span className="presup-prest-card__precios">
                               <span className="presup-prest-card__precio">
-                                <span className="presup-prest-card__precio-label">Efect/Transf</span>
+                                <span className="presup-prest-card__precio-label">
+                                  {esTipoTratamiento(p.tipo) ? "Por sesión" : "Efect/Transf"}
+                                </span>
                                 <span className="presup-prest-card__precio-val">
                                   {p.precioEfectivo > 0 ? formatMoney(p.precioEfectivo) : "—"}
                                 </span>
                               </span>
-                              <span className="presup-prest-card__precio">
-                                <span className="presup-prest-card__precio-label">3 cuotas</span>
-                                <span className="presup-prest-card__precio-val">
-                                  {p.precio3Cuotas > 0 ? (
-                                    <>
-                                      {formatMoney(p.precio3Cuotas)}
-                                      <span className="presup-prest-card__cuota">
-                                        {" "}
-                                        ({formatMoney(p.precio3Cuotas / 3)}/cuota)
-                                      </span>
-                                    </>
-                                  ) : (
-                                    "—"
-                                  )}
+                              {esTipoTratamiento(p.tipo) ? (
+                                <span className="presup-prest-card__precio">
+                                  <span className="presup-prest-card__precio-label">Frecuencia</span>
+                                  <span className="presup-prest-card__precio-val">
+                                    {etiquetaFrecuencia(p.frecuencia, p.sesiones)}
+                                  </span>
                                 </span>
-                              </span>
+                              ) : (
+                                <span className="presup-prest-card__precio">
+                                  <span className="presup-prest-card__precio-label">3 cuotas</span>
+                                  <span className="presup-prest-card__precio-val">
+                                    {p.precio3Cuotas > 0 ? (
+                                      <>
+                                        {formatMoney(p.precio3Cuotas)}
+                                        <span className="presup-prest-card__cuota">
+                                          {" "}
+                                          ({formatMoney(p.precio3Cuotas / 3)}/cuota)
+                                        </span>
+                                      </>
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </span>
+                                </span>
+                              )}
                             </span>
                             {!selectable ? (
-                              <span className="presup-prest-card__aviso">Sin precios cargados</span>
+                              <span className="presup-prest-card__aviso">
+                                {esTipoTratamiento(p.tipo) && !p.frecuencia
+                                  ? "Sin frecuencia"
+                                  : "Sin precios cargados"}
+                              </span>
                             ) : null}
                           </span>
                         </label>

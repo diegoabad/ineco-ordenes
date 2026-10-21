@@ -5,7 +5,12 @@ import {
   listPrestaciones,
   updatePrestacion,
 } from "../services/db.service.js";
-import type { PrestacionInput } from "../types.js";
+import {
+  esTipoTratamiento,
+  parseFrecuenciaTratamiento,
+  parseSesionesTratamiento,
+  type PrestacionInput,
+} from "../types.js";
 
 const router = Router();
 
@@ -30,13 +35,25 @@ function parseMinutes(value: unknown): number {
 
 function parsePrestacionInput(body: unknown): PrestacionInput {
   const raw = body as Record<string, unknown>;
+  const tipo = String(raw.tipo ?? "").trim() || "Evaluación";
+  const tratamiento = esTipoTratamiento(tipo);
+  const frecuencia = tratamiento ? parseFrecuenciaTratamiento(raw.frecuencia) : null;
+  const sesiones = tratamiento ? parseSesionesTratamiento(raw.frecuencia, raw.sesiones) : null;
+  if (tratamiento && !frecuencia) {
+    throw new Error("Elegí la frecuencia del tratamiento");
+  }
+  if (tratamiento && (!sesiones || sesiones < 1)) {
+    throw new Error("Las sesiones tienen que ser 1 o más");
+  }
   return {
     titulo: String(raw.titulo ?? "").trim(),
     descripcion: String(raw.descripcion ?? "").trim(),
-    tipo: String(raw.tipo ?? "").trim() || "Evaluación",
+    tipo,
     duracionMinutos: parseMinutes(raw.duracionMinutos),
     precioEfectivo: parseMoney(raw.precioEfectivo),
-    precio3Cuotas: parseMoney(raw.precio3Cuotas),
+    precio3Cuotas: tratamiento ? 0 : parseMoney(raw.precio3Cuotas),
+    frecuencia,
+    sesiones,
   };
 }
 

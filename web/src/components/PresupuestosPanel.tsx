@@ -36,7 +36,7 @@ import { TablePagination } from "./TablePagination";
 import { useClientPagination } from "../hooks/useClientPagination";
 
 function presupuestoEsEditable(estado: PresupuestoEstado): boolean {
-  return estado === "pendiente" || estado === "fallido";
+  return estado === "pendiente" || estado === "fallido" || estado === "enviado";
 }
 
 function presupuestoPermiteEnvio(estado: PresupuestoEstado): boolean {
@@ -45,7 +45,6 @@ function presupuestoPermiteEnvio(estado: PresupuestoEstado): boolean {
 
 function presupuestoEditTooltip(estado: PresupuestoEstado): string {
   if (presupuestoEsEditable(estado)) return "Editar";
-  if (estado === "enviado") return "No se puede editar presupuestos enviados";
   if (estado === "aceptado") return "No se puede editar presupuestos aceptados";
   if (estado === "rechazado") return "No se puede editar presupuestos rechazados";
   return "No se puede editar en este estado";
@@ -99,7 +98,13 @@ function formatTotal(value: number): string {
 }
 
 function estadoAlVolver(p: Presupuesto): PresupuestoEstado {
-  if (p.estadoAnterior && p.estadoAnterior !== "aceptado") return p.estadoAnterior;
+  if (
+    p.estadoAnterior &&
+    p.estadoAnterior !== "aceptado" &&
+    p.estadoAnterior !== "rechazado"
+  ) {
+    return p.estadoAnterior;
+  }
   return p.ultimoEnvioAt ? "enviado" : "pendiente";
 }
 
@@ -253,7 +258,7 @@ export function PresupuestosPanel({
   }
 
   async function volverEstadoAnterior(p: Presupuesto) {
-    if (guardandoEstadoId || p.estado !== "aceptado") return;
+    if (guardandoEstadoId || (p.estado !== "aceptado" && p.estado !== "rechazado")) return;
     setGuardandoEstadoId(p.id);
     try {
       const updated = await revertirPresupuestoEstado(p.id);
@@ -583,37 +588,59 @@ export function PresupuestosPanel({
                           <button
                             type="button"
                             className="fl-icon-btn fl-icon-btn--success"
-                            title="Marcar como aceptado"
+                            title={
+                              p.estado === "rechazado"
+                                ? "No se puede aceptar un presupuesto rechazado"
+                                : "Marcar como aceptado"
+                            }
                             aria-label="Marcar como aceptado"
                             disabled={
                               emailPreview?.id === p.id ||
                               guardandoEstaFila ||
-                              Boolean(guardandoEstadoId)
+                              Boolean(guardandoEstadoId) ||
+                              p.estado === "rechazado"
                             }
                             onClick={() => void marcarEstado(p, "aceptado")}
                           >
                             <IconCheck size={16} />
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="fl-icon-btn fl-icon-btn--warning"
-                          title={
-                            p.estado === "rechazado"
-                              ? "Ya está rechazado"
-                              : "Marcar como rechazado"
-                          }
-                          aria-label="Marcar como rechazado"
-                          disabled={
-                            emailPreview?.id === p.id ||
-                            guardandoEstaFila ||
-                            Boolean(guardandoEstadoId) ||
-                            p.estado === "rechazado"
-                          }
-                          onClick={() => void abrirRechazo(p)}
-                        >
-                          <IconX size={16} />
-                        </button>
+                        {p.estado === "rechazado" ? (
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--link"
+                            title={`Volver a ${PRESUPUESTO_ESTADO_LABEL[estadoAlVolver(p)].toLowerCase()}`}
+                            aria-label={`Volver al estado anterior: ${PRESUPUESTO_ESTADO_LABEL[estadoAlVolver(p)]}`}
+                            disabled={
+                              emailPreview?.id === p.id ||
+                              guardandoEstaFila ||
+                              Boolean(guardandoEstadoId)
+                            }
+                            onClick={() => void volverEstadoAnterior(p)}
+                          >
+                            <IconUndo size={16} />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="fl-icon-btn fl-icon-btn--warning"
+                            title={
+                              p.estado === "aceptado"
+                                ? "No se puede rechazar un presupuesto aceptado"
+                                : "Marcar como rechazado"
+                            }
+                            aria-label="Marcar como rechazado"
+                            disabled={
+                              emailPreview?.id === p.id ||
+                              guardandoEstaFila ||
+                              Boolean(guardandoEstadoId) ||
+                              p.estado === "aceptado"
+                            }
+                            onClick={() => void abrirRechazo(p)}
+                          >
+                            <IconX size={16} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="fl-icon-btn fl-icon-btn--mail"
