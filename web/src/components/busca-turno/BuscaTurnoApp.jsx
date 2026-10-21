@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { IconX, IconBuilding, IconMonitor, IconTrash } from '../Icons';
-import { apiPost, getPersona, createTurno, config } from './medexisApi';
+import { apiPost, getPersona, createTurno, anularTurno, config } from './medexisApi';
 import { fetchBuscaTurnoConfig, saveBuscaTurnoConfig } from './buscaTurnoConfigApi';
 import SearchableSelect from './SearchableSelect';
 import './BuscaTurnoApp.css';
@@ -332,6 +332,71 @@ function addDays(d, n) {
 function fmtDate(d) {
   return d.toISOString().split('T')[0];
 }
+
+async function correrEnParalelo(items, limite, fn) {
+  if (!items.length) return;
+  let cursor = 0;
+  const workers = Math.min(limite, items.length);
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (cursor < items.length) {
+        const item = items[cursor++];
+        await fn(item);
+      }
+    })
+  );
+}
+
+async function fetchDadosConTope(par) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const qs = new URLSearchParams({
+      Fecha: par.fecha,
+      PrestadorDocumento: par.doc,
+    });
+    const res = await fetch(`${config.base}/Turno?${qs}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: '{}',
+      signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.Resultado === 'ERROR' || data?.Respuesta === 'ERROR') return [];
+    const list = Array.isArray(data)
+      ? data
+      : data?.Turnos || data?.turnos || (data?.TurnoFechaHora ? [data] : []);
+    return list
+      .map((s) => {
+        const fechaHora = s.turnoFechaHora || s.TurnoFechaHora;
+        const cuando = new Date(fechaHora);
+        if (!fechaHora || isNaN(cuando.getTime())) return null;
+        const apellido = String(s.PersonaApellido || s.personaApellido || '').trim();
+        const nombrePac = String(s.PersonaNombre || s.personaNombre || '').trim();
+        const prestacion = String(
+          s.prestacionNombre || s.PrestacionNombre || s.TurnoPrestacion || s.turnoPrestacion || ''
+        ).trim();
+        return {
+          fechaHora: cuando,
+          profesionalDoc: par.doc,
+          profesional: par.nombre || '',
+          sede: String(s.Sede || s.sede || 'INECO'),
+          edificio: String(s.Edificio || s.edificio || '').trim(),
+          sector: String(s.Sector || s.sector || '').trim(),
+          personaDocumento: String(s.PersonaDocumento || s.personaDocumento || '').trim(),
+          personaNombre: [apellido, nombrePac].filter(Boolean).join(' '),
+          prestacion,
+          ocupado: true,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
 function fmtDateKey(d) {
   return d.toISOString().split('T')[0];
 }
@@ -383,6 +448,38 @@ function mismoDiaMinutos(a, b) {
   );
 }
 
+function lugarOcupado(s) {
+  return [s.edificio || '', s.sector || '', s.sede || ''].join('|');
+}
+
+/** Junta módulos seguidos del mismo paciente. Un hueco más grande queda como otro turno. */
+function agruparOcupadosMismoPaciente(lista) {
+  const ordenados = [...lista].sort(
+    (a, b) => new Date(a.fechaHora) - new Date(b.fechaHora)
+  );
+  const grupos = [];
+  for (const turno of ordenados) {
+    const grupo = grupos[grupos.length - 1];
+    const ultimo = grupo?.turnos[grupo.turnos.length - 1];
+    const min = minutoSlot(turno);
+    const minPrev = ultimo ? minutoSlot(ultimo) : null;
+    const gap = min != null && minPrev != null ? min - minPrev : null;
+    const docPrev = String(ultimo?.personaDocumento || '').trim();
+    const docTurno = String(turno.personaDocumento || '').trim();
+    const mismoPaciente = !!(docPrev && docPrev === docTurno);
+    const mismoLugar = !!(ultimo && lugarOcupado(ultimo) === lugarOcupado(turno));
+    const mismoDia = min != null && minPrev != null && mismoDiaMinutos(minPrev, min);
+    let seguido = false;
+    if (mismoDia && (gap === 15 || gap === 30 || gap === 45)) {
+      if (grupo.turnos.length < 2) seguido = true;
+      else seguido = gap === minutoSlot(grupo.turnos[1]) - minutoSlot(grupo.turnos[0]);
+    }
+    if (grupo && mismoPaciente && mismoLugar && seguido) grupo.turnos.push(turno);
+    else grupos.push({ turnos: [turno] });
+  }
+  return grupos;
+}
+
 function gcdMin(a, b) {
   let x = Math.abs(a);
   let y = Math.abs(b);
@@ -396,9 +493,9 @@ function gcdMin(a, b) {
 
 /**
  * Paso de la agenda de ESTE bloque, sin mirar otros profesionales.
- * 15, 30 o 45 si aparecen. Si solo se ven huecos más grandes (el módulo del medio
- * está ocupado), el paso es 15, 30 o 45 según el máximo común divisor.
- * Un hueco de 60 en una agenda de 30 no es un módulo de 60.
+ * 15, 30, 45 o 60 si aparecen. Si solo se ven huecos más grandes (el módulo del
+ * medio está ocupado), el paso es 15, 30 o 45 según el máximo común divisor.
+ * Una agenda en punto (9, 10, 11) es de 60. Un hueco de 60 entre módulos de 30 no.
  */
 function detectarPaso(minutos) {
   const counts = new Map();
@@ -408,13 +505,13 @@ function detectarPaso(minutos) {
     if (gap <= 0 || gap % PASO_MIN !== 0) continue;
     if (!mismoDiaMinutos(minutos[i - 1], minutos[i])) continue;
     gaps.push(gap);
-    if (gap === 15 || gap === 30 || gap === 45) {
+    if (gap === 15 || gap === 30 || gap === 45 || gap === 60) {
       counts.set(gap, (counts.get(gap) || 0) + 1);
     }
   }
   let paso = null;
   let veces = 0;
-  for (const p of [15, 30, 45]) {
+  for (const p of [15, 30, 45, 60]) {
     const n = counts.get(p) || 0;
     if (n > veces || (n === veces && n > 0 && paso != null && p > paso)) {
       paso = p;
@@ -425,10 +522,16 @@ function detectarPaso(minutos) {
   if (!gaps.length) return null;
   let g = gaps[0];
   for (let i = 1; i < gaps.length; i++) g = gcdMin(g, gaps[i]);
+  if (g === 60) return 60;
   for (const p of [45, 30, 15]) {
     if (g % p === 0) return p;
   }
   return null;
+}
+
+function diaDeMinuto(min) {
+  const d = new Date(min * 60000);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
 function ofertasDeUnModulo(byMin, moduloMin) {
@@ -440,17 +543,72 @@ function ofertasDeUnModulo(byMin, moduloMin) {
 }
 
 /**
+ * El paso sale de libres y dados del mismo día. Si un día tiene un solo hueco,
+ * se usa el paso que ya se vio en otros días de esa agenda.
+ */
+function minutosDeSlots(slots) {
+  const out = [];
+  for (const s of slots) {
+    const min = minutoSlot(s);
+    if (min != null) out.push(min);
+  }
+  return out;
+}
+
+function agruparMinutosPorDia(minutos) {
+  const porDia = new Map();
+  for (const min of minutos) {
+    const dia = diaDeMinuto(min);
+    if (!porDia.has(dia)) porDia.set(dia, []);
+    porDia.get(dia).push(min);
+  }
+  return porDia;
+}
+
+function pasosDeGrilla(libres, ocupados) {
+  const diasLibres = agruparMinutosPorDia(libres);
+  const diasTodos = agruparMinutosPorDia([...libres, ...ocupados]);
+  const pasos = new Map();
+  const vistos = [];
+  const dias = new Set([...diasLibres.keys(), ...diasTodos.keys()]);
+  for (const dia of dias) {
+    const soloLibres = [...new Set(diasLibres.get(dia) || [])].sort((a, b) => a - b);
+    const todos = [...new Set(diasTodos.get(dia) || [])].sort((a, b) => a - b);
+    // Si los libres ya marcan el paso, los dados no lo achican.
+    const paso = detectarPaso(soloLibres) || detectarPaso(todos);
+    if (!paso) continue;
+    pasos.set(dia, paso);
+    vistos.push(paso);
+  }
+  let fallback = null;
+  let veces = 0;
+  const counts = new Map();
+  for (const p of vistos) counts.set(p, (counts.get(p) || 0) + 1);
+  for (const p of [15, 30, 45, 60]) {
+    const n = counts.get(p) || 0;
+    if (n > veces || (n === veces && n > 0 && fallback != null && p > fallback)) {
+      fallback = p;
+      veces = n;
+    }
+  }
+  return { pasos, fallback };
+}
+
+/**
  * Ofertas que caben en `duracionMin` para los huecos que ya son de un solo
  * profesional y una sola duración. No se mezclan acá con otra agenda.
  * 45 es un módulo y 90 ocupa 9:00 y 9:45. En una agenda de 30, 60 ocupa
- * 10:00 y 10:30; 9:00 no entra si falta 9:30.
- * Sin regla, si esa duración no entra en la agenda, se muestran igual los huecos
- * para no hacer desaparecer al profesional.
+ * 10:00 y 10:30; 9:00 no entra si falta 9:30. 75 en una agenda de 60 ocupa
+ * dos horas: 10:00 no entra si a las 11:00 ya hay turno (solo quedan 60 libres).
+ * Los turnos dados no se ofrecen: marcan el paso y el hueco hasta el próximo ocupado.
+ * Sin regla, si no se puede medir la agenda, se muestran igual los huecos.
  */
 function armarOfertasPorDuracion(slots, duracionMin, opts) {
   const duracion = Number(duracionMin);
   const conservar = !!opts?.conservarSiNoEntra;
+  const ocupados = opts?.ocupados || [];
   if (!Number.isFinite(duracion) || duracion <= 0) return [];
+  const { pasos, fallback } = pasosDeGrilla(minutosDeSlots(slots), minutosDeSlots(ocupados));
   const byBloque = new Map();
   for (const s of slots) {
     const k = [
@@ -462,8 +620,9 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
     if (!byBloque.has(k)) byBloque.set(k, []);
     byBloque.get(k).push(s);
   }
+  const ocupadosMin = minutosDeSlots(ocupados);
   const ofertas = [];
-  const duracionDeUnModulo = duracion === 15 || duracion === 30 || duracion === 45;
+  const duracionDeUnModulo = duracion === 15 || duracion === 30 || duracion === 45 || duracion === 60;
   for (const list of byBloque.values()) {
     const byMin = new Map();
     for (const s of list) {
@@ -471,22 +630,25 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
       if (min == null || byMin.has(min)) continue;
       byMin.set(min, s);
     }
-    const minutos = [...byMin.keys()].sort((a, b) => a - b);
-    const paso = detectarPaso(minutos);
-    if (!paso) {
-      if (conservar || duracionDeUnModulo) {
-        ofertas.push(...ofertasDeUnModulo(byMin, duracion));
-      }
-      continue;
-    }
-    if (duracion % paso !== 0) {
-      if (conservar) ofertas.push(...ofertasDeUnModulo(byMin, paso));
-      continue;
-    }
-    const needed = duracion / paso;
-    const delBloque = [];
-    for (const startMin of minutos) {
+    const sueltos = [];
+    const encadenados = [];
+    let midio = false;
+    for (const startMin of byMin.keys()) {
+      const paso = pasos.get(diaDeMinuto(startMin)) || fallback;
       const start = byMin.get(startMin);
+      let siguienteOcupado = null;
+      for (const min of ocupadosMin) {
+        if (min <= startMin || !mismoDiaMinutos(startMin, min)) continue;
+        if (siguienteOcupado == null || min < siguienteOcupado) siguienteOcupado = min;
+      }
+      // 10:00 no entra en 75 min si a las 11:00 ya hay turno: solo quedan 60 libres.
+      if (siguienteOcupado != null && siguienteOcupado - startMin < duracion) continue;
+      if (!paso) {
+        sueltos.push(start);
+        continue;
+      }
+      midio = true;
+      const needed = Math.ceil(duracion / paso);
       const modulos = [start];
       let ok = true;
       for (let i = 1; i < needed; i++) {
@@ -498,10 +660,13 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
         }
         modulos.push(next);
       }
-      if (ok) delBloque.push({ ...start, modulos, moduloMin: paso });
+      if (ok) encadenados.push({ ...start, modulos, moduloMin: paso });
     }
-    if (delBloque.length) ofertas.push(...delBloque);
-    else if (conservar) ofertas.push(...ofertasDeUnModulo(byMin, paso));
+    if (encadenados.length) ofertas.push(...encadenados);
+    const mostrarSueltos = conservar || (!midio && duracionDeUnModulo);
+    if (sueltos.length && mostrarSueltos) {
+      ofertas.push(...ofertasDeUnModulo(new Map(sueltos.map((s) => [minutoSlot(s), s])), duracion));
+    }
   }
   return ofertas;
 }
@@ -521,7 +686,7 @@ function duracionDeSlot(slot, prestacionId, duracionGeneral, index) {
  * cada profesional usa la suya (la regla si tiene, si no la del selector).
  * La grilla de uno no cambia el paso ni los huecos de otro.
  */
-function armarOfertasConReglas(slots, prestacionId, duracionGeneral, reglas) {
+function armarOfertasConReglas(slots, prestacionId, duracionGeneral, reglas, ocupados) {
   const index = new Map();
   for (const r of normalizeReglas(reglas)) {
     index.set(reglaKey(r.profesionalDoc, r.prestacionCodigo, r.modalidad), r.duracionMin);
@@ -542,11 +707,18 @@ function armarOfertasConReglas(slots, prestacionId, duracionGeneral, reglas) {
       porDuracion.get(k).slots.push({ ...s, porRegla: info.porRegla, duracionMin: info.dur });
     }
     for (const grupo of porDuracion.values()) {
-      // La regla solo recorta al profesional que la tiene. El resto usa la duración general
-      // y, si no entra en su agenda, igual se muestran sus huecos.
+      const mod = grupo.slots[0] && isSlotVirtual(grupo.slots[0].edificio) ? 'VIRTUAL' : 'PRESENCIAL';
+      const doc = String(grupo.slots[0]?.profesionalDoc || '');
+      const dados = (ocupados || []).filter(
+        (o) =>
+          String(o.profesionalDoc) === doc &&
+          (isSlotVirtual(o.edificio) ? 'VIRTUAL' : 'PRESENCIAL') === mod
+      );
+      // La regla solo recorta al profesional que la tiene. El paso sale de libres + dados.
       out.push(
         ...armarOfertasPorDuracion(grupo.slots, grupo.dur, {
           conservarSiNoEntra: !grupo.porRegla,
+          ocupados: dados,
         })
       );
     }
@@ -620,6 +792,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [duracionMin, setDuracionMin] = useState(30);
   const [searching, setSearching] = useState(false);
   const [slotsRaw, setSlotsRaw] = useState([]);
+  const [dadosRaw, setDadosRaw] = useState([]);
   const [searchReturnedEmpty, setSearchReturnedEmpty] = useState(false);
   const [searchOffset, setSearchOffset] = useState(0);
   const [collapsedDays, setCollapsedDays] = useState(() => new Set());
@@ -641,6 +814,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [filtroReglaMod, setFiltroReglaMod] = useState('TODOS');
   const [configSaving, setConfigSaving] = useState(false);
   const configSaveLock = useRef(false);
+  const busquedaSeqRef = useRef(0);
   const reglasRef = useRef([]);
 
   const sedePickerIntentRef = useRef(null);
@@ -813,13 +987,17 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   );
 
   const slotsFiltered = useMemo(() => {
-    // 1) los turnos ya vinieron por prestación y profesional.
-    // 2) modalidad. 3) duración, aparte: regla si ese profesional tiene, si no la general.
-    let list = slotsRaw;
-    if (modalidad === 'VIRTUAL') list = list.filter((s) => isSlotVirtual(s.edificio));
-    else if (modalidad === 'PRESENCIAL') list = list.filter((s) => !isSlotVirtual(s.edificio));
-    return armarOfertasConReglas(list, prestacionId, duracionMin, reglas);
-  }, [slotsRaw, modalidad, duracionMin, prestacionId, reglas]);
+    // 1) libres por prestación y profesional, cruzados con los dados de esa fecha.
+    // 2) modalidad. 3) duración: regla si ese profesional tiene, si no la general.
+    const mismaModalidad = (s) => {
+      if (modalidad === 'VIRTUAL') return isSlotVirtual(s.edificio);
+      if (modalidad === 'PRESENCIAL') return !isSlotVirtual(s.edificio);
+      return true;
+    };
+    const list = slotsRaw.filter(mismaModalidad);
+    const dados = dadosRaw.filter(mismaModalidad);
+    return armarOfertasConReglas(list, prestacionId, duracionMin, reglas, dados);
+  }, [slotsRaw, dadosRaw, modalidad, duracionMin, prestacionId, reglas]);
 
   const enabledProfDocs = useMemo(
     () => new Set(profesionalesCatalog.filter((p) => p.enabled).map((p) => String(p.doc))),
@@ -855,6 +1033,10 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [prestadorFilter, setPrestadorFilter] = useState('');
   const [prestadoresModalOpen, setPrestadoresModalOpen] = useState(false);
   const [selectedSlotForAssign, setSelectedSlotForAssign] = useState(null);
+  const [selectedOcupado, setSelectedOcupado] = useState(null);
+  const [ocupadoConfirmar, setOcupadoConfirmar] = useState(false);
+  const [ocupadoCancelando, setOcupadoCancelando] = useState(false);
+  const [ocupadoError, setOcupadoError] = useState('');
 
   useEffect(() => {
     setPrestadoresModalOpen(false);
@@ -864,7 +1046,8 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   useEffect(() => {
     const prestadoresPickOpen =
       prestadoresModalOpen && !!prestacionId && profesionalesForPrestacion.length > 0;
-    const anyModalOpen = selectedSlotForAssign != null || prestadoresPickOpen;
+    const anyModalOpen =
+      selectedSlotForAssign != null || selectedOcupado != null || prestadoresPickOpen;
     const html = document.documentElement;
     const body = document.body;
     if (anyModalOpen) {
@@ -878,6 +1061,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     }
   }, [
     selectedSlotForAssign,
+    selectedOcupado,
     prestadoresModalOpen,
     prestacionId,
     profesionalesForPrestacion.length,
@@ -1516,6 +1700,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       if (startOffset === 0 && !append) setSearchOffset(0);
       if (!append) {
         setSlotsRaw([]);
+        setDadosRaw([]);
         setSearchReturnedEmpty(false);
         setCollapsedDays(new Set());
       }
@@ -1525,10 +1710,11 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       try {
       let allSlots = [];
       let falloBusqueda = null;
+      const busquedaId = ++busquedaSeqRef.current;
       const DAYS_PER_BLOCK = 21;
-      const PARALLEL_DAYS = 7;
       const LIMITE_POR_DIA = 40;
-      const PROFESIONALES_EN_PARALELO = 4;
+      const CONCURRENCIA = 16;
+      const TOPE_MS = 8000;
 
       const url = `${config.base}/Turno/Disponible`;
 
@@ -1557,89 +1743,94 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         });
       };
 
-      const fetchDay = async (dayOffset) => {
-        const desde = addDays(new Date(), dayOffset);
-        const hasta = addDays(new Date(), dayOffset + 1);
+      const modalidadValor = 'PRESENCIAL';
+      const trabajos = [];
+      for (let day = 0; day < DAYS_PER_BLOCK; day++) {
+        const desde = addDays(new Date(), startOffset + day);
         const fechaDesde = fmtDate(desde);
-        const fechaHasta = fmtDate(hasta);
-        // Medexis ignora el filtro de modalidad en Disponible: pedimos PRESENCIAL
-        // y filtramos Virtual/Presencial en el cliente según `edificio`.
-        const modalidadValor = 'PRESENCIAL';
+        const fechaHasta = fmtDate(addDays(desde, 1));
+        for (const prof of profesionales) {
+          trabajos.push({ prof, fechaDesde, fechaHasta });
+        }
+      }
 
-        const fetchProf = async (prof) => {
-          try {
-            const body = {
+      setStatus({
+        text: 'Buscando turnos...',
+        error: false,
+        visible: true,
+      });
+
+      const fetchLibre = async (job) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), TOPE_MS);
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            signal: ctrl.signal,
+            body: JSON.stringify({
               prestacionCodigo: prestacionId,
-              profesionalDocumentos: [String(prof.doc)],
+              profesionalDocumentos: [String(job.prof.doc)],
               modalidad: modalidadValor,
               filtros: {
-                fechaDesde,
-                fechaHasta,
+                fechaDesde: job.fechaDesde,
+                fechaHasta: job.fechaHasta,
                 turnoEstado: 'D',
                 modalidad: modalidadValor,
               },
               // Un día y un profesional: el límite de Medexis es del request entero.
-              // Si iban varios juntos, los huecos de uno se comían el cupo y el resto no volvía.
               limite: LIMITE_POR_DIA,
-            };
-            const res = await fetch(url, {
-              method: 'POST',
-              headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-              },
-              credentials: 'include',
-              body: JSON.stringify(body),
-            });
-            const data = await res.json().catch(() => null);
-            if (!res.ok) {
-              const msg =
-                data?.Detalle || data?.Mensaje || data?.Message || `HTTP ${res.status}`;
-              throw new Error(msg);
-            }
-            if (data?.Respuesta === 'ERROR') {
-              throw new Error(data.Detalle || data.Mensaje || 'Error al consultar turnos');
-            }
-            return parseSlotList(data, prof);
-          } catch (e) {
-            falloBusqueda = e;
-            return [];
+            }),
+          });
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            const msg =
+              data?.Detalle || data?.Mensaje || data?.Message || `HTTP ${res.status}`;
+            throw new Error(msg);
           }
-        };
-
-        const slotsDia = [];
-        for (let i = 0; i < profesionales.length; i += PROFESIONALES_EN_PARALELO) {
-          const tanda = profesionales.slice(i, i + PROFESIONALES_EN_PARALELO);
-          const results = await Promise.all(tanda.map((prof) => fetchProf(prof)));
-          for (const sl of results) slotsDia.push(...sl);
+          if (data?.Respuesta === 'ERROR') {
+            throw new Error(data.Detalle || data.Mensaje || 'Error al consultar turnos');
+          }
+          return parseSlotList(data, job.prof);
+        } catch (e) {
+          if (e?.name !== 'AbortError') falloBusqueda = e;
+          return [];
+        } finally {
+          clearTimeout(timer);
         }
-        return slotsDia;
       };
 
-      for (let i = 0; i < DAYS_PER_BLOCK; i += PARALLEL_DAYS) {
-        const batchOffsets = [];
-        for (let j = 0; j < PARALLEL_DAYS && i + j < DAYS_PER_BLOCK; j++) {
-          batchOffsets.push(startOffset + i + j);
-        }
-        const batchDesde = addDays(new Date(), batchOffsets[0]);
-        const batchHasta = addDays(new Date(), batchOffsets[batchOffsets.length - 1]);
-        setStatus({
-          text: `Buscando del ${fmtDisplay(batchDesde)} al ${fmtDisplay(batchHasta)}...`,
-          error: false,
-          visible: true,
-        });
-
-        const batchResults = await Promise.all(batchOffsets.map((offset) => fetchDay(offset)));
-        for (const sl of batchResults) {
-          allSlots.push(...sl);
-        }
-      }
+      // Libres y dados a la vez. Cada pedido se corta solo si no responde.
+      await Promise.all([
+        correrEnParalelo(trabajos, CONCURRENCIA, async (job) => {
+          if (busquedaSeqRef.current !== busquedaId) return;
+          const libres = await fetchLibre(job);
+          if (!libres.length || busquedaSeqRef.current !== busquedaId) return;
+          allSlots.push(...libres);
+          setSlotsRaw((prev) => dedupeSlotsRaw([...prev, ...libres]));
+        }),
+        correrEnParalelo(trabajos, CONCURRENCIA, async (job) => {
+          if (busquedaSeqRef.current !== busquedaId) return;
+          const dados = await fetchDadosConTope({
+            doc: String(job.prof.doc),
+            fecha: job.fechaDesde,
+            nombre: job.prof.nombre || '',
+          });
+          if (!dados.length || busquedaSeqRef.current !== busquedaId) return;
+          setDadosRaw((prev) => dedupeSlotsRaw([...prev, ...dados]));
+        }),
+      ]);
 
       if (allSlots.length === 0 && falloBusqueda) throw falloBusqueda;
 
       if (allSlots.length === 0) {
         if (!append) {
           setSlotsRaw([]);
+          setDadosRaw([]);
           setSearchReturnedEmpty(true);
           clearStatus();
         } else {
@@ -1677,6 +1868,67 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     ]
   );
 
+  const closeOcupadoModal = useCallback(() => {
+    setSelectedOcupado(null);
+    setOcupadoConfirmar(null);
+    setOcupadoCancelando(false);
+    setOcupadoError('');
+  }, []);
+
+  const handleCancelarOcupado = useCallback(async (turnos) => {
+    const lista = (turnos || []).filter((t) => t?.personaDocumento);
+    if (!lista.length) {
+      setOcupadoError('Faltan datos para cancelar este turno.');
+      return;
+    }
+    setOcupadoCancelando(true);
+    setOcupadoError('');
+    const anulados = [];
+    let fallo = null;
+    for (const turno of lista) {
+      const turnoFh = formatTurnoFechaHoraMedexis(turno.fechaHora);
+      if (!turnoFh) {
+        fallo = new Error('La fecha y hora del turno no son válidas.');
+        break;
+      }
+      try {
+        await anularTurno({
+          prestadorDocumento: turno.profesionalDoc,
+          personaDocumento: turno.personaDocumento,
+          turnoFechaHora: turnoFh,
+          sede: turno.sede || 'INECO',
+        });
+        anulados.push(turno);
+      } catch (e) {
+        fallo = e;
+        break;
+      }
+    }
+    if (anulados.length) {
+      const claves = new Set(anulados.map((t) => slotDedupeKey(t)));
+      setDadosRaw((prev) => prev.filter((d) => !claves.has(slotDedupeKey(d))));
+      setSelectedOcupado((prev) => {
+        if (!prev?.turnos) return prev;
+        const quedan = prev.turnos.filter((t) => !claves.has(slotDedupeKey(t)));
+        return quedan.length ? { turnos: quedan } : null;
+      });
+    }
+    setOcupadoConfirmar(null);
+    setOcupadoCancelando(false);
+    if (!fallo) {
+      closeOcupadoModal();
+      toast.success(
+        anulados.length > 1 ? `Se cancelaron ${anulados.length} turnos.` : 'Turno cancelado.'
+      );
+      return;
+    }
+    setOcupadoError(
+      anulados.length
+        ? `Se cancelaron ${anulados.length} turno${anulados.length !== 1 ? 's' : ''}. No se pudo el resto: ${fallo.message || 'error'}`
+        : fallo.message || 'No se pudo cancelar el turno.'
+    );
+  }, [closeOcupadoModal]);
+
   const closeAssignModal = useCallback(() => {
     setSelectedSlotForAssign(null);
     setAssignDni('');
@@ -1706,6 +1958,10 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const limpiarBusqueda = useCallback(() => {
     setPrestacionId('');
     setSlotsRaw([]);
+    setDadosRaw([]);
+    setSelectedOcupado(null);
+    setOcupadoConfirmar(false);
+    setOcupadoError('');
     setSearchReturnedEmpty(false);
     setSearchOffset(0);
     setCollapsedDays(new Set());
@@ -1814,7 +2070,20 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         return;
       }
       const modulos = slot.modulos?.length ? slot.modulos : [slot];
-      const turnoItems = [];
+      const paciente = {
+        PersonaTipoDocumento: 'AR',
+        PersonaDocumento: String(personaData.PersonaDocumento ?? assignDni.trim()),
+        PersonaNombre: personaData.PersonaNombre ?? '',
+        PersonaApellido: personaData.PersonaApellido ?? '',
+        PersonaFechaNacimiento: fechaNac,
+        PersonaSexo: (personaData.PersonaSexo || 'MASCULINO').toUpperCase().replace('OTRO', 'MASCULINO'),
+        PersonaEmail: personaData.PersonaEmail ?? '',
+        PersonaTelefonoCel: personaData.PersonaTelefonoCel ?? '',
+        PersonaIdioma: 'es',
+        GeneraPago: personaData._manual ? 'N' : 'S',
+        TurnoX: 1,
+      };
+      const preparados = [];
       for (const m of modulos) {
         const turnoFh = formatTurnoFechaHoraMedexis(
           m.fechaHora instanceof Date ? m.fechaHora : new Date(m.fechaHora)
@@ -1824,25 +2093,52 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           setAssignLoading(false);
           return;
         }
-        turnoItems.push({
-          PersonaTipoDocumento: 'AR',
-          PersonaDocumento: String(personaData.PersonaDocumento ?? assignDni.trim()),
-          PersonaNombre: personaData.PersonaNombre ?? '',
-          PersonaApellido: personaData.PersonaApellido ?? '',
-          PersonaFechaNacimiento: fechaNac,
-          PersonaSexo: (personaData.PersonaSexo || 'MASCULINO').toUpperCase().replace('OTRO', 'MASCULINO'),
-          PersonaEmail: personaData.PersonaEmail ?? '',
-          PersonaTelefonoCel: personaData.PersonaTelefonoCel ?? '',
-          PersonaIdioma: 'es',
-          PrestadorDocumento: m.profesionalDoc,
-          Sede: (m.sede && String(m.sede).trim()) || 'INECO',
-          TurnoFechaHora: turnoFh,
-          TurnoPrestacion: String(m.prestacionId || slot.prestacionId),
-          GeneraPago: personaData._manual ? 'N' : 'S',
-          TurnoX: 1,
+        preparados.push({
+          modulo: m,
+          turnoFh,
+          sede: (m.sede && String(m.sede).trim()) || 'INECO',
+          prestador: m.profesionalDoc,
+          prestacion: String(m.prestacionId || slot.prestacionId),
         });
       }
-      await createTurno({ turno: turnoItems });
+      const asignados = [];
+      try {
+        for (const item of preparados) {
+          // Medexis no tiene duración: un POST, un módulo. Si uno falla, se anulan los ya creados.
+          await createTurno({
+            turno: [
+              {
+                ...paciente,
+                PrestadorDocumento: item.prestador,
+                Sede: item.sede,
+                TurnoFechaHora: item.turnoFh,
+                TurnoPrestacion: item.prestacion,
+              },
+            ],
+          });
+          asignados.push(item);
+        }
+      } catch (err) {
+        const noAnulados = [];
+        for (const item of asignados) {
+          try {
+            await anularTurno({
+              prestadorDocumento: item.prestador,
+              personaDocumento: paciente.PersonaDocumento,
+              turnoFechaHora: item.turnoFh,
+              sede: item.sede,
+            });
+          } catch {
+            noAnulados.push(item.modulo);
+          }
+        }
+        if (noAnulados.length) {
+          throw new Error(
+            `No se pudo completar la asignación y quedaron turnos sin anular (${textoModulos(noAnulados)}). ${err?.message || ''}`.trim()
+          );
+        }
+        throw new Error(err?.message || 'No se pudo asignar el turno.');
+      }
       const ocupados = new Set(modulos.map((m) => slotDedupeKey(m)));
       setSlotsRaw((prev) => prev.filter((s) => !ocupados.has(slotDedupeKey(s))));
       closeAssignModal();
@@ -1953,7 +2249,13 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                     <button
                       type="button"
                       className="btn btn-refresh-config"
-                      onClick={() => setReglaModalOpen(true)}
+                      onClick={() => {
+                        setReglaProfDoc('');
+                        setReglaPrestCod('');
+                        setReglaModalidad('TODAS');
+                        setReglaDuracion(120);
+                        setReglaModalOpen(true);
+                      }}
                     >
                       Agregar regla
                     </button>
@@ -2460,6 +2762,39 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 slots: g.slots.sort((a, b) => a.fechaHora - b.fechaHora),
               }))
             );
+            const minutosLibres = new Set();
+            for (const s of sorted) {
+              const mods = s.modulos?.length ? s.modulos : [s];
+              for (const m of mods) {
+                const min = minutoSlot(m);
+                if (min != null) minutosLibres.add(`${s.profesionalDoc}|${min}`);
+              }
+            }
+            const entraModalidad = (edificio) => {
+              if (modalidad === 'VIRTUAL') return isSlotVirtual(edificio);
+              if (modalidad === 'PRESENCIAL') return !isSlotVirtual(edificio);
+              return true;
+            };
+            const ocupadosDelDia = dadosRaw.filter((d) => {
+              const cuando = d.fechaHora instanceof Date ? d.fechaHora : new Date(d.fechaHora);
+              if (fmtDateKey(cuando) !== key) return false;
+              if (!byProf.has(String(d.profesionalDoc))) return false;
+              if (!entraModalidad(d.edificio)) return false;
+              const min = minutoSlot(d);
+              return min == null || !minutosLibres.has(`${d.profesionalDoc}|${min}`);
+            });
+            const gruposPorProf = new Map();
+            for (const d of ocupadosDelDia) {
+              const id = String(d.profesionalDoc);
+              if (!gruposPorProf.has(id)) gruposPorProf.set(id, []);
+              gruposPorProf.get(id).push(d);
+            }
+            for (const [id, lista] of gruposPorProf) {
+              gruposPorProf.set(id, agruparOcupadosMismoPaciente(lista));
+            }
+            let bloquesOcupados = 0;
+            for (const lista of gruposPorProf.values()) bloquesOcupados += lista.length;
+            const totalDia = sorted.length + bloquesOcupados;
             const dayCollapsed = collapsedDays.has(key);
             return (
               <div key={key} className={`day-group${dayCollapsed ? ' is-collapsed' : ''}`}>
@@ -2483,7 +2818,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                     <span className="day-header-label">{fmtDayLabel(fecha)}</span>
                   </span>
                   <span className="day-count">
-                    {sorted.length} turno{sorted.length !== 1 ? 's' : ''}
+                    {totalDia} turno{totalDia !== 1 ? 's' : ''}
                   </span>
                 </button>
                 {!dayCollapsed && (
@@ -2494,7 +2829,59 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                           <span className="day-prof-name">{profLabelConDoc(nombre, doc)}</span>
                         </div>
                         <div className="slot-grid slot-grid-by-prof">
-                          {profSlots.map((s, i) => {
+                          {[
+                            ...profSlots.map((s) => ({ tipo: 'libre', item: s, orden: s.fechaHora })),
+                            ...(gruposPorProf.get(String(doc)) || []).map((grupo) => ({
+                              tipo: 'ocupado',
+                              item: grupo,
+                              orden: grupo.turnos[0].fechaHora,
+                            })),
+                          ]
+                            .sort((a, b) => new Date(a.orden) - new Date(b.orden))
+                            .map((celda, i) => {
+                            if (celda.tipo === 'ocupado') {
+                              const grupo = celda.item;
+                              const primero = grupo.turnos[0];
+                              const ultimo = grupo.turnos[grupo.turnos.length - 1];
+                              const virtual = isSlotVirtual(primero.edificio);
+                              const modalidadTxt = virtual
+                                ? 'Virtual'
+                                : [primero.edificio, primero.sector].filter(Boolean).join(' · ') || 'Presencial';
+                              const paciente = primero.personaNombre || 'Paciente';
+                              const varios = grupo.turnos.length > 1;
+                              const rango = varios
+                                ? `${fmtTime(primero.fechaHora)}–${fmtTime(ultimo.fechaHora)}`
+                                : fmtTime(primero.fechaHora);
+                              return (
+                                <button
+                                  key={`oc-${doc}-${new Date(primero.fechaHora).getTime()}-${i}`}
+                                  type="button"
+                                  className={`slot-card slot-card-compact slot-card--ocupado${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${varios ? ' slot-card--multi' : ''}`}
+                                  onClick={() => {
+                                    setOcupadoError('');
+                                    setOcupadoConfirmar(null);
+                                    setSelectedOcupado(grupo);
+                                  }}
+                                  title={paciente}
+                                  aria-label={`Turno ocupado ${rango}. ${modalidadTxt}. ${paciente}${varios ? `. ${grupo.turnos.length} turnos` : ''}`}
+                                >
+                                  <span className="slot-time-row">
+                                    <span className="slot-mod-icon" aria-hidden>
+                                      {virtual ? (
+                                        <IconMonitor size={14} />
+                                      ) : (
+                                        <IconBuilding size={14} />
+                                      )}
+                                    </span>
+                                    <span className="slot-time">{rango}</span>
+                                  </span>
+                                  {varios ? (
+                                    <span className="slot-modulos">{grupo.turnos.length} turnos</span>
+                                  ) : null}
+                                </button>
+                              );
+                            }
+                            const s = celda.item;
                             const virtual = isSlotVirtual(s.edificio);
                             const tooltip = virtual
                               ? 'Virtual'
@@ -2647,6 +3034,138 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           </div>
         </div>
       )}
+
+      {selectedOcupado?.turnos?.length > 0 && (() => {
+        const turnos = selectedOcupado.turnos;
+        const primero = turnos[0];
+        const varios = turnos.length > 1;
+        const aCancelar =
+          ocupadoConfirmar?.tipo === 'todos'
+            ? turnos
+            : ocupadoConfirmar?.tipo === 'uno'
+              ? turnos.filter((t) => slotDedupeKey(t) === ocupadoConfirmar.clave)
+              : [];
+        return (
+        <div className="fl-modal-backdrop" role="presentation">
+          <div
+            className="fl-modal fl-modal--busca-asignar"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="busca-ocupado-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="fl-modal__header">
+              <h2 id="busca-ocupado-title">{varios ? 'Turnos ocupados' : 'Turno ocupado'}</h2>
+              <button type="button" className="fl-icon-btn" onClick={closeOcupadoModal} aria-label="Cerrar">
+                <IconX size={18} />
+              </button>
+            </div>
+            <div className="fl-modal__body">
+              <div className="modal-slot-info" aria-label="Datos del turno ocupado">
+                <div className="modal-slot-row">
+                  <span className="modal-slot-label">Fecha</span>
+                  <span className="modal-slot-value">{fmtDayLabelTitulo(primero.fechaHora)}</span>
+                </div>
+                <div className="modal-slot-row">
+                  <span className="modal-slot-label">{varios ? 'Horarios' : 'Hora'}</span>
+                  <span className="modal-slot-value modal-slot-value--time">{textoModulos(turnos)}</span>
+                </div>
+                <div className="modal-slot-row">
+                  <span className="modal-slot-label">Paciente</span>
+                  <span className="modal-slot-value">{titleCase(primero.personaNombre || 'Sin nombre')}</span>
+                </div>
+                {primero.personaDocumento ? (
+                  <div className="modal-slot-row">
+                    <span className="modal-slot-label">Documento</span>
+                    <span className="modal-slot-value">{primero.personaDocumento}</span>
+                  </div>
+                ) : null}
+                <div className="modal-slot-row">
+                  <span className="modal-slot-label">Profesional</span>
+                  <span className="modal-slot-value">
+                    {titleCase(primero.profesional || '') || primero.profesionalDoc}
+                  </span>
+                </div>
+                {(primero.edificio || primero.sector) && (
+                  <div className="modal-slot-row">
+                    <span className="modal-slot-label">Lugar</span>
+                    <span className="modal-slot-value">
+                      {[primero.edificio, primero.sector].filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                )}
+                {primero.prestacion ? (
+                  <div className="modal-slot-row">
+                    <span className="modal-slot-label">Prestación</span>
+                    <span className="modal-slot-value">{primero.prestacion}</span>
+                  </div>
+                ) : null}
+              </div>
+              {varios && !ocupadoConfirmar ? (
+                <ul className="ocupado-horas">
+                  {turnos.map((t) => (
+                    <li key={slotDedupeKey(t)}>
+                      <span>{fmtTime(t.fechaHora)}</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary ocupado-hora-btn"
+                        disabled={ocupadoCancelando || !t.personaDocumento}
+                        onClick={() => setOcupadoConfirmar({ tipo: 'uno', clave: slotDedupeKey(t) })}
+                      >
+                        Cancelar este
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {ocupadoConfirmar ? (
+                <p className="ocupado-confirm">
+                  {ocupadoConfirmar.tipo === 'todos'
+                    ? `¿Cancelar los ${turnos.length} turnos de ${titleCase(primero.personaNombre || 'este paciente')}?`
+                    : `¿Cancelar solo el turno de las ${fmtTime(aCancelar[0]?.fechaHora)}?`}
+                </p>
+              ) : (
+                <p className="ocupado-confirm">
+                  {varios
+                    ? 'Son turnos seguidos del mismo paciente. Podés cancelar uno o todos.'
+                    : 'Este horario ya está ocupado. Podés cancelarlo si corresponde.'}
+                </p>
+              )}
+              {ocupadoError ? <p className="modal-error">{ocupadoError}</p> : null}
+            </div>
+            <div className="fl-modal__footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => (ocupadoConfirmar ? setOcupadoConfirmar(null) : closeOcupadoModal())}
+                disabled={ocupadoCancelando}
+              >
+                {ocupadoConfirmar ? 'Volver' : 'Cerrar'}
+              </button>
+              {ocupadoConfirmar ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => handleCancelarOcupado(aCancelar)}
+                  disabled={ocupadoCancelando || aCancelar.length === 0}
+                >
+                  {ocupadoCancelando ? 'Cancelando...' : 'Sí, cancelar'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setOcupadoConfirmar(varios ? { tipo: 'todos' } : { tipo: 'uno', clave: slotDedupeKey(primero) })}
+                  disabled={ocupadoCancelando || !primero.personaDocumento}
+                >
+                  {varios ? 'Cancelar todos' : 'Cancelar turno'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {selectedSlotForAssign && (
         <div className="fl-modal-backdrop" role="presentation">

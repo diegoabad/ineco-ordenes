@@ -69,6 +69,20 @@ export async function getTurnos(fecha, prestadorDocumento) {
   };
 }
 
+/** Anula un turno ya creado. Medexis lo hace por POST a /Turno con estos datos en la query. */
+export async function anularTurno({ prestadorDocumento, personaDocumento, turnoFechaHora, sede }) {
+  const data = await apiPost("/Turno", {
+    PrestadorDocumento: String(prestadorDocumento),
+    PersonaDocumento: String(personaDocumento),
+    TurnoFechaHora: String(turnoFechaHora),
+    Sede: String(sede || "INECO"),
+  });
+  if (data?.Resultado === "ERROR" || data?.Respuesta === "ERROR") {
+    throw new Error(data.Detalle || data.Mensaje || "No se pudo anular el turno.");
+  }
+  return data;
+}
+
 export async function createTurno(turnoBody) {
   const url = `${base}/TurnoNuevo`;
   const res = await fetch(url, {
