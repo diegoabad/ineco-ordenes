@@ -76,6 +76,7 @@ export type WaPruebaAclaracion = {
 
 export type MenuPaso =
   | "sede"
+  | "algoMas"
   | "menu"
   | "turnos"
   | "info"

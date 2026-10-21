@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { createTtlCache } from "../lib/ttl-cache.js";
 
 const CONFIG_DOC = doc(firestore, "ordenes_config", "whatsapp_motor_config");
 
@@ -43,6 +44,8 @@ export type WhatsappMotorConfigDoc = {
   data: WhatsappMotorConfig;
   updatedAt: string;
 };
+
+const motorConfigCache = createTtlCache<WhatsappMotorConfigDoc>(10 * 60_000);
 
 export const DEFAULT_MOTOR_CONFIG: WhatsappMotorConfig = {
   interpretacion: {
@@ -187,16 +190,22 @@ export function normalizeMotorConfig(raw: unknown): WhatsappMotorConfig {
 }
 
 export async function getWhatsappMotorConfig(): Promise<WhatsappMotorConfigDoc> {
+  const cached = motorConfigCache.get();
+  if (cached !== undefined) return cached;
   const snap = await getDoc(CONFIG_DOC);
   if (!snap.exists()) {
-    return { data: DEFAULT_MOTOR_CONFIG, updatedAt: "" };
+    const empty = { data: DEFAULT_MOTOR_CONFIG, updatedAt: "" };
+    motorConfigCache.set(empty);
+    return empty;
   }
   const raw = snap.data() as Record<string, unknown>;
   const payload = raw.data ?? raw;
-  return {
+  const value = {
     data: normalizeMotorConfig(payload),
     updatedAt: String(raw.updatedAt ?? ""),
   };
+  motorConfigCache.set(value);
+  return value;
 }
 
 export async function saveWhatsappMotorConfig(
@@ -206,5 +215,6 @@ export async function saveWhatsappMotorConfig(
   const updatedAt = new Date().toISOString();
   const payload: WhatsappMotorConfigDoc = { data: normalized, updatedAt };
   await setDoc(CONFIG_DOC, payload, { merge: false });
+  motorConfigCache.set(payload);
   return payload;
 }

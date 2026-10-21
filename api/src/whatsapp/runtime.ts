@@ -25,7 +25,7 @@ import { mediaMetaFromRaw, normalizeIncomingMessage } from "./normalize.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { BaileysSessionStore } from "./session-store.js";
 import type { WaMessage, WaMessageType, WaStatusSnapshot } from "./types.js";
-import { scheduleBotTurn, setBotDeliver } from "./bot-turn.js";
+import { barrerInactividad, scheduleBotTurn, setBotDeliver } from "./bot-turn.js";
 
 const sessionStore = new BaileysSessionStore(
   path.isAbsolute(env.whatsapp.sessionPath)
@@ -178,6 +178,8 @@ async function resumeUnansweredTurns(): Promise<void> {
   }
 }
 
+let timerInactividad: ReturnType<typeof setInterval> | null = null;
+
 export async function bootstrapWhatsapp(): Promise<void> {
   if (bootstrapped) return;
   bootstrapped = true;
@@ -187,6 +189,17 @@ export async function bootstrapWhatsapp(): Promise<void> {
   void resumeUnansweredTurns().catch((error) => {
     console.error("[whatsapp] No se pudieron retomar los mensajes sin respuesta", error);
   });
+  if (!timerInactividad) {
+    timerInactividad = setInterval(() => {
+      void barrerInactividad().catch((error) => {
+        console.error("[whatsapp] No se pudo cerrar por inactividad", error);
+      });
+    }, 5 * 60 * 1000);
+    // No mantener el proceso vivo solo por este timer.
+    if (typeof timerInactividad === "object" && "unref" in timerInactividad) {
+      timerInactividad.unref();
+    }
+  }
 }
 
 export async function sendConversationText(

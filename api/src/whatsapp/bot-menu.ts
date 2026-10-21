@@ -9,7 +9,13 @@ import {
   textoDeTurnosPropios,
 } from "./acciones.js";
 import { documentoDePersona } from "./estado-dialogo.js";
-import { getWhatsappBotConfig } from "./bot-config.js";
+import { sexoDesdeNombre } from "../lib/nombrePersona.js";
+import {
+  botDaTurnos,
+  getWhatsappBotConfig,
+  TEXTO_TURNO_DATOS_LISTOS,
+  TEXTO_TURNO_SIN_ASIGNAR,
+} from "./bot-config.js";
 import { getWhatsappConocimiento } from "./conocimiento.js";
 import {
   createMessage,
@@ -60,28 +66,100 @@ const OPCIONES = [
   { n: "4", clave: "quejas", titulo: "Quejas" },
 ];
 
-const PIE = "0. Volver atrás\n00. Cancelar el proceso";
-
-function conPie(texto: string): string {
-  return `${texto}\n\n${PIE}`;
+/** Texto libre: la salida va en la misma frase, no como menú aparte. */
+function conVolver(texto: string): string {
+  const base = texto.trim();
+  if (/toc[aá] 0\b|0 para volver/i.test(base)) return base;
+  return `${base} O tocá 0 para volver atrás.`;
 }
 
 function quiereVolver(texto: string): boolean {
   const t = sinTildes(texto).trim();
-  return t === "0" || t === "volver" || t === "atras" || t === "volver atras";
+  // 00 quedó deprecado: hace lo mismo que volver atrás.
+  return (
+    t === "0" ||
+    t === "00" ||
+    t === "volver" ||
+    t === "atras" ||
+    t === "volver atras" ||
+    t === "cancelar" ||
+    t === "cancelar el proceso"
+  );
 }
 
-function quiereCancelar(texto: string): boolean {
+function pideIndistinto(texto: string): boolean {
   const t = sinTildes(texto).trim();
-  return t === "00" || t === "cancelar el proceso";
+  return (
+    t === "indistinto" ||
+    t === "cualquiera" ||
+    t === "da igual" ||
+    t === "el que sea" ||
+    t === "no se" ||
+    t === "nose" ||
+    /\b(indistinto|cualquiera|sin preferencia|me da igual|el que sea|no tengo preferencia)\b/.test(t)
+  );
+}
+
+function preguntaProfesional(cambiar: boolean): string {
+  const para = cambiar ? "para el turno nuevo" : "";
+  return conVolver(
+    `¿Tenés algún médico en particular ${para}? Escribí el nombre y apellido, o escribí indistinto y te muestro una lista.`
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 function mensajeError(error: unknown): string {
   const texto = error instanceof Error ? error.message : "";
-  if (!texto || /password|token|https?:\/\//i.test(texto)) {
-    return "Hubo un problema con el sistema. Podés reintentar, volver atrás con 0 o cancelar con 00.";
+  if (!texto || /password|token|https?:\/\//i.test(texto) || esErrorSistema(texto)) {
+    return "Hubo un problema con el sistema. Podés elegir otra opción para seguir.";
   }
-  return `${texto.slice(0, 240)}\n\nPodés reintentar, volver atrás con 0 o cancelar con 00.`;
+  return `${texto.slice(0, 240)}\n\nPodés elegir otra opción para seguir.`;
+}
+
+/** Errores de Medexis / internos: no se muestran al paciente. */
+function esErrorSistema(texto: string): boolean {
+  const t = sinTildes(texto);
+  if (
+    /precio cero|codigo de prestacion|medexis|resultado.?error|exception|stack|password|token|https?:|api\/turno|null reference|sql|timeout|econn|quota|resource_exhausted/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/^no pude (dar|cancelar)/i.test(texto.trim())) return true;
+  // Mensajes nuestros accionables: no son error de sistema.
+  if (
+    /^(turno dado|turno cancelado|falta el|faltan |no hay |estos son|tenemos estos|buscas a|no encontre|ese profesional|hay mas de|con ese dni|figura |no figura|para confirmar)/i.test(
+      sinTildes(texto.trim()),
+    )
+  ) {
+    return false;
+  }
+  // Reglas de negocio opacas del sistema de turnos.
+  if (/\bno (puede|pudo|se puede)\b/.test(t) && !/\b(email|dni|horario|nombre|apellido)\b/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function mensajeFalloReserva(crudo: string): string {
+  if (/falta el email|faltan nombre|falta.*apellido|falta el dni|falta el horario/i.test(crudo)) {
+    return crudo;
+  }
+  if (esErrorSistema(crudo) || !crudo.trim()) {
+    return "No pude darte ese turno. El sistema no lo pudo registrar.";
+  }
+  return crudo;
+}
+
+function mensajeFalloCancelar(crudo: string): string {
+  if (/^turno cancelado/i.test(crudo.trim())) return crudo;
+  if (/no encontr|no hay un turno/i.test(crudo)) return crudo;
+  if (esErrorSistema(crudo) || !crudo.trim()) {
+    return "No pude cancelar ese turno. El sistema no lo pudo registrar.";
+  }
+  return crudo;
 }
 
 function sinTildes(texto: string): string {
@@ -167,12 +245,72 @@ function numerar(lineas: string[]): string {
   return lineas.map((linea, index) => `${index + 1}. ${linea}`).join("\n");
 }
 
+/** Horarios agrupados por día, con número para elegir. */
+function formatearHorariosMenu(lineas: string[]): string {
+  const bloques: string[] = ["Tengo los siguientes turnos libres:"];
+  let diaActual = "";
+  let n = 0;
+  for (const linea of lineas) {
+    const m = linea.match(/\((\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::\d{2})?\)/);
+    if (!m) continue;
+    const [, y, mes, dia, hh, mm] = m;
+    const claveDia = `${y}-${mes}-${dia}`;
+    if (claveDia !== diaActual) {
+      diaActual = claveDia;
+      const cuando = new Date(`${claveDia}T12:00:00-03:00`);
+      const weekday = new Intl.DateTimeFormat("es-AR", {
+        weekday: "long",
+        timeZone: "America/Argentina/Buenos_Aires",
+      }).format(cuando);
+      const mesNombre = new Intl.DateTimeFormat("es-AR", {
+        month: "long",
+        timeZone: "America/Argentina/Buenos_Aires",
+      }).format(cuando);
+      bloques.push(
+        "",
+        `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dia} de ${mesNombre}`,
+      );
+    }
+    n += 1;
+    bloques.push(`${n}. ${hh}:${mm}`);
+  }
+  return bloques.join("\n");
+}
+
 function noValida(lista: string): string {
   return `Esa opción no es válida. Elegí un número de la lista.\n\n${lista}`;
 }
 
 function listaSedes(): string {
   return `¿Para qué sucursal es tu consulta?\nRespondé con el número.\n\n${numerar(SEDES)}`;
+}
+
+function preguntaAlgoMas(sedeNoCaba: boolean): string {
+  const aviso = sedeNoCaba
+    ? "Este WhatsApp gestiona solo la sede de CABA. Te dejé el contacto de esa sucursal.\n\n"
+    : "";
+  return `${aviso}¿Te puedo ayudar en algo más?\n\n1. Sí\n2. No, gracias`;
+}
+
+function opcionesTrasSi(desde: "sede" | "info"): string {
+  if (desde === "sede") {
+    return [
+      "¿En qué te ayudo?",
+      "",
+      "1. Continuar con CABA (turnos, info, tratamientos, quejas)",
+      "2. Ver otra sucursal",
+    ].join("\n");
+  }
+  return [
+    "¿En qué te ayudo?",
+    "",
+    "1. Menú principal (turnos, info, tratamientos, quejas)",
+    "2. Ver otra sucursal",
+  ].join("\n");
+}
+
+function desdeAlgoMas(estado: MenuEstado): "sede" | "info" {
+  return estado.pendiente === "desde:info" || estado.pendiente === "elige:info" ? "info" : "sede";
 }
 
 function listaMenu(): string {
@@ -190,7 +328,6 @@ function listaTurnos(): string {
     "4. Cambiar un turno",
     "",
     "0. Volver atrás",
-    "00. Cancelar el proceso",
   ].join("\n");
 }
 
@@ -325,16 +462,67 @@ function capitulo(markdown: string, pista: string): string {
   return bloque?.texto ?? "";
 }
 
+/** Parte sedes por ### / #### o por títulos **INECO …** (evita devolver toda una zona). */
+function entradasDeSede(texto: string): { titulo: string; cuerpo: string }[] {
+  const lineas = texto.replace(/\r\n/g, "\n").split("\n");
+  const out: { titulo: string; cuerpo: string }[] = [];
+  let titulo = "";
+  let cuerpo: string[] = [];
+  const cerrar = () => {
+    const t = cuerpo.join("\n").trim();
+    if (titulo || t) out.push({ titulo, cuerpo: t });
+    cuerpo = [];
+  };
+  for (const linea of lineas) {
+    const heading = linea.match(/^#{2,4}\s+(.+)$/);
+    const negrita = linea.match(/^\*\*([^*]+)\*\*\s*$/);
+    if (heading || negrita) {
+      cerrar();
+      titulo = (heading?.[1] ?? negrita?.[1] ?? "").trim();
+      continue;
+    }
+    cuerpo.push(linea);
+  }
+  cerrar();
+  return out;
+}
+
+function tituloEsSede(titulo: string, buscado: string): boolean {
+  const t = sinTildes(titulo);
+  if (!buscado || !t.includes(buscado)) return false;
+  // "Gran Buenos Aires — Zona Oeste" no es una sede; "INECO Ramos Mejía" sí.
+  if (/zona|gran buenos|interior|caba y|todas las/.test(t) && !/\bineco\b/.test(t)) return false;
+  return (
+    t === buscado ||
+    t.startsWith(buscado) ||
+    /\bineco\b/.test(t) ||
+    new RegExp(`(?:^|\\W)${buscado.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\W|$)`).test(t)
+  );
+}
+
 function datosDeSede(markdown: string, sede: string): string {
   const texto = capitulo(markdown, "Sedes") || markdown;
   const buscado = sinTildes(sede);
-  const trozos = texto.split(/\n(?=#{2,4}\s+)/);
-  const bloque = trozos.find((trozo) => sinTildes(trozo).includes(buscado));
-  if (bloque && sinTildes(bloque).includes(buscado)) return bloque.trim().slice(0, 900);
+  if (!buscado) return "";
+  const entradas = entradasDeSede(texto);
+  const porTitulo = entradas
+    .filter((item) => tituloEsSede(item.titulo, buscado))
+    .sort((a, b) => a.titulo.length - b.titulo.length);
+  if (porTitulo[0]) {
+    const { titulo, cuerpo } = porTitulo[0];
+    return [titulo ? `**${titulo.replace(/^\*\*|\*\*$/g, "")}**` : "", cuerpo].filter(Boolean).join("\n").trim().slice(0, 900);
+  }
+  // Último recurso: párrafo que nombra la sede, sin arrastrar otra sede en negrita.
   const parrafo = texto
     .split(/\n\s*\n/)
     .map((parte) => parte.trim())
-    .find((parte) => sinTildes(parte).includes(buscado));
+    .filter(Boolean)
+    .find((parte) => {
+      const limpio = sinTildes(parte);
+      if (!limpio.includes(buscado)) return false;
+      const otras = SEDES.map((nombre) => sinTildes(nombre)).filter((nombre) => nombre && nombre !== buscado);
+      return !otras.some((otra) => limpio.includes(`ineco ${otra}`) || limpio.includes(`**ineco ${otra}`));
+    });
   return (parrafo ?? "").slice(0, 900);
 }
 
@@ -359,11 +547,14 @@ function empujar(estado: MenuEstado): void {
 }
 
 async function preguntar(conversation: WaConversation, texto: string): Promise<void> {
-  await decir(conversation.id, conversation.contactId, conPie(texto));
+  const limpio = texto.trim();
+  // Si ya es un menú numerado con 0, no duplicamos la frase de volver.
+  const conOpcionCero = /\n0\.\s/m.test(limpio) || /^0\.\s/m.test(limpio);
+  await decir(conversation.id, conversation.contactId, conOpcionCero ? limpio : conVolver(limpio));
 }
 
 async function accion(
-  conversation: WaConversation,
+  _conversation: WaConversation,
   clave: Parameters<typeof ejecutarAccion>[0],
   consulta: string,
   ctx: Parameters<typeof ejecutarAccion>[2],
@@ -372,8 +563,8 @@ async function accion(
     return memoria?.accion
       ? await memoria.accion(clave, consulta, ctx)
       : await ejecutarAccion(clave, consulta, ctx);
-  } catch (error) {
-    await decir(conversation.id, conversation.contactId, mensajeError(error));
+  } catch {
+    // El caller recupera el flujo (menú de turnos / opciones). No filtramos el error crudo.
     return null;
   }
 }
@@ -449,7 +640,31 @@ async function pedirDni(conversation: WaConversation, estado: MenuEstado): Promi
   empujar(estado);
   estado.paso = "dni";
   await guardar(conversation.id, estado);
-  await preguntar(conversation, "¿Me pasás el DNI del paciente?");
+  await preguntar(
+    conversation,
+    "Pasame el DNI del paciente, sin puntos ni espacios.",
+  );
+}
+
+async function botMenuDaTurnos(): Promise<boolean> {
+  const bot = await getWhatsappBotConfig();
+  return botDaTurnos(bot?.data ?? {});
+}
+
+async function cerrarTurnoParaOperador(conversation: WaConversation, estado: MenuEstado): Promise<void> {
+  await etiquetarNombres(conversation, ["Derivado a asesor", "Pedido de turno"], true);
+  await decir(conversation.id, conversation.contactId, TEXTO_TURNO_DATOS_LISTOS);
+  await decir(
+    conversation.id,
+    conversation.contactId,
+    "Listo. Alguien del equipo te va a escribir por este medio.",
+  );
+  if (!memoria) await setConversationAssignee(conversation.id, { kind: "user", name: "Equipo" });
+  else {
+    memoria.conversation.assigneeKind = "user";
+    memoria.conversation.assigneeName = "Equipo";
+  }
+  await guardar(conversation.id, vacio("menu", estado));
 }
 
 async function pedirSiguienteDato(conversation: WaConversation, estado: MenuEstado): Promise<void> {
@@ -457,25 +672,38 @@ async function pedirSiguienteDato(conversation: WaConversation, estado: MenuEsta
   if (!estado.nombre) {
     estado.paso = "nombre";
     await guardar(conversation.id, estado);
-    await preguntar(conversation, "¿Cuál es el nombre del paciente?");
+    await preguntar(conversation, "¿Cómo se llama el paciente? Solo el nombre.");
     return;
   }
   if (!estado.apellido) {
     estado.paso = "apellido";
     await guardar(conversation.id, estado);
-    await preguntar(conversation, "¿Cuál es el apellido?");
+    await preguntar(conversation, "¿Y el apellido?");
     return;
   }
   if (!estado.sexo) {
-    estado.paso = "sexo";
-    await guardar(conversation.id, estado);
-    await preguntar(conversation, "¿El sexo es 1 femenino o 2 masculino?");
-    return;
+    const inferido = sexoDesdeNombre(estado.nombre);
+    if (inferido) {
+      estado.sexo = inferido;
+    } else {
+      estado.paso = "sexo";
+      await guardar(conversation.id, estado);
+      await preguntar(
+        conversation,
+        "¿El sexo del paciente?\n\n1. Femenino\n2. Masculino\n\n0. Volver atrás",
+      );
+      return;
+    }
   }
   if (!estado.email) {
     estado.paso = "email";
     await guardar(conversation.id, estado);
-    await preguntar(conversation, "¿Cuál es el email?");
+    await preguntar(conversation, "Pasame un email de contacto.");
+    return;
+  }
+  // Sin dar turnos: con la ficha lista, deriva al equipo (no busca profesional ni horarios).
+  if (!(await botMenuDaTurnos()) && (estado.modo === "sacar" || estado.modo === "cambiar")) {
+    await cerrarTurnoParaOperador(conversation, estado);
     return;
   }
   estado.paso = "profesional";
@@ -483,11 +711,36 @@ async function pedirSiguienteDato(conversation: WaConversation, estado: MenuEsta
   estado.profesional = "";
   estado.tratamiento = "";
   await guardar(conversation.id, estado);
+  await decir(conversation.id, conversation.contactId, preguntaProfesional(estado.modo === "cambiar"));
+}
+
+async function ofrecerListaProfesionales(
+  conversation: WaConversation,
+  estado: MenuEstado,
+): Promise<void> {
+  const salida = await accion(conversation, "turnos.listarProfesionales", "", {});
+  if (!salida || esErrorSistema(salida.texto)) {
+    await volverTurnos(
+      conversation,
+      estado,
+      "No pude armar la lista de médicos. El sistema no respondió.",
+    );
+    return;
+  }
+  const lineas = lineasConCodigo(salida.texto);
+  if (!lineas.length) {
+    await preguntar(
+      conversation,
+      "Ahora no tengo una lista para mostrarte. Escribí el nombre y apellido del médico.",
+    );
+    return;
+  }
+  estado.paso = "profesional";
+  estado.opciones = lineas;
+  await guardar(conversation.id, estado);
   await preguntar(
     conversation,
-    estado.modo === "cambiar"
-      ? "¿Con qué profesional busco el turno nuevo?"
-      : "¿Con qué profesional busco el turno?",
+    `Estos son algunos médicos. Elegí un número, o escribí otro nombre:\n\n${numerar(lineas)}\n\n0. Volver atrás`,
   );
 }
 
@@ -513,8 +766,26 @@ async function despuesDelDni(conversation: WaConversation, estado: MenuEstado): 
     }
     if (estado.modo === "ver") {
       const salida = await accion(conversation, "turnos.delPaciente", `dni ${estado.dni}`, { dni: estado.dni });
-      if (!salida) return;
-      await volverTurnos(conversation, estado, salida.texto);
+      if (!salida) {
+        await volverTurnos(
+          conversation,
+          estado,
+          "No pude consultar los turnos. El sistema no respondió.",
+        );
+        return;
+      }
+      await volverTurnos(
+        conversation,
+        estado,
+        esErrorSistema(salida.texto)
+          ? "No pude consultar los turnos. El sistema no respondió."
+          : salida.texto,
+      );
+      return;
+    }
+    // Cancelar sí; cambiar sin dar turnos = tomar datos y que lo reasigne el equipo.
+    if (estado.modo === "cambiar" && !(await botMenuDaTurnos())) {
+      await pedirSiguienteDato(conversation, estado);
       return;
     }
     await listarParaElegir(conversation, estado);
@@ -540,7 +811,14 @@ async function despuesDelDni(conversation: WaConversation, estado: MenuEstado): 
 async function listarParaElegir(conversation: WaConversation, estado: MenuEstado): Promise<void> {
   empujar(estado);
   const salida = await accion(conversation, "turnos.delPaciente", `dni ${estado.dni}`, { dni: estado.dni });
-  if (!salida) return;
+  if (!salida || esErrorSistema(salida.texto)) {
+    await volverTurnos(
+      conversation,
+      estado,
+      "No pude consultar los turnos. El sistema no respondió.",
+    );
+    return;
+  }
   const modo = estado.modo === "cambiar" ? "cambiar" : "anular";
   const texto = textoDeTurnosPropios(modo, salida.texto, "");
   const futuras = texto.split("\n").map((linea) => linea.trim()).filter((linea) => linea.startsWith("futuro:"));
@@ -563,6 +841,63 @@ async function listarParaElegir(conversation: WaConversation, estado: MenuEstado
   await preguntar(conversation, `${titulo}:\n\n${numerar(futuras)}`);
 }
 
+function lineasConCodigo(resultado: string): string[] {
+  return resultado
+    .split("\n")
+    .map((linea) => linea.trim())
+    .filter((linea) => /\(\d+/.test(linea));
+}
+
+/** Parsea la salida de turnos.listarTratamientos (confirmación, varios, o tratamientos). */
+function leerListarTratamientos(resultado: string): {
+  tipo: "confirma" | "profesionales" | "tratamientos" | "vacio";
+  nombre: string;
+  lineas: string[];
+} {
+  const texto = resultado.trim();
+  if (texto.startsWith("Buscás a")) {
+    return {
+      tipo: "confirma",
+      nombre: texto.replace(/^Buscás a\s*/i, "").replace(/\.$/, "").trim(),
+      lineas: [],
+    };
+  }
+  if (/profesionales con ese nombre|hay más de un/i.test(texto)) {
+    return { tipo: "profesionales", nombre: "", lineas: lineasConCodigo(texto) };
+  }
+  const deTratamientos = texto.match(/estos son los tratamientos de\s+([^:\n]+)\s*:/i);
+  if (deTratamientos) {
+    const lineas = lineasConCodigo(texto);
+    return {
+      tipo: lineas.length ? "tratamientos" : "vacio",
+      nombre: deTratamientos[1]!.trim(),
+      lineas,
+    };
+  }
+  // Formato viejo: NOMBRE (doc): trat1; trat2
+  const lineas = lineasConCodigo(texto);
+  if (texto.startsWith("Falta el profesional") || !lineas.length) {
+    return { tipo: "vacio", nombre: "", lineas: [] };
+  }
+  if (lineas.length === 1 && lineas[0]!.includes(":")) {
+    const nombre = lineas[0]!.split("(")[0]?.trim() || "";
+    const tratamientos = lineas[0]!
+      .split(":")
+      .slice(1)
+      .join(":")
+      .split(";")
+      .map((item) => item.trim().replace(/\s*\([^)]*\)\s*$/, ""))
+      .filter(Boolean);
+    return { tipo: "tratamientos", nombre, lineas: tratamientos };
+  }
+  // Varias líneas con (código) sin encabezado de tratamientos ⇒ lista de profesionales.
+  if (lineas.length > 1) {
+    return { tipo: "profesionales", nombre: "", lineas };
+  }
+  const nombre = lineas[0]!.split("(")[0]?.trim() || "";
+  return { tipo: "tratamientos", nombre, lineas: [nombre] };
+}
+
 async function ofrecerProfesional(
   conversation: WaConversation,
   estado: MenuEstado,
@@ -570,45 +905,52 @@ async function ofrecerProfesional(
 ): Promise<void> {
   empujar(estado);
   const salida = await accion(conversation, "turnos.listarTratamientos", texto, { textoPersona: texto });
-  if (!salida) return;
-  const resultado = salida.texto.trim();
-  if (resultado.startsWith("Buscás a")) {
-    const nombre = resultado.replace(/^Buscás a\s*/i, "").replace(/\.$/, "").trim();
+  if (!salida || esErrorSistema(salida.texto)) {
+    await volverTurnos(
+      conversation,
+      estado,
+      "No pude buscar ese profesional. El sistema no respondió.",
+    );
+    return;
+  }
+  const leido = leerListarTratamientos(salida.texto);
+  if (leido.tipo === "confirma") {
     estado.paso = "confirmar";
-    estado.pendiente = nombre;
+    estado.pendiente = leido.nombre;
     await guardar(conversation.id, estado);
-    await preguntar(conversation, `¿Buscás a ${nombre}?\nRespondé sí o no.`);
+    await preguntar(conversation, `¿Te referís a ${leido.nombre}? Respondé sí o no.`);
     return;
   }
-  const lineas = resultado.split("\n").map((linea) => linea.trim()).filter((linea) => /\(\d+/.test(linea));
-  if (lineas.length > 1 || /profesionales con ese nombre|hay más de un/i.test(resultado)) {
+  if (leido.tipo === "profesionales") {
     estado.paso = "profesional";
-    estado.opciones = lineas;
+    estado.opciones = leido.lineas;
     await guardar(conversation.id, estado);
-    await preguntar(conversation, `Tenemos estos profesionales:\n\n${numerar(lineas)}\n\n¿Cuál buscabas?`);
+    await preguntar(
+      conversation,
+      `Hay más de un médico con ese nombre. Elegí un número:\n\n${numerar(leido.lineas)}\n\n0. Volver atrás`,
+    );
     return;
   }
-  if (resultado.startsWith("Falta el profesional") || !lineas.length) {
+  if (leido.tipo === "vacio" || !leido.lineas.length) {
     estado.paso = "profesional";
     estado.opciones = [];
     await guardar(conversation.id, estado);
-    await preguntar(conversation, "No hay un profesional habilitado con ese nombre. ¿Me decís el nombre y el apellido?");
+    await preguntar(
+      conversation,
+      "No encontré ese nombre. Escribí nombre y apellido, o indistinto para ver una lista.",
+    );
     return;
   }
-  const nombre = lineas[0]!.split("(")[0]?.trim() || texto;
-  const tratamientos = lineas[0]!
-    .split(":")
-    .slice(1)
-    .join(":")
-    .split(";")
-    .map((item) => item.trim().replace(/\s*\([^)]*\)\s*$/, ""))
-    .filter(Boolean);
-  estado.profesional = nombre;
+  const tratamientos = leido.lineas.map((item) => item.replace(/\s*\([^)]*\)\s*$/, "").trim()).filter(Boolean);
+  estado.profesional = leido.nombre || texto;
   estado.opciones = tratamientos;
   estado.paso = "tratamiento";
   estado.pendiente = "";
   await guardar(conversation.id, estado);
-  await preguntar(conversation, `Estos son los tratamientos de ${nombre}:\n\n${numerar(tratamientos)}`);
+  await preguntar(
+    conversation,
+    `Estos son los tratamientos de ${estado.profesional}. Elegí un número:\n\n${numerar(tratamientos)}\n\n0. Volver atrás`,
+  );
 }
 
 async function buscarHorarios(
@@ -628,7 +970,14 @@ async function buscarHorarios(
     masTemprano: antes,
     horariosPrevios: ampliar || antes ? estado.horarios : "",
   });
-  if (!salida) return;
+  if (!salida || esErrorSistema(salida.texto)) {
+    await volverTurnos(
+      conversation,
+      estado,
+      "No pude buscar horarios. El sistema no respondió.",
+    );
+    return;
+  }
   aplicarFicha(estado, salida.ficha);
   if (salida.horarios) estado.horarios = salida.horarios;
   if (salida.hastaDia != null) estado.hastaDia = salida.hastaDia;
@@ -644,10 +993,9 @@ async function buscarHorarios(
     await preguntar(conversation, `${salida.texto}\n\nEscribí más adelante para seguir buscando.`);
     return;
   }
-  const visibles = lineas.map((linea) => linea.replace(/\s*\([^)]*\)\s*$/, ""));
   await preguntar(
     conversation,
-    `Estos son los horarios libres:\n\n${numerar(visibles)}\n\nEscribí el número. Si querés ver más adelante, escribí más adelante.`,
+    `${formatearHorariosMenu(lineas)}\n\nEscribí el número del horario. Si querés ver más fechas, escribí más adelante.\n\n0. Volver atrás`,
   );
 }
 
@@ -658,27 +1006,53 @@ async function reservarElegido(
 ): Promise<void> {
   const iso = linea.match(/\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\)/)?.[1] ?? "";
   if (!iso) {
-    await preguntar(conversation, noValida(numerar(estado.opciones.map((linea) => linea.replace(/\s*\([^)]*\)\s*$/, "")))));
+    await preguntar(conversation, noValida(formatearHorariosMenu(estado.opciones)));
     return;
   }
   const consulta = `${estado.profesional} ${estado.tratamiento} (${iso})`;
   const salida = await accion(conversation, "turnos.reservar", consulta, ctxDe(estado, conversation.contact?.phoneNumber ?? ""));
-  if (!salida) return;
+  if (!salida) {
+    await volverTurnos(
+      conversation,
+      estado,
+      "No pude darte ese turno. El sistema no lo pudo registrar.",
+    );
+    return;
+  }
   if (!salida.texto.startsWith("Turno dado")) {
-    await decir(conversation.id, conversation.contactId, salida.texto);
+    if (/falta el email/i.test(salida.texto)) {
+      estado.paso = "email";
+      estado.email = "";
+      await guardar(conversation.id, estado);
+      await preguntar(conversation, "Pasame un email de contacto.");
+      return;
+    }
+    if (/faltan nombre|falta.*apellido/i.test(salida.texto)) {
+      if (!estado.nombre) estado.nombre = "";
+      if (!estado.apellido) estado.apellido = "";
+      await pedirSiguienteDato(conversation, estado);
+      return;
+    }
+    await volverTurnos(conversation, estado, mensajeFalloReserva(salida.texto));
     return;
   }
   let extra = "";
   if (estado.anularLuego) {
-    const linea = estado.anularLuego.replace(/^futuro:\s*/i, "");
-    const cancelado = await accion(conversation, "turnos.cancelar", linea, {
+    const lineaAnular = estado.anularLuego.replace(/^futuro:\s*/i, "");
+    const cancelado = await accion(conversation, "turnos.cancelar", lineaAnular, {
       dni: estado.dni,
-      textoPersona: linea,
+      textoPersona: lineaAnular,
     });
-    if (!cancelado) return;
-    extra = cancelado.texto.startsWith("Turno cancelado")
-      ? "El turno anterior quedó cancelado."
-      : `No pude cancelar el turno anterior. ${cancelado.texto}`;
+    if (!cancelado) {
+      extra = "El turno nuevo quedó, pero no pude cancelar el anterior.";
+    } else if (cancelado.texto.startsWith("Turno cancelado")) {
+      extra = "El turno anterior quedó cancelado.";
+    } else {
+      extra = mensajeFalloCancelar(cancelado.texto).replace(
+        /^No pude cancelar ese turno/,
+        "El turno nuevo quedó, pero no pude cancelar el anterior",
+      );
+    }
   }
   await volverTurnos(conversation, estado, [salida.texto, extra].filter(Boolean).join("\n"));
 }
@@ -702,8 +1076,19 @@ async function confirmarTurno(conversation: WaConversation, estado: MenuEstado, 
       dni: estado.dni,
       textoPersona: linea,
     });
-    if (!salida) return;
-    await volverTurnos(conversation, estado, salida.texto);
+    if (!salida) {
+      await volverTurnos(
+        conversation,
+        estado,
+        "No pude cancelar ese turno. El sistema no lo pudo registrar.",
+      );
+      return;
+    }
+    if (salida.texto.startsWith("Turno cancelado")) {
+      await volverTurnos(conversation, estado, salida.texto);
+      return;
+    }
+    await volverTurnos(conversation, estado, mensajeFalloCancelar(salida.texto));
     return;
   }
   estado.anularLuego = estado.pendiente;
@@ -727,56 +1112,66 @@ async function mostrarPaso(conversation: WaConversation, estado: MenuEstado): Pr
     return;
   }
   if (estado.paso === "dni") {
-    await preguntar(conversation, "¿Me pasás el DNI del paciente?");
+    await preguntar(conversation, "Pasame el DNI del paciente, sin puntos ni espacios.");
     return;
   }
   if (estado.paso === "nombre") {
-    await preguntar(conversation, "¿Cuál es el nombre del paciente?");
+    await preguntar(conversation, "¿Cómo se llama el paciente? Solo el nombre.");
     return;
   }
   if (estado.paso === "apellido") {
-    await preguntar(conversation, "¿Cuál es el apellido?");
+    await preguntar(conversation, "¿Y el apellido?");
     return;
   }
   if (estado.paso === "sexo") {
-    await preguntar(conversation, "¿El sexo es 1 femenino o 2 masculino?");
-    return;
-  }
-  if (estado.paso === "email") {
-    await preguntar(conversation, "¿Cuál es el email?");
-    return;
-  }
-  if (estado.paso === "profesional") {
     await preguntar(
       conversation,
-      estado.opciones.length
-        ? `Tenemos estos profesionales:\n\n${numerar(estado.opciones)}\n\n¿Cuál buscabas?`
-        : "¿Con qué profesional lo busco?",
+      "¿El sexo del paciente?\n\n1. Femenino\n2. Masculino\n\n0. Volver atrás",
     );
     return;
   }
+  if (estado.paso === "email") {
+    await preguntar(conversation, "Pasame un email de contacto.");
+    return;
+  }
+  if (estado.paso === "profesional") {
+    if (estado.opciones.length) {
+      await preguntar(
+        conversation,
+        `Estos son algunos médicos. Elegí un número, o escribí otro nombre:\n\n${numerar(estado.opciones)}\n\n0. Volver atrás`,
+      );
+    } else {
+      await decir(conversation.id, conversation.contactId, preguntaProfesional(estado.modo === "cambiar"));
+    }
+    return;
+  }
   if (estado.paso === "tratamiento") {
-    await preguntar(conversation, `Elegí un número de la lista.\n\n${numerar(estado.opciones)}`);
+    await preguntar(
+      conversation,
+      `Elegí el tratamiento con el número:\n\n${numerar(estado.opciones)}\n\n0. Volver atrás`,
+    );
     return;
   }
   if (estado.paso === "horarios") {
-    const visibles = estado.opciones.map((linea) => linea.replace(/\s*\([^)]*\)\s*$/, ""));
     await preguntar(
       conversation,
-      visibles.length
-        ? `Estos son los horarios libres:\n\n${numerar(visibles)}\n\nEscribí el número o más adelante.`
-        : "Escribí más adelante para seguir buscando.",
+      estado.opciones.length
+        ? `${formatearHorariosMenu(estado.opciones)}\n\nEscribí el número del horario. Si querés ver más fechas, escribí más adelante.\n\n0. Volver atrás`
+        : "No encontré horarios en estas fechas. Escribí más adelante para seguir buscando.",
     );
     return;
   }
   if (estado.paso === "elegirTurno") {
-    await preguntar(conversation, `Elegí un número de la lista.\n\n${numerar(estado.opciones)}`);
+    await preguntar(
+      conversation,
+      `Elegí el turno con el número:\n\n${numerar(estado.opciones)}\n\n0. Volver atrás`,
+    );
     return;
   }
   if (estado.paso === "confirmar") {
     const texto = estado.pendiente.startsWith("futuro:")
       ? `Para confirmar ${estado.modo === "cambiar" ? "el cambio" : "la anulación"}:\n${estado.pendiente}\n\nRespondé sí o no.`
-      : `¿Buscás a ${estado.pendiente}?\nRespondé sí o no.`;
+      : `¿Te referís a ${estado.pendiente}? Respondé sí o no.`;
     await preguntar(conversation, texto);
     return;
   }
@@ -784,7 +1179,7 @@ async function mostrarPaso(conversation: WaConversation, estado: MenuEstado): Pr
     await preguntar(conversation, "Contame qué pasó.");
     return;
   }
-  await preguntar(conversation, listaInfo());
+  await decir(conversation.id, conversation.contactId, listaInfo());
 }
 
 function listaInfo(): string {
@@ -798,24 +1193,21 @@ function listaInfo(): string {
     "5. Datos de INECO",
     "",
     "0. Volver atrás",
-    "00. Cancelar el proceso",
   ].join("\n");
 }
 
 async function responderInfo(conversation: WaConversation, estado: MenuEstado, texto: string): Promise<void> {
   const t = sinTildes(texto).trim();
-  if (quiereCancelar(t) || (estado.paso === "info" && (t === "0" || t === "menu"))) {
+  // 0 = salir de lo que estamos haciendo (info) y volver al menú principal.
+  if (quiereVolver(t) && (estado.paso === "info" || t === "menu")) {
     await guardar(conversation.id, vacio("menu", estado));
-    await decir(
-      conversation.id,
-      conversation.contactId,
-      `${quiereCancelar(t) ? "Cancelé este proceso.\n\n" : ""}${listaMenu()}`,
-    );
+    await decir(conversation.id, conversation.contactId, listaMenu());
     return;
   }
   if (quiereVolver(t) && estado.paso !== "info") {
     estado.paso = "info";
     estado.opciones = [];
+    estado.modo = "";
     await guardar(conversation.id, estado);
     await decir(conversation.id, conversation.contactId, listaInfo());
     return;
@@ -921,13 +1313,13 @@ async function responderInfo(conversation: WaConversation, estado: MenuEstado, t
     }
     await etiquetarSede(conversation, sede);
     const datos = await mensajeDeSede(sede);
-    estado.paso = "info";
-    estado.opciones = [];
-    await guardar(conversation.id, estado);
+    const siguiente = vacio("algoMas", estado);
+    siguiente.pendiente = "desde:info";
+    await guardar(conversation.id, siguiente);
     await decir(
       conversation.id,
       conversation.contactId,
-      `${datos}\n\n${listaInfo()}`,
+      `${datos}\n\n${preguntaAlgoMas(sinTildes(sede) !== "caba")}`,
     );
     return;
   }
@@ -974,7 +1366,7 @@ async function responderInfo(conversation: WaConversation, estado: MenuEstado, t
         return;
       }
       if (!pideAfirmacion(texto)) {
-        await preguntar(conversation, `Esa opción no es válida. ¿Buscás a ${nombre}? Respondé sí o no.`);
+        await preguntar(conversation, `Esa opción no es válida. ¿Con ese nombre te referís a ${nombre}? Respondé sí o no.`);
         return;
       }
       consulta = nombre;
@@ -982,32 +1374,29 @@ async function responderInfo(conversation: WaConversation, estado: MenuEstado, t
     }
     const salida = await accion(conversation, "turnos.listarTratamientos", consulta, { textoPersona: consulta });
     if (!salida) return;
-    const resultado = salida.texto.trim();
-    if (resultado.startsWith("Buscás a")) {
-      const nombre = resultado.replace(/^Buscás a\s*/i, "").replace(/\.$/, "").trim();
-      estado.pendiente = `confirma:${nombre}`;
+    const leido = leerListarTratamientos(salida.texto);
+    if (leido.tipo === "confirma") {
+      estado.pendiente = `confirma:${leido.nombre}`;
       await guardar(conversation.id, estado);
-      await preguntar(conversation, `¿Buscás a ${nombre}? Respondé sí o no.`);
+      await preguntar(conversation, `¿Con ese nombre te referís a ${leido.nombre}? Respondé sí o no.`);
       return;
     }
-    const lineas = resultado.split("\n").map((linea) => linea.trim()).filter((linea) => /\(\d+/.test(linea));
-    if (lineas.length > 1 || /profesionales con ese nombre|hay más de un/i.test(resultado)) {
-      estado.opciones = lineas;
+    if (leido.tipo === "profesionales") {
+      estado.opciones = leido.lineas;
       await guardar(conversation.id, estado);
-      await preguntar(conversation, `Hay más de un profesional. Elegí un número de la lista.\n\n${numerar(lineas)}`);
+      await preguntar(conversation, `Hay más de un profesional. Elegí un número de la lista.\n\n${numerar(leido.lineas)}`);
       return;
     }
-    if (resultado.startsWith("Falta el profesional") || !lineas.length) {
-      await preguntar(conversation, "No hay un profesional habilitado con ese nombre. ¿Me decís el nombre y el apellido?");
+    if (leido.tipo === "vacio" || !leido.lineas.length) {
+      await preguntar(conversation, "No encontré ese nombre entre los profesionales. ¿Me decís el nombre y el apellido?");
       return;
     }
-    const nombre = (lineas[0]!.split("(")[0] ?? "").trim();
-    await etiquetarParecido(conversation, nombre);
+    await etiquetarParecido(conversation, leido.nombre || consulta);
     estado.paso = "info";
     estado.opciones = [];
     estado.pendiente = "";
     await guardar(conversation.id, estado);
-    await decir(conversation.id, conversation.contactId, `${resultado.slice(0, 900)}\n\n${listaInfo()}`);
+    await decir(conversation.id, conversation.contactId, `${salida.texto.trim().slice(0, 900)}\n\n${listaInfo()}`);
     return;
   }
   const n = indice(texto, estado.opciones.length);
@@ -1032,26 +1421,14 @@ async function responderInfo(conversation: WaConversation, estado: MenuEstado, t
 
 async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, texto: string): Promise<void> {
   const t = sinTildes(texto).trim();
-  if (quiereCancelar(t)) {
-    await guardar(conversation.id, vacio("menu"));
-    await decir(conversation.id, conversation.contactId, `Cancelé este proceso.\n\n${listaMenu()}`);
-    return;
-  }
+  // 0 = cancelar lo que estamos haciendo y volver al menú de turnos (o al principal).
   if (quiereVolver(t) && estado.paso !== "turnos") {
-    const previo = estado.pila.pop();
-    if (!previo) {
-      await volverTurnos(conversation, estado);
-      return;
-    }
-    estado.paso = previo.paso;
-    estado.opciones = previo.opciones;
-    await guardar(conversation.id, estado);
-    await mostrarPaso(conversation, estado);
+    await volverTurnos(conversation, estado, "Listo, cancelé esto.");
     return;
   }
 
   if (estado.paso === "turnos") {
-    if (t === "0" || t === "menu") {
+    if (quiereVolver(t) || t === "menu") {
       await guardar(conversation.id, vacio("menu", estado));
       await decir(conversation.id, conversation.contactId, listaMenu());
       return;
@@ -1075,6 +1452,11 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
     estado.pendiente = "";
     estado.pila = [];
     await etiquetarNombres(conversation, ["Pedido de turno", "CABA"], true);
+    const puedeDar = await botMenuDaTurnos();
+    // Ver y cancelar siempre; sacar/cambiar sin dar turnos = tomar datos + operador.
+    if (!puedeDar && (modo === "sacar" || modo === "cambiar")) {
+      await decir(conversation.id, conversation.contactId, TEXTO_TURNO_SIN_ASIGNAR);
+    }
     if (!estado.dni) {
       await pedirDni(conversation, estado);
       return;
@@ -1086,7 +1468,10 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
   if (estado.paso === "dni") {
     const dni = dniDe(texto);
     if (!dni) {
-      await preguntar(conversation, "Eso no parece un documento. Puede ser el DNI, con o sin puntos, o uno de otro país. ¿Me lo pasás de nuevo?");
+      await preguntar(
+        conversation,
+        "Eso no parece un DNI. Pasamelo de nuevo, sin puntos ni espacios.",
+      );
       return;
     }
     estado.dni = dni;
@@ -1109,7 +1494,10 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
   if (estado.paso === "sexo") {
     const sexo = sexoDe(texto);
     if (!sexo) {
-      await preguntar(conversation, noValida("1. Femenino\n2. Masculino"));
+      await preguntar(
+        conversation,
+        "Elegí un número de la lista.\n\n1. Femenino\n2. Masculino\n\n0. Volver atrás",
+      );
       return;
     }
     estado.sexo = sexo;
@@ -1120,7 +1508,7 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
   if (estado.paso === "email") {
     const email = emailDe(texto);
     if (!email) {
-      await preguntar(conversation, "Ese email no es válido. ¿Me lo pasás de nuevo?");
+      await preguntar(conversation, "Ese email no es válido. Pasamelo de nuevo, por ejemplo nombre@correo.com.");
       return;
     }
     estado.email = email;
@@ -1129,9 +1517,21 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
   }
 
   if (estado.paso === "profesional") {
+    if (pideIndistinto(texto) && !estado.opciones.length) {
+      await ofrecerListaProfesionales(conversation, estado);
+      return;
+    }
     const elegido = indice(texto, estado.opciones.length);
-    if (estado.opciones.length && elegido < 0) {
-      await preguntar(conversation, noValida(numerar(estado.opciones)));
+    if (estado.opciones.length && elegido < 0 && !pideIndistinto(texto)) {
+      // Si escribe un nombre libre aunque haya lista, lo buscamos.
+      if (/[a-zA-ZáéíóúÁÉÍÓÚñÑ]{3,}/.test(texto) && !/^\d+$/.test(texto.trim())) {
+        await ofrecerProfesional(conversation, estado, texto);
+        return;
+      }
+      await preguntar(
+        conversation,
+        `Elegí un número de la lista, o escribí el nombre:\n\n${numerar(estado.opciones)}\n\n0. Volver atrás`,
+      );
       return;
     }
     const consulta =
@@ -1146,11 +1546,11 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
       estado.paso = "profesional";
       estado.opciones = [];
       await guardar(conversation.id, estado);
-      await preguntar(conversation, "Dale. ¿Con qué profesional lo busco?");
+      await decir(conversation.id, conversation.contactId, preguntaProfesional(estado.modo === "cambiar"));
       return;
     }
     if (!pideAfirmacion(texto)) {
-      await preguntar(conversation, `¿Buscás a ${estado.pendiente}? Respondé sí o no.`);
+      await preguntar(conversation, `¿Te referís a ${estado.pendiente}? Respondé sí o no.`);
       return;
     }
     await ofrecerProfesional(conversation, estado, estado.pendiente);
@@ -1229,11 +1629,97 @@ export async function runMenuTurn(conversationId: string): Promise<void> {
   try {
     await responderMenu(conversation, estado, texto);
   } catch (error) {
-    await decir(conversation.id, conversation.contactId, mensajeError(error));
+    const enTurnos = Boolean(estado.modo) || ["dni", "horarios", "tratamiento", "profesional", "confirmar", "elegirTurno", "turnos"].includes(estado.paso);
+    if (enTurnos) {
+      await volverTurnos(conversation, estado, mensajeError(error));
+      return;
+    }
+    await guardar(conversation.id, vacio("menu", estado));
+    await decir(
+      conversation.id,
+      conversation.contactId,
+      `${mensajeError(error)}\n\n${listaMenu()}`,
+    );
   }
 }
 
+async function irAMenuCaba(conversation: WaConversation, previo = ""): Promise<void> {
+  await etiquetarSede(conversation, "CABA");
+  await guardar(conversation.id, vacio("menu"));
+  await decir(
+    conversation.id,
+    conversation.contactId,
+    [previo, `Listo, tu consulta es para CABA.\n\n${listaMenu()}`].filter(Boolean).join("\n\n"),
+  );
+}
+
+async function cerrarAlgoMas(conversation: WaConversation): Promise<void> {
+  await guardar(conversation.id, vacio("sede"));
+  await decir(
+    conversation.id,
+    conversation.contactId,
+    "Dale, quedo a tu disposición. Si necesitás algo más, escribime.",
+  );
+}
+
+async function verOtraSucursal(conversation: WaConversation, desde: "sede" | "info"): Promise<void> {
+  if (desde === "info") {
+    const siguiente = vacio("infoTema", { modo: "sucursales" });
+    siguiente.opciones = [...SEDES];
+    await guardar(conversation.id, siguiente);
+    await preguntar(conversation, `¿De qué sucursal querés los datos?\n\n${numerar(SEDES)}`);
+    return;
+  }
+  await guardar(conversation.id, vacio("sede"));
+  await decir(conversation.id, conversation.contactId, listaSedes());
+}
+
+async function responderAlgoMas(
+  conversation: WaConversation,
+  estado: MenuEstado,
+  texto: string,
+): Promise<void> {
+  const t = sinTildes(texto).trim();
+  const desde = desdeAlgoMas(estado);
+
+  if (estado.pendiente.startsWith("elige:")) {
+    if (t === "1" || /\bcaba\b|menu|menú|turno|continuar|seguir/.test(t)) {
+      await irAMenuCaba(conversation);
+      return;
+    }
+    if (t === "2" || /\botra sucursal\b|\bsucursal\b/.test(t)) {
+      await verOtraSucursal(conversation, desde);
+      return;
+    }
+    if (quiereVolver(t)) {
+      estado.pendiente = desde === "info" ? "desde:info" : "desde:sede";
+      await guardar(conversation.id, estado);
+      await decir(conversation.id, conversation.contactId, preguntaAlgoMas(desde === "sede"));
+      return;
+    }
+    await decir(conversation.id, conversation.contactId, noValida(opcionesTrasSi(desde)));
+    return;
+  }
+
+  if (t === "2" || pideNegacion(texto) || /\bno[, ]?gracias\b/.test(t)) {
+    await cerrarAlgoMas(conversation);
+    return;
+  }
+  if (t === "1" || pideAfirmacion(texto) || t === "si" || t === "sí") {
+    estado.pendiente = desde === "info" ? "elige:info" : "elige:sede";
+    await guardar(conversation.id, estado);
+    await decir(conversation.id, conversation.contactId, opcionesTrasSi(desde));
+    return;
+  }
+  await decir(conversation.id, conversation.contactId, noValida(preguntaAlgoMas(desde === "sede")));
+}
+
 async function responderMenu(conversation: WaConversation, estado: MenuEstado, texto: string): Promise<void> {
+  if (estado.paso === "algoMas") {
+    await responderAlgoMas(conversation, estado, texto);
+    return;
+  }
+
   if (estado.paso === "sede") {
     const sede = sedeElegida(texto);
     if (!sede) {
@@ -1243,15 +1729,17 @@ async function responderMenu(conversation: WaConversation, estado: MenuEstado, t
     await etiquetarSede(conversation, sede);
     if (sinTildes(sede) !== "caba") {
       const datos = await mensajeDeSede(sede);
+      const siguiente = vacio("algoMas", estado);
+      siguiente.pendiente = "desde:sede";
+      await guardar(conversation.id, siguiente);
       await decir(
         conversation.id,
         conversation.contactId,
-        `${datos}\n\nSi tu consulta es para CABA, elegila de la lista.\n\n${listaSedes()}`,
+        `${datos}\n\n${preguntaAlgoMas(true)}`,
       );
       return;
     }
-    await guardar(conversation.id, vacio("menu"));
-    await decir(conversation.id, conversation.contactId, `Listo, tu consulta es para CABA.\n\n${listaMenu()}`);
+    await irAMenuCaba(conversation);
     return;
   }
 

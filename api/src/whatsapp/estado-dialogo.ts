@@ -350,8 +350,10 @@ export function diffFicha(
 }
 
 export function faltantesCaso(caso: WaCasoTurno): string[] {
-  const base = ["consultaPara", "pacienteNombre", "pacienteApellido", "dni", "sexo", "grupoEtario"];
-  if (caso.consultaPara === "tercero") base.push("relacionFamiliar", "contactoNombre");
+  const base = ["consultaPara"];
+  if (caso.consultaPara === "tercero") base.push("relacionFamiliar");
+  base.push("grupoEtario", "pacienteNombre", "pacienteApellido", "sexo", "dni");
+  if (caso.consultaPara === "tercero") base.push("contactoNombre");
   return base.filter((campo) => !caso[campo as keyof WaFichaCaso]);
 }
 

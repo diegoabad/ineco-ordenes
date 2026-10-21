@@ -3,15 +3,21 @@ import {
   accionPorEleccion,
   completarConsulta,
   ejecutarAccion,
+  formatearHorariosAgrupados,
   horarioOfrecido,
   horariosOmitidos,
   opcionesOmitidas,
+  eligeBuscarOrientacion,
+  eligeDerivacionOrientacion,
+  noSabeTratamiento,
   pideMasFechas,
   pideMasTemprano,
   pideAfirmacion,
   pideNegacion,
   preguntaDeResultado,
   reservaRepetida,
+  sinPreferenciaProfesional,
+  TEXTO_ORIENTACION_TURNO,
   textoAcciones,
   textoDeTurnosPropios,
   turnoNombrado,
@@ -19,11 +25,17 @@ import {
   textoOpcionInvalida,
   type AccionClave,
 } from "./acciones.js";
-import { getWhatsappBotConfig } from "./bot-config.js";
+import {
+  botDaTurnos,
+  getWhatsappBotConfig,
+  TEXTO_TURNO_DATOS_LISTOS,
+  TEXTO_TURNO_SIN_ASIGNAR,
+} from "./bot-config.js";
 import { getWhatsappConocimiento } from "./conocimiento.js";
 import {
   fillEmptyContactFields,
   getConversation,
+  listConversations,
   listRecentMessagesByConversation,
   replaceContactPatientFields,
   setConversationAssignee,
@@ -48,6 +60,7 @@ import {
   type WaPausaDialogo,
 } from "./estado-dialogo.js";
 import { listIntenciones } from "./intenciones.js";
+import { sexoDesdeNombre, sexoDesdeRelacion } from "../lib/nombrePersona.js";
 import { getWhatsappMotorConfig } from "./motor-config.js";
 import { completeStructured } from "./openai-client.js";
 import { listWhatsappTagCatalog } from "./tags.js";
@@ -55,7 +68,8 @@ import type { WaAuditoriaPaso } from "./types.js";
 
 const PREGUNTA_CONFLICTO =
   "Te puedo ayudar con las dos cosas, primero una y después la otra. ¿Preferís que empecemos por la cancelación del turno, o por el turno nuevo?";
-const PREGUNTA_ALGO_MAS = "¿Necesitás algo más?";
+const PREGUNTA_ALGO_MAS = "¿Te puedo ayudar en algo más?";
+const PREGUNTA_EN_QUE = "¿En qué te puedo ayudar?";
 const AVISO_FUERA =
   "Solo puedo ayudarte con consultas de INECO: turnos, tratamientos, profesionales, sedes y coberturas. ¿En qué te puedo ayudar?";
 const AVISO_FUERA_DERIVA =
@@ -363,16 +377,32 @@ const ETIQUETA_DATO: Record<string, string> = {
 };
 
 /** Pedidos de la búsqueda de turnos: no van a la ficha del paciente. */
-const PEDIDOS_BUSQUEDA = new Set(["profesional", "tratamiento", "horario", "confirmaProfesional"]);
+const PEDIDOS_BUSQUEDA = new Set(["profesional", "tratamiento", "horario", "confirmaProfesional", "orientacionTurno"]);
 
 /** Según la pregunta que acabamos de hacer, qué responde el próximo mensaje. */
 export function datoPedidoDePregunta(pregunta: string, resultado = ""): string {
   const t = sinTildes(`${pregunta}\n${resultado}`);
   if (!t.trim()) return "";
-  if (/buscas a /.test(t)) return "confirmaProfesional";
-  if (/con que profesional|falta el profesional|cual buscabas|profesionales con ese/.test(t)) return "profesional";
+  if (/buscas a |te referis a /.test(t)) return "confirmaProfesional";
+  if (
+    /con que profesional|tenes algun profesional|profesional en especial|falta el profesional|cual buscabas|profesionales con ese|cual de estos profesionales/.test(
+      t,
+    )
+  ) {
+    return "profesional";
+  }
   if (/para que tratamiento|estos son los tratamientos|cual de estos tratamientos|falta el tratamiento|hay mas de un cruce/.test(t)) {
     return "tratamiento";
+  }
+  if (
+    (/seguir buscando|hablar con alguien del equipo|que preferis/.test(t) && /1\.|2\./.test(`${pregunta}\n${resultado}`)) ||
+    (/tratamiento aproximado/.test(t) && /profesional/.test(t))
+  ) {
+    // La menú 1/2 es orientacionTurno; el follow-up de buscar vuelve a tratamiento/profesional.
+    if (/tratamiento aproximado/.test(t) && /profesional/.test(t) && !/1\.|2\./.test(`${pregunta}\n${resultado}`)) {
+      return "tratamiento";
+    }
+    return "orientacionTurno";
   }
   if (/cual de estos horarios|falta el horario|horarios libres|busco mas adelante/.test(t)) return "horario";
   if (/pasas (tu |el )?dni|falta el dni/.test(t)) return "dni";
@@ -419,15 +449,20 @@ function fichaDesdeContacto(contact: {
 }
 
 function requeridosDe(clave: string, ficha: Ficha): string[] {
-  const base: Record<string, string[]> = {
-    TURNOS: ["consultaPara", "dni", "pacienteNombre", "pacienteApellido", "sexo", "grupoEtario"],
-    INFO_TRATAMIENTOS: [],
-    INFO_PROFESIONALES: [],
-    QUEJAS: ["pacienteNombre"],
-  };
-  const campos = [...(base[clave] ?? [])];
+  if (clave !== "TURNOS") {
+    const base: Record<string, string[]> = {
+      INFO_TRATAMIENTOS: [],
+      INFO_PROFESIONALES: [],
+      QUEJAS: ["pacienteNombre"],
+    };
+    return [...(base[clave] ?? [])];
+  }
+  // Primero para quién es; si es otra persona, relación y edad; recién después DNI/nombre.
+  const campos = ["consultaPara"];
   if (ficha.consultaPara === "tercero") {
-    campos.push("relacionFamiliar", "contactoNombre");
+    campos.push("relacionFamiliar", "grupoEtario", "pacienteNombre", "pacienteApellido", "sexo", "dni", "contactoNombre");
+  } else {
+    campos.push("grupoEtario", "pacienteNombre", "pacienteApellido", "sexo", "dni");
   }
   if ((ficha.esPaciente === "si" || ficha.esPaciente === "no") && !ficha.email) campos.push("email");
   return campos;
@@ -484,6 +519,60 @@ function inferirRelacion(
 
 function faltantesDe(clave: string, ficha: Ficha): string[] {
   return requeridosDe(clave, ficha).filter((campo) => !ficha[campo as keyof Ficha]);
+}
+
+/** Antes de listar Drs / buscar turnos: para quién + edad (+ relación si es otra persona). */
+function faltanteFichaAntesDeBuscar(ficha: Ficha): string | null {
+  if (!ficha.consultaPara) return "consultaPara";
+  if (ficha.consultaPara === "tercero" && !ficha.relacionFamiliar) return "relacionFamiliar";
+  if (!ficha.grupoEtario) return "grupoEtario";
+  return null;
+}
+
+/** Datos mínimos para que un operador asigne el turno a mano. */
+function fichaListaParaOperador(ficha: Ficha): boolean {
+  if (!ficha.consultaPara || !ficha.grupoEtario || !ficha.pacienteNombre || !ficha.pacienteApellido || !ficha.dni) {
+    return false;
+  }
+  if (ficha.consultaPara === "tercero" && !ficha.relacionFamiliar) return false;
+  return true;
+}
+
+function yaAvisoTurnoSinAsignar(mensajes: { direction: string; text: string }[]): boolean {
+  return mensajes.some(
+    (m) =>
+      m.direction === "OUTBOUND" &&
+      /no puedo asignarte el turno ahora|va a dar una persona del equipo lo antes posible/i.test(m.text),
+  );
+}
+
+function preguntaFichaAntesDeBuscar(campo: string, ficha: Ficha): string {
+  if (campo === "consultaPara") return "¿La consulta es para vos o para otra persona?";
+  if (campo === "relacionFamiliar") return "¿Qué relación tenés con el paciente?";
+  if (campo === "grupoEtario") {
+    return ficha.consultaPara === "tercero"
+      ? "¿Qué edad tiene? (si es niño o adulto también sirve)"
+      : "¿Qué edad tenés?";
+  }
+  return "¿Me pasás ese dato?";
+}
+
+/** Respuestas de ficha que no son nombre de profesional. */
+function esRespuestaFichaBasica(texto: string): boolean {
+  const t = sinTildes(texto).replace(/[!¡.?,]/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (/^(para mi|para mi mismo|yo|mio|mia)$/.test(t)) return true;
+  if (/^(otra|otra persona|para otra|para otra persona|familiar)$/.test(t)) return true;
+  if (/\b(para mi hija|para mi hijo|para mi mama|para mi papa|es para mi|es para otra|es mi hij|es mi papa|es mi mama|soy la mama|soy el papa)\b/.test(t)) {
+    return true;
+  }
+  if (/^(tiene |tengo )?\d{1,3}( anos?)?$/.test(t)) return true;
+  // 1 y 2 suelen ser opciones de menú, no edades sueltas.
+  if (/^\d{1,3}$/.test(t)) {
+    const n = Number(t);
+    return n >= 3 && n <= 120;
+  }
+  return false;
 }
 
 function textoFicha(ficha: Ficha): string {
@@ -677,7 +766,19 @@ export function datoTieneForma(campo: string, texto: string): boolean {
     if (/^(si|sí|no|ok|hola|chau|gracias)$/.test(t)) return false;
     // Un documento suelto no es un profesional.
     if (documentoDePersona(texto) && !/[a-záéíóúñ]/i.test(texto)) return false;
-    return /^[a-zñáéíóúü0-9]+(?:[\s\-./]+[a-zñáéíóúü0-9]+){0,6}$/i.test(texto.trim()) || /^\d{1,2}$/.test(t);
+    // Edad / para quién no son profesional ni tratamiento.
+    if (esRespuestaFichaBasica(texto)) return false;
+    if (campo === "profesional" && (sinPreferenciaProfesional(texto) || noSabeTratamiento(texto))) return false;
+    if (campo === "tratamiento" && noSabeTratamiento(texto)) return false;
+    // Solo un número 1-12 puede ser ítem de lista; edades >= 13 no.
+    if (/^\d{1,3}$/.test(t)) {
+      const n = Number(t);
+      return n >= 1 && n <= 12;
+    }
+    // Nombre corto (hasta ~5 tokens); frases largas no son un Dr.
+    const tokens = texto.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length > 5) return false;
+    return /^[a-zñáéíóúü0-9]+(?:[\s\-./]+[a-zñáéíóúü0-9]+){0,6}$/i.test(texto.trim());
   }
   if (campo === "horario") {
     return (
@@ -686,7 +787,10 @@ export function datoTieneForma(campo: string, texto: string): boolean {
       /\d{4}-\d{2}-\d{2}/.test(texto)
     );
   }
-  if (campo === "sexo") return /\b(masculino|femenino|hombre|mujer|varon)\b/.test(t);
+  if (campo === "orientacionTurno") {
+    return eligeBuscarOrientacion(texto) || eligeDerivacionOrientacion(texto);
+  }
+  if (campo === "sexo") return /\b(masculino|femenino|hombre|mujer|varon)\b/.test(t) || /^(1|2)$/.test(t.trim());
   if (campo === "grupoEtario") {
     const edad = t.match(/\b(\d{1,3})\b/);
     if (edad) {
@@ -717,7 +821,10 @@ export function avisoDato(campo: string): string {
   if (campo === "profesional") return "Necesito el nombre del profesional. ¿Me lo decís de nuevo?";
   if (campo === "tratamiento") return "Necesito el tratamiento o el número de la lista. ¿Me lo decís de nuevo?";
   if (campo === "horario") return "Elegí un horario de la lista, o escribí más adelante.";
-  if (campo === "confirmaProfesional") return "Respondé sí o no: ¿buscás a esa persona?";
+  if (campo === "confirmaProfesional") return "Respondé sí o no: ¿te referís a esa persona?";
+  if (campo === "orientacionTurno") {
+    return "Respondé 1 para seguir buscando acá, o 2 para hablar con alguien del equipo.";
+  }
   if (campo === "sexo") return "Necesito saber si es masculino o femenino. ¿Me lo decís de nuevo?";
   if (campo === "grupoEtario") return "Necesito la edad en números, o si es un niño o un adulto. ¿Me la decís de nuevo?";
   if (campo === "pacienteNombre" || campo === "contactoNombre") return "Necesito el nombre en letras. ¿Me lo repetís?";
@@ -790,7 +897,7 @@ export function extraerCorreccion(texto: string): {
   const dni = documentoDePersona(texto);
   if (dni && /\b(dni|documento)\b/.test(t)) out.dni = dni;
 
-  if (/\bsexo\b/.test(t) || /\bmasculino\b|\bfemenino\b/.test(t)) {
+  if (/\bsexo\b/.test(t) || /\bmasculino\b|\bfemenino\b|\bhombre\b|\bmujer\b|\bvaron\b/.test(t)) {
     if (/\bmasculino\b|\bhombre\b|\bvaron\b/.test(t)) out.sexo = "masculino";
     if (/\bfemenino\b|\bmujer\b/.test(t)) out.sexo = "femenino";
   }
@@ -860,11 +967,24 @@ function acotarDatosAlTexto(
   if (/\d/.test(datos.pacienteApellido)) datos.pacienteApellido = "";
   if (/\d/.test(datos.contactoNombre)) datos.contactoNombre = "";
   if (/\d/.test(datos.contactoApellido)) datos.contactoApellido = "";
-  if (datos.sexo && !t.includes(datos.sexo)) datos.sexo = "";
+  if (datos.sexo && !t.includes(datos.sexo) && !/\b(hombre|mujer|varon)\b/.test(t)) {
+    const inferido = sexoDesdeNombre(datos.pacienteNombre);
+    if (datos.sexo !== inferido) datos.sexo = "";
+  }
   const apellido = t.match(/\bapellido\s+(?:es|seria|correcto(?:\s+es)?)\s+([a-zñ]{2,})/);
   if (apellido?.[1]) {
     datos.pacienteApellido = apellido[1].charAt(0).toUpperCase() + apellido[1].slice(1);
   }
+}
+
+function completarSexoSiFalta(datos: {
+  pacienteNombre: string;
+  relacionFamiliar?: string;
+  sexo: "" | "masculino" | "femenino";
+}): void {
+  if (datos.sexo) return;
+  datos.sexo =
+    sexoDesdeNombre(datos.pacienteNombre) || sexoDesdeRelacion(datos.relacionFamiliar ?? "") || "";
 }
 
 /** Un turno para quien escribe y otro para un familiar, o más de un turno nombrado. */
@@ -895,6 +1015,11 @@ function noQuiereNadaMas(texto: string, cortesia: string): boolean {
   return /^(no|nop|nada|no gracias|eso es todo|era todo|listo|chau|gracias|ok gracias|hasta luego|adios|nos vemos)( nada mas)?$/.test(
     t,
   ) || t === "nada mas" || t === "no nada mas";
+}
+
+function esPreguntaAlgoMas(texto: string): boolean {
+  const t = sinTildes(texto);
+  return /te puedo ayudar (en|con) algo mas|necesitas algo mas/.test(t);
 }
 
 function sinPresentacion(texto: string): string {
@@ -1245,6 +1370,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (!intenciones.length) return;
 
   const bot = botDoc?.data ?? {};
+  const daTurnos = botDaTurnos(bot);
   const motor = motorDoc.data;
   const desdeConfig = modelos(bot);
   const models = {
@@ -1326,7 +1452,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Si hay un segundo tema, ponelo en intencionSecundaria. Si hay uno solo, o ninguno, intencionSecundaria vacía.",
       "Si hay más de una intención, intencion es la primera, intencionSecundaria la segunda y otras el resto, sin repetir claves. Si no hay más, otras es un array vacío.",
       "temas: una frase corta por cada pedido distinto, aunque sean de la misma intención. Dos turnos para dos personas son dos temas. Tres precios de tres tratamientos son tres temas. Si hay un solo pedido, un solo elemento. Si no hay pedido, un array vacío.",
-      "requierePersona=true solo si pide algo de INECO que este canal no puede cerrar: confirmar una reserva que no dimos en esta charla, un resultado, una historia clínica o un dato clínico. false si es un turno nuevo, cancelar, cambiar o reprogramar un turno, ver sus turnos, un precio, una sede, una cobertura, una lista, una queja o un dato de la ficha.",
+      "requierePersona=true solo si pide algo de INECO que este canal no puede cerrar: confirmar una reserva que no dimos en esta charla, un resultado, una historia clínica o un dato clínico. false si no sabe el tratamiento o el profesional (el sistema le ofrece buscar o hablar con el equipo). false si es un turno nuevo, cancelar, cambiar o reprogramar un turno, ver sus turnos, un precio, una sede, una cobertura, una lista, una queja o un dato de la ficha.",
       "enConflicto=true solo si los pedidos no se pueden hacer juntos: cancelar un turno y sacar otro distinto. false si uno se responde con información (precio, sede, cobertura, tratamiento, profesional) y el otro es un turno o una queja: esos van los dos, el trámite largo queda en cola. false también si se pueden responder los dos, por ejemplo un precio y una dirección.",
       "hayPedido=false si no hay un pedido concreto: saludo, despedida, o un mensaje del que no se entiende la intención. Un sí, un no, un nombre o un DNI que responde algo nuestro es hayPedido=true.",
       "fueraDeIneco=true solo si el mensaje no tiene nada que ver con INECO: cultura general, tareas, clima, deportes, política, chistes, recetas, otras empresas o datos varios. false si habla de turnos, tratamientos, profesionales, sedes, precios, coberturas, pacientes, quejas, o responde un dato que pedimos. Un saludo o una despedida no son fuera de INECO.",
@@ -1346,7 +1472,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Si corrige el profesional («perdón no era Marcelo era Pablo», «mejor con Pablo»), no pongas Pablo en pacienteNombre: es el profesional. accion=turnos.libres y consulta con el nombre nuevo para verificar si existe.",
       "Cuando dan un nombre de profesional (o lo corrigen), siempre buscá si está habilitado: no asumas que existe ni inventes horarios.",
       "dni: solo dígitos, si la persona lo dijo. email: solo si lo dijo.",
-      "sexo=masculino o femenino solo si el texto lo dice. Si no se sabe, vacío.",
+      "sexo=masculino o femenino si el texto lo dice (hombre/mujer) o si el nombre de pila lo deja claro (Ana→femenino, Juan→masculino). No hace falta que digan la palabra femenino o masculino. Si el nombre es ambiguo (Alex), vacío.",
       "consultaPara=tercero si escribe por otra persona (por ejemplo \"para mi hijo\"). propio si la consulta es para quien escribe.",
       "relacionFamiliar es quién es el paciente para quien escribe: Padre, Madre, Abuelo, Abuela, Hijo, Hija, Tío, Tía, Sobrino, Sobrina, Esposo, Esposa, Pareja, Novio, Novia, Tutor u Otro.",
       "Si ya lo dijo, completalo y no dejes el campo vacío: mi hijo o mi nene = Hijo; mi hija o mi nena = Hija; mi papá o mi padre = Padre; mi mamá o mi madre = Madre; mi abuelo = Abuelo; mi abuela = Abuela; mi tío = Tío; mi tía = Tía; mi sobrino = Sobrino; mi sobrina = Sobrina; mi marido o mi esposo = Esposo; mi esposa o mi mujer = Esposa; mi pareja = Pareja; mi novio = Novio; mi novia = Novia; soy su tutor o tutora = Tutor. No vuelvas a preguntar la relación.",
@@ -1360,7 +1486,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Si preguntan qué dato habían dicho antes y hay correcciones, usá ese valor anterior. No lo inventes.",
       "intencionConcluida=true solo si, con este lote, la intención en la que quedamos ya no tiene nada pendiente.",
       "Un saludo, un cómo estás y una despedida no son intenciones: intencion vacía y la cortesía que corresponda.",
-      "accion: una clave de la lista, o vacío. turnos.listarProfesionales si preguntan quién atiende un tratamiento, o si piden un horario libre sin decir el profesional. turnos.listarTratamientos si preguntan qué hace un profesional. turnos.libres si piden horarios y la consulta tiene profesional y tratamiento, o si responden el DNI que pedimos para esa búsqueda, o si piden fechas más adelante. Si la acción anterior listó varios cruces y eligen uno que estaba en esa lista, consulta copia ese profesional y ese tratamiento y la acción es turnos.libres. Si eligen algo que no estaba en la lista, accion vacía. turnos.reservar solo si eligen un horario que estaba en la lista: consulta copia profesional, tratamiento y la fecha y hora tal cual, con el formato que figura entre paréntesis. turnos.delPaciente si piden sus turnos anteriores o futuros, cuál les quedó, o dicen que se olvidaron o no se acuerdan del turno: consulta lleva el DNI. No es un turno nuevo. turnos.delPaciente si piden anular o cambiar un turno: no pidas la sede ni la fecha, los turnos de este canal son de la misma sede y la fecha sale de la búsqueda. turnos.cancelar solo si ya confirmaron la anulación. Vacío si todavía no se puede ejecutar ninguna. No abras una ficha nueva si solo preguntan por turnos que ya tienen. Si el resultado dice que es paciente, no vuelvas a pedir los datos que ya figuran.",
+      "accion: una clave de la lista, o vacío. turnos.listarProfesionales si preguntan quién atiende un tratamiento, si no tienen profesional en especial pero sí dijeron el tratamiento, o si piden un horario libre sin decir el profesional. Si preguntamos el tratamiento y dicen que no saben cuál, no inventes uno: requierePersona=true. turnos.listarTratamientos si preguntan qué hace un profesional. turnos.libres si piden horarios y la consulta tiene profesional y tratamiento, o si responden el DNI que pedimos para esa búsqueda, o si piden fechas más adelante. Si la acción anterior listó varios cruces y eligen uno que estaba en esa lista, consulta copia ese profesional y ese tratamiento y la acción es turnos.libres. Si eligen algo que no estaba en la lista, accion vacía. turnos.reservar solo si eligen un horario que estaba en la lista: consulta copia profesional, tratamiento y la fecha y hora tal cual, con el formato que figura entre paréntesis. turnos.delPaciente si piden sus turnos anteriores o futuros, cuál les quedó, o dicen que se olvidaron o no se acuerdan del turno: consulta lleva el DNI. No es un turno nuevo. turnos.delPaciente si piden anular o cambiar un turno: no pidas la sede ni la fecha, los turnos de este canal son de la misma sede y la fecha sale de la búsqueda. turnos.cancelar solo si ya confirmaron la anulación. Vacío si todavía no se puede ejecutar ninguna. No abras una ficha nueva si solo preguntan por turnos que ya tienen. Si el resultado dice que es paciente, no vuelvas a pedir los datos que ya figuran.",
       textoAcciones(),
       "Intenciones:",
       ...intenciones.map((item) => `- ${item.clave}: ${item.nombre}. ${item.descripcion}`),
@@ -1429,9 +1555,16 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     (pedidoPrevio === "profesional" || pedidoPrevio === "confirmaProfesional")
   ) {
     const t = sinTildes(textoLote);
-    const cambio = t.match(
-      /\bno era\s+(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*[a-zñ]+(?:\s+[a-zñ]+)?\s*[;,.]?\s*(?:era|es|sino|sino que|mejor)\s+(?:con\s+)?(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
-    ) || t.match(/\b(?:mejor|prefiero|en realidad|ahora)\s+(?:con\s+)?(?:el\s+)?(?:dr|dra|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/);
+    const cambio =
+      t.match(
+        /\bno era\s+(?:el\s+)?(?:dr\.?|dra\.?|doctor|doctora)?\s*[a-zñ]+(?:\s+[a-zñ]+)?\s*[;,.]?\s*(?:era|es|sino|sino que|mejor)\s+(?:con\s+)?(?:el\s+)?(?:dr\.?|dra\.?|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
+      ) ||
+      t.match(
+        /\bno(?:\s+era)?\s+(?:el\s+)?(?:dr\.?|dra\.?|doctor|doctora)?\s*[a-zñ]+\s*[;,.]?\s*(?:era|es|sino)\s+(?:con\s+)?(?:el\s+)?(?:dr\.?|dra\.?|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
+      ) ||
+      t.match(
+        /\b(?:mejor|prefiero|en realidad|ahora)\s+(?:con\s+)?(?:el\s+)?(?:dr\.?|dra\.?|doctor|doctora)?\s*([a-zñ]+(?:\s+[a-zñ]+)?)/,
+      );
     if (cambio?.[1]) correccion.profesional = capitalizarPalabra(cambio[1]);
   }
   let rechazoDato = "";
@@ -1443,8 +1576,9 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     if (correccion.sexo) detection.datos.sexo = correccion.sexo;
     if (correccion.grupoEtario) detection.datos.grupoEtario = correccion.grupoEtario;
     if (correccion.email) detection.datos.email = correccion.email;
+    completarSexoSiFalta(detection.datos);
     // Si preguntamos profesional/tratamiento/horario, un nombre corto no es la ficha
-    // (salvo corrección explícita de nombre/apellido/dni).
+    // (salvo corrección explícita o respuesta clara de para quién / edad).
     if (
       PEDIDOS_BUSQUEDA.has(pedidoPrevio) &&
       !correccion.pacienteNombre &&
@@ -1453,6 +1587,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       !correccion.sexo &&
       !correccion.grupoEtario &&
       !correccion.email &&
+      !esRespuestaFichaBasica(textoLote) &&
       !/\b(me llamo|yo soy|mi nombre es|soy [a-záéíóúñ])/i.test(textoLote)
     ) {
       detection.datos.pacienteNombre = "";
@@ -1464,6 +1599,31 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       detection.datos.sexo = "";
       detection.datos.grupoEtario = "";
     }
+    // Respuestas de ficha (para quién / edad / relación) aunque hayamos preguntado otra cosa.
+    // No interpretar 1/2 del menú de orientación como edad.
+    if (esRespuestaFichaBasica(textoLote) && pedidoPrevio !== "orientacionTurno") {
+      const dichoFicha = sinTildes(textoLote);
+      if (
+        /^(para mi|para mi mismo|yo|mio|mia)$/.test(dichoFicha.trim()) ||
+        /\bpara mi\b(?!\s+(hij|nen|espos|mama|papa|madre|padre|abuel))/.test(dichoFicha)
+      ) {
+        detection.datos.consultaPara = "propio";
+      }
+      if (
+        /^(otra|otra persona|para otra|para otra persona|familiar)$/.test(dichoFicha.trim()) ||
+        /\b(para otra|es para otra|para mi hij|es mi hij|para mi mama|para mi papa|es mi papa|es mi mama|soy la mama|soy el papa)\b/.test(
+          dichoFicha,
+        )
+      ) {
+        detection.datos.consultaPara = "tercero";
+      }
+      const edadMatch = dichoFicha.match(/\b(\d{1,3})\b/);
+      if (edadMatch && !/^(1|2)$/.test(dichoFicha.trim())) {
+        const n = Number(edadMatch[1]);
+        if (n >= 1 && n <= 120) detection.datos.grupoEtario = n >= 18 ? "adulto" : "infanto";
+      } else if (/\badult/.test(dichoFicha)) detection.datos.grupoEtario = "adulto";
+      else if (/\b(nino|nena|nene|infanto)\b/.test(dichoFicha)) detection.datos.grupoEtario = "infanto";
+    }
     // Pidieron profesional y mandaron solo el documento: lo anoto y sigo pidiendo el profesional.
     if (
       !correccion.profesional &&
@@ -1473,13 +1633,17 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       !/[a-záéíóúñ]/i.test(textoLote)
     ) {
       detection.datos.dni = documentoDePersona(textoLote);
-      rechazoDato = "Anoté el documento. ¿Con qué profesional busco el turno?";
+      rechazoDato = "Anoté el documento. ¿Tenés algún profesional en especial?";
     } else if (
       !correccion.profesional &&
       !esCorreccion(textoLote) &&
       pedidoPrevio &&
       respuestaEsCorta(textoLote) &&
-      !datoTieneForma(pedidoPrevio, textoLote)
+      !datoTieneForma(pedidoPrevio, textoLote) &&
+      !esRespuestaFichaBasica(textoLote) &&
+      !(pedidoPrevio === "profesional" && (sinPreferenciaProfesional(textoLote) || noSabeTratamiento(textoLote))) &&
+      !(pedidoPrevio === "tratamiento" && noSabeTratamiento(textoLote)) &&
+      !(pedidoPrevio === "orientacionTurno" && datoTieneForma("orientacionTurno", textoLote))
     ) {
       rechazoDato = avisoDato(pedidoPrevio);
       detection.datos.pacienteNombre = "";
@@ -1498,12 +1662,22 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       detection.datos.dni = documentoDePersona(textoLote) || detection.datos.dni;
     } else if (pedidoPrevio === "email" && datoTieneForma("email", textoLote)) {
       detection.datos.email = textoLote.match(/[^\s@]+@[^\s@]+\.[^\s@]+/)?.[0]?.toLowerCase() ?? detection.datos.email;
+    } else if (pedidoPrevio === "sexo" && datoTieneForma("sexo", textoLote)) {
+      const t = sinTildes(textoLote);
+      if (/\bfemenin|\bmujer\b|^1$/.test(t.trim())) detection.datos.sexo = "femenino";
+      if (/\bmasculin|\bhombre\b|\bvaron\b|^2$/.test(t.trim())) detection.datos.sexo = "masculino";
     }
     const dicho = sinTildes(textoLote);
     const familiar = /\b(hij[oa]|nene|nena|espos[oa]|mama|papa|madre|padre|abuel[oa]|tio|tia|sobrin[oa]|para otra|familiar)\b/.test(dicho);
-    const propio = /\bpara mi\b(?!\s+(hij|nen|espos|mama|papa|madre|padre|abuel))/.test(dicho);
-    if (detection.datos.consultaPara === "tercero" && !familiar) detection.datos.consultaPara = "";
-    if (detection.datos.consultaPara === "propio" && !propio) detection.datos.consultaPara = "";
+    const propio =
+      /^(para mi|para mi mismo|yo|mio|mia)$/.test(dicho.trim()) ||
+      /\bpara mi\b(?!\s+(hij|nen|espos|mama|papa|madre|padre|abuel))/.test(dicho);
+    // Solo aceptar propio/tercero si el mensaje lo dice (el modelo suele inventar «propio»).
+    if (detection.datos.consultaPara === "tercero" && !familiar && !propio) detection.datos.consultaPara = "";
+    if (detection.datos.consultaPara === "propio" && !propio && !familiar) detection.datos.consultaPara = "";
+    if (!detection.datos.consultaPara && propio) detection.datos.consultaPara = "propio";
+    if (!detection.datos.consultaPara && familiar) detection.datos.consultaPara = "tercero";
+    completarSexoSiFalta(detection.datos);
   }
 
   let casosTurno = incorporarPersonas(
@@ -1519,18 +1693,32 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       correccion.grupoEtario ||
       correccion.email,
   );
-  if (detection.datos && activo && !rechazoDato && (!PEDIDOS_BUSQUEDA.has(pedidoPrevio) || corrigeFicha)) {
+  if (detection.datos && activo && !rechazoDato && (!PEDIDOS_BUSQUEDA.has(pedidoPrevio) || corrigeFicha || esRespuestaFichaBasica(textoLote))) {
     if (!PEDIDOS_BUSQUEDA.has(pedidoPrevio)) {
       vincularDatoPedido(pedidoPrevio, textoLote, detection.datos);
     }
     precargarCaso(detection.datos, activo, casosTurno, textoLote);
+    // precargarCaso puede reponer un «propio» inventado: volver a exigir evidencia en el texto.
+    {
+      const dichoPost = sinTildes(textoLote);
+      const familiarPost = /\b(hij[oa]|nene|nena|espos[oa]|mama|papa|madre|padre|abuel[oa]|tio|tia|sobrin[oa]|para otra|familiar)\b/.test(
+        dichoPost,
+      );
+      const propioPost =
+        /^(para mi|para mi mismo|yo|mio|mia)$/.test(dichoPost.trim()) ||
+        /\bpara mi\b(?!\s+(hij|nen|espos|mama|papa|madre|padre|abuel))/.test(dichoPost);
+      if (detection.datos.consultaPara === "propio" && !propioPost) detection.datos.consultaPara = "";
+      if (detection.datos.consultaPara === "tercero" && !familiarPost && !propioPost) detection.datos.consultaPara = "";
+      if (!detection.datos.consultaPara && propioPost) detection.datos.consultaPara = "propio";
+      if (!detection.datos.consultaPara && familiarPost) detection.datos.consultaPara = "tercero";
+    }
     if (activo.consultaPara === "tercero" && /\bmi dni\b/.test(sinTildes(textoLote))) detection.datos.dni = "";
   }
 
   const fichaPrevia = fichaDesdeContacto(contact);
   const contactoActual =
     contact && detection.datos
-      ? PEDIDOS_BUSQUEDA.has(pedidoPrevio) && !corrigeFicha
+      ? PEDIDOS_BUSQUEDA.has(pedidoPrevio) && !corrigeFicha && !esRespuestaFichaBasica(textoLote)
         ? detection.datos.dni
           ? await fillContact(contact.id, {
               consultaPara: "",
@@ -1786,6 +1974,8 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       intencionCola: [],
     });
     await anotar(riesgo.clave, true);
+    // Siempre educado: en el primer contacto, saluda aunque el mensaje sea de riesgo.
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
     await send(conversationId, riesgo.mensajeRiesgo);
     await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
     return;
@@ -1800,6 +1990,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       intencionPropuesta: null,
       intencionCola: [],
     });
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
     await send(
       conversationId,
       "Gracias por escribirnos. Alguien del equipo te va a contactar por este medio. Este canal no es una guardia.",
@@ -1864,6 +2055,42 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   const pideOtraCosa = batch.some(
     (message) => message.text.includes("?") || /\bturno\b/i.test(message.text),
   );
+  const respondioAlgoMas = esPreguntaAlgoMas(ultimaPregunta);
+  // Después de «¿Te puedo ayudar en algo más?»: no → despedida; sí → preguntar en qué.
+  if (respondioAlgoMas && noQuiereNadaMas(textoLote, detection.cortesia)) {
+    const pasaAlEquipo = seguimiento.derivacionPendiente;
+    seguimiento.derivacionPendiente = false;
+    seguimiento.datoPedido = null;
+    if (pasaAlEquipo) pausar(previa);
+    await guardar({
+      intencionAbierta: previa || null,
+      intencionConcluida: true,
+      intencionPropuesta: null,
+      intencionCola: [],
+    });
+    await anotar(previa || null, true);
+    await send(conversationId, pasaAlEquipo ? AVISO_EQUIPO : charla.cierre);
+    if (pasaAlEquipo) await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+    return;
+  }
+  if (
+    respondioAlgoMas &&
+    pideAfirmacion(textoLote) &&
+    !pideNegacion(textoLote) &&
+    sinTema &&
+    !pideOtraCosa
+  ) {
+    seguimiento.datoPedido = null;
+    await guardar({
+      intencionAbierta: previa || null,
+      intencionConcluida: true,
+      intencionPropuesta: null,
+      intencionCola: [],
+    });
+    await anotar(previa || null, true);
+    await send(conversationId, PREGUNTA_EN_QUE);
+    return;
+  }
   const soloDespedida =
     esSoloDespedida(batch.map((message) => message.text)) ||
     (detection.cortesia === "cierre" && !pideOtraCosa);
@@ -1950,7 +2177,13 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   }
 
   const claveDatos = datosDeClave || chosen?.clave || "";
-  const previoAccion = conversation.ultimoResultado?.motivo ?? "";
+  // motivo puede ser legible; las fechas exactas viven en horarios.
+  const previoAccion = [
+    conversation.ultimoResultado?.motivo ?? "",
+    conversation.ultimoResultado?.horarios ?? "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const consultaAccionBase = completarConsulta(textoLote, detection.consulta ?? "", previoAccion);
   const confirmaPendiente = /^Para confirmar (la anulación|el cambio):/i.test(previoAccion);
   const eleccionPendiente = /^Elegí el turno a (anular|cambiar):/i.test(previoAccion);
@@ -1983,11 +2216,18 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     resultadoForzado = elegido
       ? `Para confirmar ${modoPedido === "cambiar" ? "el cambio" : "la anulación"}:\n${elegido}`
       : previoAccion;
-  } else if (/busc[aá]s a /i.test(previoAccion) && pideNegacion(textoLote)) {
+  } else if (
+    (/busc[aá]s a /i.test(previoAccion) || pedidoPrevio === "confirmaProfesional") &&
+    pideNegacion(textoLote)
+  ) {
     claveAccion = "";
     resultadoForzado = "Falta el profesional. Decime el nombre y el apellido.";
-  } else if (/busc[aá]s a /i.test(previoAccion) && pideAfirmacion(textoLote)) claveAccion = "turnos.libres";
-  else if (
+  } else if (
+    (/busc[aá]s a /i.test(previoAccion) || pedidoPrevio === "confirmaProfesional") &&
+    pideAfirmacion(textoLote)
+  ) {
+    claveAccion = "turnos.libres";
+  } else if (
     (/busc[aá]s a /i.test(previoAccion) || pedidoPrevio === "confirmaProfesional") &&
     !pideAfirmacion(textoLote) &&
     !pideNegacion(textoLote) &&
@@ -2017,35 +2257,181 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (correccion.profesional && !sedeAjena && !rechazoDato) {
     claveAccion = "turnos.libres";
   }
+  // Config «no dar turnos»: no buscar profesionales, libres ni reservar (sí ver/cancelar propios).
   if (
+    !daTurnos &&
+    (claveAccion === "turnos.libres" ||
+      claveAccion === "turnos.listarProfesionales" ||
+      claveAccion === "turnos.listarTratamientos" ||
+      claveAccion === "turnos.reservar" ||
+      claveAccion === "profesionales.listarTratamientos" ||
+      claveAccion === "prestaciones.listarProfesionales")
+  ) {
+    claveAccion = "";
+  }
+  // Sin para quién / edad no buscamos turnos ni listamos Drs (salvo anular/ver propios).
+  const faltaFichaBusqueda = faltanteFichaAntesDeBuscar(fichaActual);
+  if (
+    faltaFichaBusqueda &&
+    (claveAccion === "turnos.libres" ||
+      claveAccion === "turnos.listarProfesionales" ||
+      claveAccion === "turnos.listarTratamientos" ||
+      claveAccion === "turnos.reservar" ||
+      claveAccion === "profesionales.listarTratamientos" ||
+      claveAccion === "prestaciones.listarProfesionales")
+  ) {
+    claveAccion = "";
+  }
+  // Si preguntamos profesional pero contestaron ficha (para mí / edad), no buscar.
+  if (
+    PEDIDOS_BUSQUEDA.has(pedidoPrevio) &&
+    esRespuestaFichaBasica(textoLote) &&
+    (claveAccion === "turnos.libres" || claveAccion === "turnos.listarProfesionales")
+  ) {
+    claveAccion = "";
+  }
+  const enTurnos =
+    chosen?.clave === "TURNOS" || previa === "TURNOS" || conversation.intencionAbierta === "TURNOS";
+  // Eligió orientación: buscar acá o hablar con el equipo (solo si el bot puede dar turnos).
+  if (
+    daTurnos &&
+    !sedeAjena &&
+    !rechazoDato &&
+    enTurnos &&
+    pedidoPrevio === "orientacionTurno"
+  ) {
+    if (eligeDerivacionOrientacion(textoLote)) {
+      seguimiento.derivacionPendiente = true;
+      const derivado = tagsByName.get("derivado a asesor");
+      if (derivado && !nextTagIds.has(derivado.id)) {
+        nextTagIds.add(derivado.id);
+        await saveTags(conversationId, [...nextTagIds]);
+      }
+      pausar(previa || "TURNOS");
+      await guardar({
+        intencionAbierta: "TURNOS",
+        intencionConcluida: true,
+        intencionPropuesta: null,
+        intencionCola: [],
+      });
+      await anotar("TURNOS", true);
+      if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+      await send(
+        conversationId,
+        "Dale, alguien del equipo te va a orientar por este medio.",
+      );
+      await send(conversationId, AVISO_EQUIPO);
+      await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+      return;
+    }
+    if (eligeBuscarOrientacion(textoLote)) {
+      claveAccion = "";
+      resultadoForzado =
+        "Perfecto. Decime un tratamiento aproximado (por ejemplo psiquiatría o psicología) o el nombre de un profesional, y te ayudo a buscar.";
+    } else {
+      claveAccion = "";
+      resultadoForzado = TEXTO_ORIENTACION_TURNO;
+    }
+  }
+  // No sabe el tratamiento → ofrecer buscar o derivar (no inventar uno).
+  else if (
+    daTurnos &&
+    !sedeAjena &&
+    !rechazoDato &&
+    enTurnos &&
+    pedidoPrevio === "tratamiento" &&
+    noSabeTratamiento(textoLote)
+  ) {
+    claveAccion = "";
+    resultadoForzado = TEXTO_ORIENTACION_TURNO;
+    detection.requierePersona = false;
+    seguimiento.derivacionPendiente = false;
+  }
+  // Sabe el tratamiento (o ya está en la charla) pero no tiene profesional en especial → listar Drs.
+  // Pisa una acción previa del modelo: «cualquiera» / «no sé» no deben ir a turnos.libres.
+  else if (
+    daTurnos &&
+    !sedeAjena &&
+    !rechazoDato &&
+    enTurnos &&
+    !faltaFichaBusqueda &&
+    pedidoPrevio === "profesional" &&
+    (sinPreferenciaProfesional(textoLote) || noSabeTratamiento(textoLote)) &&
+    !datoTieneForma("profesional", textoLote)
+  ) {
+    const hayTratamientoEnContexto =
+      /estos son los tratamientos|falta el tratamiento|psiquiat|psicol|consulta|evaluacion|programa|ados|neuropsic|tratamiento/i.test(
+        `${previoAccion}\n${detection.consulta ?? ""}\n${textoLote}`,
+      );
+    if (hayTratamientoEnContexto && !noSabeTratamiento(textoLote)) {
+      claveAccion = "turnos.listarProfesionales";
+    } else {
+      // Sin tratamiento claro o no sabe → ofrecer buscar o hablar con el equipo.
+      claveAccion = "";
+      resultadoForzado = TEXTO_ORIENTACION_TURNO;
+      detection.requierePersona = false;
+      seguimiento.derivacionPendiente = false;
+    }
+  } else if (
     !claveAccion &&
     !sedeAjena &&
     !rechazoDato &&
+    !faltaFichaBusqueda &&
     (pedidoPrevio === "profesional" ||
       pedidoPrevio === "tratamiento" ||
       (pedidoPrevio === "confirmaProfesional" &&
         datoTieneForma("profesional", textoLote) &&
         !pideAfirmacion(textoLote) &&
         !pideNegacion(textoLote))) &&
-    (chosen?.clave === "TURNOS" || previa === "TURNOS" || conversation.intencionAbierta === "TURNOS")
+    enTurnos &&
+    !(pedidoPrevio === "profesional" && (sinPreferenciaProfesional(textoLote) || noSabeTratamiento(textoLote))) &&
+    !(pedidoPrevio === "tratamiento" && noSabeTratamiento(textoLote)) &&
+    !esRespuestaFichaBasica(textoLote)
   ) {
     claveAccion = "turnos.libres";
   }
+  const nombreConfirmado =
+    previoAccion.match(/busc[aá]s a ([^\n.]+)/i)?.[1]?.trim() ||
+    previoAccion.match(/te refer[ií]s a ([^\n.?]+)/i)?.[1]?.trim() ||
+    "";
+  const confirmaProfesionalAhora =
+    !correccion.profesional &&
+    Boolean(nombreConfirmado) &&
+    (pedidoPrevio === "confirmaProfesional" || /busc[aá]s a /i.test(previoAccion)) &&
+    pideAfirmacion(textoLote);
   const consultaAccion = [
     claveAccion === "turnos.delPaciente" ||
     claveAccion === "turnos.cancelar" ||
+    claveAccion === "turnos.listarProfesionales" ||
     pideMasFechas(textoLote) ||
     pideMasTemprano(textoLote) ||
-    /falta el dni|busc[aá]s a|profesionales con ese|estos son los tratamientos|hay más de un cruce|falta el tratamiento/i.test(previoAccion)
+    (!correccion.profesional &&
+      /falta el dni|profesionales con ese|estos son los tratamientos|hay más de un cruce|falta el tratamiento/i.test(
+        previoAccion,
+      ))
       ? previoAccion
       : "",
+    // Si acabamos de confirmar el profesional, mandamos el nombre (sin el «sí»).
+    // Si corrige el profesional, no reusar el nombre anterior.
+    correccion.profesional
+      ? ""
+      : confirmaProfesionalAhora ||
+          (nombreConfirmado &&
+            (claveAccion === "turnos.libres" || pedidoPrevio === "confirmaProfesional"))
+        ? nombreConfirmado
+        : "",
     consultaAccionBase,
     correccion.profesional ? correccion.profesional : "",
     claveAccion === "turnos.libres" ||
     claveAccion === "turnos.reservar" ||
     claveAccion === "turnos.delPaciente" ||
-    claveAccion === "turnos.cancelar"
-      ? textoLote
+    claveAccion === "turnos.cancelar" ||
+    claveAccion === "turnos.listarProfesionales"
+      ? confirmaProfesionalAhora || correccion.profesional
+        ? correccion.profesional
+          ? textoLote
+          : ""
+        : textoLote
       : "",
   ]
     .filter(Boolean)
@@ -2090,6 +2476,42 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   );
   if (cancelaExistente) datosDeClave = "";
   if (detection.requierePersona === true) seguimiento.derivacionPendiente = true;
+
+  // Bot sin dar turnos: tomar ficha y derivar; no buscar ni reservar.
+  const turnoNuevoSinAsignar =
+    !daTurnos &&
+    !sedeAjena &&
+    !conflicto &&
+    !cancelaExistente &&
+    !confirmarReserva &&
+    (chosen?.clave === "TURNOS" || previa === "TURNOS" || conversation.intencionAbierta === "TURNOS") &&
+    claveAccion !== "turnos.delPaciente" &&
+    claveAccion !== "turnos.cancelar" &&
+    modoPedido !== "anular" &&
+    modoPedido !== "cambiar";
+  if (turnoNuevoSinAsignar && fichaListaParaOperador(fichaActual)) {
+    seguimiento.derivacionPendiente = true;
+    const derivado = tagsByName.get("derivado a asesor");
+    if (derivado && !nextTagIds.has(derivado.id)) {
+      nextTagIds.add(derivado.id);
+      await saveTags(conversationId, [...nextTagIds]);
+    }
+    pausar(previa || "TURNOS");
+    await guardar({
+      intencionAbierta: "TURNOS",
+      intencionConcluida: true,
+      intencionPropuesta: null,
+      intencionCola: [],
+    });
+    await anotar("TURNOS", true);
+    if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
+    if (!yaAvisoTurnoSinAsignar(messages)) await send(conversationId, TEXTO_TURNO_SIN_ASIGNAR);
+    await send(conversationId, TEXTO_TURNO_DATOS_LISTOS);
+    await send(conversationId, AVISO_EQUIPO);
+    await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+    return;
+  }
+
   const accion = conflicto
     ? null
     : accionPermitida(claveAccion, chosen?.clave ?? "");
@@ -2099,7 +2521,16 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       : "";
   const horarioRechazado =
     accion?.clave === "turnos.reservar" && !horarioOfrecido(consultaAccion, previoAccion)
-      ? `Ese horario no está entre las opciones.\n${previoAccion}`
+      ? `Ese horario no está entre las opciones.\n${
+          conversation.ultimoResultado?.horarios
+            ? formatearHorariosAgrupados(
+                conversation.ultimoResultado.horarios
+                  .split("\n")
+                  .map((linea) => linea.trim())
+                  .filter((linea) => /\(\d{4}-\d{2}-\d{2}/.test(linea)),
+              )
+            : previoAccion
+        }`
       : "";
   const salidaAccion =
     accion && !resultadoForzado && !opcionRechazada && !horarioRechazado
@@ -2115,12 +2546,31 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
           ampliar: pideMasFechas(textoLote),
           masTemprano: pideMasTemprano(textoLote),
           horariosPrevios: conversation.ultimoResultado?.horarios,
-          textoPersona: textoLote,
+          // Un «sí» de confirmación no es el nombre del profesional.
+          textoPersona:
+            nombreConfirmado ||
+            (pedidoPrevio === "confirmaProfesional" && pideAfirmacion(textoLote) ? "" : textoLote),
         })
       : null;
   let resultadoAccion = resultadoForzado || horarioRechazado || opcionRechazada || salidaAccion?.texto || "";
   if (modoPedido && accion?.clave === "turnos.delPaciente" && /futuro:/i.test(resultadoAccion)) {
-    resultadoAccion = textoDeTurnosPropios(modoPedido, resultadoAccion, `${textosEntrantes}\n${consultaAccion}`);
+    const propias = textoDeTurnosPropios(modoPedido, resultadoAccion, `${textosEntrantes}\n${consultaAccion}`);
+    // Anulación clara (un solo turno o ya nombrado): cancelar ya, sin derivar ni pedir otro sí.
+    if (modoPedido === "anular" && /^Para confirmar la anulación:/i.test(propias)) {
+      const linea = propias.replace(/^Para confirmar la anulación:\s*/i, "").trim();
+      const baja = await ejecutarAccion("turnos.cancelar", `${linea}\n${consultaAccion}`, {
+        dni: contact?.dni ?? "",
+        nombre: contact?.firstName ?? "",
+        apellido: contact?.lastName ?? "",
+        sexo: contact?.sexo ?? "",
+        telefono: contact?.phoneNumber ?? "",
+        email: contact?.email ?? "",
+        textoPersona: textosEntrantes,
+      });
+      resultadoAccion = baja?.texto || "No pude cancelar el turno.";
+    } else {
+      resultadoAccion = propias;
+    }
   }
   if (
     accion?.clave === "turnos.reservar" &&
@@ -2210,7 +2660,13 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     }
     return;
   }
-  const pedido = faltan[0] ? ETIQUETA_DATO[faltan[0]] ?? faltan[0] : "";
+  // Mientras resolvemos profesional/tratamiento, no pedirle datos de ficha (DNI, etc.).
+  const buscandoTurnoAhora =
+    Boolean(preguntaAccion) ||
+    /busc[aá]s a |falta el (profesional|tratamiento)|estos son los tratamientos|tenemos estos profesionales|profesionales con ese nombre/i.test(
+      resultadoAccion,
+    );
+  const pedido = buscandoTurnoAhora ? "" : faltan[0] ? ETIQUETA_DATO[faltan[0]] ?? faltan[0] : "";
   const hints = capitulosDe(
     [...new Set([chosen?.clave ?? "", secundaria?.clave ?? "", ...infosAhora, claveDatos])].filter(Boolean),
     batch.map((message) => message.text).join("\n"),
@@ -2258,7 +2714,10 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "Si hay dos precios, decí los dos.",
       "Si pregunta por una obra social, prepaga o CUD, respondé con lo que dice Coberturas sobre esa cobertura: condiciones, mail y prestador, si están escritos. Si esa cobertura no está nombrada en Coberturas, decí que depende de la sede, la prestación y el plan, y pasá coberturas@ineco.org.ar. No digas que atienden por una cobertura que el texto no nombra.",
       "No preguntes la relación si ya dijo hijo, hija, padre, madre, abuelo, abuela, tío, tía, sobrino, sobrina, marido, esposo, esposa, pareja, novio, novia o tutor, o si la ficha ya tiene una.",
-      "No digas que un turno quedó reservado si la acción no lo dio. Si la ficha ya está completa y no hay un horario elegido, pedí el tratamiento y el profesional para buscar un turno libre. No ofrezcas un turno de una sede que no sea CABA. Si el resultado lista horarios, mencionalos todos: los de antes y los nuevos. Si dice que antes no hay otros, repetí los que ya estaban. Si el resultado lista profesionales o consultas, nombrá cada uno. Si dice que falta el tratamiento, el profesional sí está: pedí el tratamiento y no digas que no está habilitado. Si dice «Buscás a» un profesional, hacé esa pregunta con el nombre completo y no busques horarios todavía. Si lista profesionales con ese nombre o apellido, nombralos y preguntá cuál buscaba. Si lista tratamientos, nombralos uno por uno. Si dice que falta el profesional, ese nombre no está: mostrá la lista si vino y no pidas el DNI. Si dice que es paciente, no pidas los datos que ya figuran. Si dice que no es paciente, pedí solo el dato que falta. Si el horario o la consulta no estaban entre las opciones, volvé a ofrecer esa lista.",
+      "No digas que un turno quedó reservado si la acción no lo dio. Si la ficha ya está completa y no hay un horario elegido, pedí el tratamiento y el profesional para buscar un turno libre. No ofrezcas un turno de una sede que no sea CABA. Si el resultado de esta acción trae «Tengo los siguientes turnos libres», no listes días ni horas en partes (el sistema manda ese listado). Si el resultado dice «Turno dado», confirmalo en una frase y no preguntes de nuevo el tratamiento ni el profesional. Si dice «Turno cancelado», confirmalo y no digas que lo ve el equipo. Si dice que antes no hay otros, no armes otra lista. Si el resultado lista profesionales o tratamientos, nombrá solo los nombres legibles: sin números de documento, sin códigos entre paréntesis y sin pegar el resultado crudo. Si dice que falta el tratamiento, el profesional sí está: pedí el tratamiento y no digas que no está habilitado. Si el resultado nombra un profesional de la lista, ese profesional sí está habilitado: no digas lo contrario. Si dice «Buscás a» un profesional, no lo repitas en partes: la pregunta del sistema confirma si se refiere a ese nombre completo, y no busques horarios todavía. Si lista profesionales con ese nombre o apellido, nombralos y preguntá cuál buscaba. Si lista tratamientos, nombralos uno por uno. Si dice que falta el profesional, ese nombre no está: mostrá la lista si vino y no pidas el DNI. Si dice que es paciente, no pidas los datos que ya figuran. Si dice que no es paciente, pedí solo el dato que falta. Si el horario o la consulta no estaban entre las opciones, no armes la lista vos. Si recién piden sacar un turno y todavía no dijeron profesional ni tratamiento, no arranques por el DNI: preguntá si tienen algún profesional en especial. Orden del turno: profesional, después tratamiento, recién después DNI si hace falta. Al reservar, usá la fecha exacta de ClavesISO (formato entre paréntesis).",
+      !daTurnos && turnoNuevoSinAsignar
+        ? "IMPORTANTE: este canal NO asigna ni reserva turnos. No busques profesionales, no listes horarios y no digas que un turno quedó dado. Pedí solo datos de ficha (para quién, edad, nombre, apellido, DNI). El turno lo asigna una persona del equipo."
+        : "",
       "Si el mensaje nombra varios turnos o varias personas, nombrá a cada una. Pedí los datos de una sola por vez, la del caso activo. No le atribuyas a esa persona la edad ni el nombre de otra.",
       "Si pregunta por varios tratamientos, precios o programas en el mismo mensaje, respondé cada uno que esté en la base. No elijas uno solo.",
       "Si una parte no se puede resolver (confirmar, cancelar o un dato clínico) y otra sí, resolvé la que se puede y decí que la otra la ve una persona. No dejes de contestar la que sí podés.",
@@ -2298,8 +2757,8 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
               ? `Para la intención principal falta un solo dato. La información va en partes. En pregunta pedí únicamente: ${pedido}. No pidas ningún dato que ya figure en la ficha. No repitas esa pregunta dentro de partes. Si el resultado trajo una lista de profesionales o de consultas, nombralos.`
               : esInfo
                 ? sedeInformada
-                  ? `Respondé ahora lo que preguntó, con la base. No digas que ya estaba respondido. La sede es ${sedeInformada}: pasá solo el dato que esté escrito y no ofrezcas sacar un turno por este canal. pregunta vacía, o una sola oferta de ayuda con otra consulta de CABA.`
-                  : "Respondé ahora lo que preguntó este mensaje, con la base. No digas que ya estaba respondido. No pidas nombre, edad, DNI ni si ya es paciente. En pregunta, una sola oferta: si lo podés ayudar en algo más, o si le gustaría sacar un turno en CABA."
+                  ? `Respondé ahora lo que preguntó, con la base. No digas que ya estaba respondido. La sede es ${sedeInformada}: pasá solo el dato que esté escrito y no ofrezcas sacar un turno por este canal. pregunta vacía, o solo: ¿Te puedo ayudar en algo más?`
+                  : "Respondé ahora lo que preguntó este mensaje, con la base. No digas que ya estaba respondido. No pidas nombre, edad, DNI ni si ya es paciente. En pregunta, solo: ¿Te puedo ayudar en algo más? No ofrezcas sacar un turno."
                 : cancelaExistente
                   ? "Está anulando o cambiando un turno que ya tiene. No pidas la sede: este canal siempre usa la misma. No pidas la fecha si no la dijo. Si el resultado pide elegir, preguntá cuál. Si pide confirmar, pedí esa confirmación y no digas que ya quedó anulado. Si falta el DNI, pedilo."
                 : chosen?.clave === "TURNOS"
@@ -2340,10 +2799,12 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
           ? `Incluí una sola vez que por este canal no se puede confirmar si un turno quedó reservado. No pidas datos para esa confirmación. Respondé el resto del mensaje.${sedeAjena ? ` El turno nuevo es para ${sedeAjena}: pasá el contacto y no lo saques por este canal.` : ""}`
           : sedeAjena
             ? `El turno es para ${sedeAjena}, no para CABA. No pidas datos. Decí que este canal solo gestiona turnos de CABA y pasá el contacto de esa sede si está en la base.${secundaria ? " Respondé también el otro pedido con la base." : ""}`
+            : buscandoTurnoAhora
+              ? "Estamos eligiendo profesional o tratamiento. Seguí solo el resultado de las listas. No pidas DNI ni otros datos de ficha todavía. No digas que un profesional de la lista no está habilitado. No pegues documentos ni códigos."
             : esInfo && faltan.length === 0
               ? sedeInformada
                 ? `Respondé ahora la consulta sobre ${sedeInformada}. No digas que ya estaba respondida. No ofrezcas sacar un turno.`
-                : "Respondé ahora la consulta con la base. No digas que ya estaba respondida. En la pregunta ofrecé ayudar en algo más o sacar un turno en CABA."
+                : "Respondé ahora la consulta con la base. No digas que ya estaba respondida. En la pregunta solo: ¿Te puedo ayudar en algo más? No ofrezcas sacar un turno."
               : faltan.length
                 ? `Falta para la intención principal: ${faltan.join(", ")}. Pedí solo el primero, una sola vez, en pregunta. No agregues listas de profesionales.`
                 : cancelaExistente
@@ -2402,19 +2863,30 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     }
     if (activo && faltan[0]) pregunta = preguntaDelCaso(activo, faltan[0]);
   }
-  if (detection.requierePersona === true && !sedeAjena && !conflicto && !fichaTurnoLista && !preguntaAccion) {
+  // Si ya ofrecimos menú de orientación, no derivar por requierePersona del modelo.
+  if (
+    detection.requierePersona === true &&
+    !sedeAjena &&
+    !conflicto &&
+    !fichaTurnoLista &&
+    !preguntaAccion &&
+    !/hablar con alguien del equipo|seguir buscando/i.test(resultadoAccion)
+  ) {
     seguimiento.derivacionPendiente = true;
     if (!bloques.some((parte) => /persona del equipo|deriv/i.test(sinTildes(parte)))) {
       bloques.push("Esa parte la va a ver una persona del equipo.");
     }
     if (!faltan.length) pregunta = PREGUNTA_ALGO_MAS;
   }
-  if (cancelaExistente && !conflicto) {
-    seguimiento.derivacionPendiente = true;
-    if (!bloques.some((parte) => /persona del equipo|deriv/i.test(sinTildes(parte)))) {
-      bloques.push("La cancelación la ve una persona del equipo.");
-    }
+  // Cancelar/cambiar lo hace este canal: no derivar ni avisar que lo ve el equipo.
+  if (cancelaExistente && !conflicto && /turno cancelado:/i.test(resultadoAccion)) {
     pregunta = PREGUNTA_ALGO_MAS;
+    seguimiento.datoPedido = null;
+    seguimiento.derivacionPendiente = false;
+    if (!bloques.some((parte) => /cancel/i.test(sinTildes(parte)))) {
+      const detalle = resultadoAccion.replace(/^Turno cancelado:\s*/i, "").trim();
+      bloques = [detalle ? `Listo, cancelé el turno: ${detalle}` : "Listo, el turno quedó cancelado."];
+    }
   }
   if (conflicto) {
     bloques = bloques
@@ -2428,14 +2900,195 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       .filter(Boolean);
     pregunta = PREGUNTA_CONFLICTO;
   }
-  const horariosFuera = horariosOmitidos(
-    `${bloques.join("\n")}\n${pregunta}`,
-    salidaAccion?.horarios ?? "",
-  );
-  if (horariosFuera) bloques.unshift(`Siguen estos horarios:\n${horariosFuera}`);
-  const opcionesFuera = opcionesOmitidas(`${bloques.join("\n")}\n${pregunta}`, resultadoAccion);
-  if (opcionesFuera) bloques.unshift(opcionesFuera);
+  // Una sola lista de horarios. El modelo no manda el listado: lo arma el sistema.
+  const lineasHorarioGuardadas = (salidaAccion?.horarios ?? "")
+    .split("\n")
+    .map((linea) => linea.trim())
+    .filter((linea) => /\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(linea));
+  const listadoHumano = lineasHorarioGuardadas.length
+    ? formatearHorariosAgrupados(lineasHorarioGuardadas)
+    : "";
+  const esTextoDeHorarios = (parte: string): boolean => {
+    if (
+      /turnos libres|horarios libres|horarios? disponibles|tengo estas opciones|estas opciones|clavesiso:|\(\d{4}-\d{2}-\d{2}|[ap]\.\s*m\./i.test(
+        parte,
+      )
+    ) {
+      return true;
+    }
+    if (/^-\s*\d{1,2}:\d{2}\b/m.test(parte)) return true;
+    const dias = (parte.match(/\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/gi) || [])
+      .length;
+    const horas = (parte.match(/\b\d{1,2}:\d{2}\b/g) || []).length;
+    return dias >= 1 && horas >= 1;
+  };
   if (preguntaAccion && !conflicto && !sedeAjena) pregunta = preguntaAccion;
+  // Menú orientación (buscar vs equipo): el cuerpo lo fija el sistema, no el modelo.
+  if (/hablar con alguien del equipo/i.test(resultadoAccion) && /seguir buscando/i.test(resultadoAccion)) {
+    const cuerpo = resultadoAccion.replace(/\n*¿Qué preferís\??\s*$/i, "").trim();
+    if (cuerpo) bloques = [cuerpo];
+  } else if (/tratamiento aproximado/i.test(resultadoAccion) && /nombre de un profesional/i.test(resultadoAccion)) {
+    const cuerpo = resultadoAccion.replace(/\n*¿[^\n]*\??\s*$/i, "").trim();
+    if (cuerpo) bloques = [cuerpo];
+  }
+  let horariosYaPuestos = false;
+  if (listadoHumano && (accion?.clave === "turnos.libres" || /cuál de estos horarios/i.test(pregunta))) {
+    // Un solo globo con el formato agrupado. Se descarta cualquier listado del modelo.
+    bloques = [listadoHumano];
+    pregunta = "¿Cuál de estos horarios querés?";
+    horariosYaPuestos = true;
+  } else if (listadoHumano && bloques.some(esTextoDeHorarios)) {
+    bloques = bloques.filter((parte) => !esTextoDeHorarios(parte));
+    bloques.push(listadoHumano);
+    horariosYaPuestos = true;
+  } else if (!listadoHumano) {
+    const horariosFuera = horariosOmitidos(
+      `${bloques.join("\n")}\n${pregunta}`,
+      salidaAccion?.horarios ?? "",
+    );
+    if (horariosFuera) {
+      bloques = bloques.filter((parte) => !esTextoDeHorarios(parte));
+      bloques.push(horariosFuera);
+      horariosYaPuestos = true;
+    }
+  }
+  if (!horariosYaPuestos) {
+    const opcionesFuera = opcionesOmitidas(`${bloques.join("\n")}\n${pregunta}`, resultadoAccion);
+    if (opcionesFuera && !esTextoDeHorarios(opcionesFuera)) bloques.unshift(opcionesFuera);
+  }
+  // Si el turno se dio, no reabrir tratamiento/profesional ni horarios.
+  if (/turno dado:/i.test(resultadoAccion) && !conflicto && !sedeAjena) {
+    pregunta = PREGUNTA_ALGO_MAS;
+    seguimiento.datoPedido = null;
+    // Tirar listados viejos de tratamientos/horarios que el modelo haya mezclado.
+    bloques = bloques.filter(
+      (parte) =>
+        !/cuál de estos tratamientos|estos son los tratamientos|siguientes turnos libres|clavesiso:/i.test(
+          parte,
+        ),
+    );
+    if (!bloques.length || !/reserv|quedó dado|turno dado|listo/i.test(bloques.join(" "))) {
+      const detalle = resultadoAccion.replace(/^Turno dado:\s*/i, "").trim();
+      bloques = [detalle ? `Listo, quedó reservado: ${detalle}` : "Listo, el turno quedó reservado."];
+    }
+    if (seguimiento.ultimoResultado) {
+      const { horarios: _h, hastaDia: _d, busqueda: _b, ...rest } = seguimiento.ultimoResultado;
+      seguimiento.ultimoResultado = rest;
+    }
+  }
+  // Si la reserva falló, no dejes que el modelo diga que se reservó.
+  if (
+    accion?.clave === "turnos.reservar" &&
+    resultadoAccion &&
+    !/turno dado:/i.test(resultadoAccion) &&
+    !conflicto
+  ) {
+    bloques = bloques.filter((parte) => !/reserv|quedó dado|se realizó correctamente/i.test(sinTildes(parte)));
+    if (!bloques.length && resultadoAccion.trim()) bloques = [resultadoAccion.split("\n")[0]!.slice(0, 300)];
+  }
+  // Si la acción propone confirmar un profesional, no repetir «Buscás a…» en un globo aparte.
+  if (/busc[aá]s a /i.test(resultadoAccion) && preguntaAccion) {
+    bloques = bloques
+      .map((parte) =>
+        parte
+          .split(/(?<=[.!?])\s+/)
+          .filter((frase) => !/busc[aá]s a /i.test(frase))
+          .join(" ")
+          .trim(),
+      )
+      .filter(Boolean);
+  }
+  // Primero para quién / relación / edad — pisa listados de Drs si todavía falta la ficha básica.
+  if (
+    !conflicto &&
+    !sedeAjena &&
+    !cancelaExistente &&
+    !confirmarReserva &&
+    chosen?.clave === "TURNOS" &&
+    !resultadoForzado
+  ) {
+    const faltaBasica = faltanteFichaAntesDeBuscar(fichaActual);
+    if (faltaBasica) {
+      // No mandar listados de profesionales mientras falta para quién / edad.
+      bloques = bloques.filter(
+        (parte) =>
+          !/tenemos estos profesionales|profesionales para|cuál de estos profesionales|no encontr|habilitado con/i.test(
+            parte,
+          ),
+      );
+      pregunta = preguntaFichaAntesDeBuscar(faltaBasica, fichaActual);
+      seguimiento.datoPedido = faltaBasica;
+    } else if (
+      !daTurnos &&
+      turnoNuevoSinAsignar &&
+      faltan[0] &&
+      (faltan[0] === "dni" ||
+        faltan[0] === "pacienteNombre" ||
+        faltan[0] === "pacienteApellido" ||
+        faltan[0] === "sexo" ||
+        faltan[0] === "contactoNombre" ||
+        faltan[0] === "email")
+    ) {
+      // Sin dar turnos: seguir pidiendo ficha (no profesional ni horarios).
+      bloques = bloques.filter(
+        (parte) =>
+          !/tenemos estos profesionales|cuál de estos profesionales|horarios|turnos libres/i.test(parte),
+      );
+      pregunta = activo
+        ? preguntaDelCaso(activo, faltan[0])
+        : preguntaFichaAntesDeBuscar(faltan[0], fichaActual);
+      if (faltan[0] === "pacienteNombre" && !activo) {
+        pregunta =
+          fichaActual.consultaPara === "tercero" ? "¿Cuál es el nombre del paciente?" : "¿Cuál es tu nombre?";
+      }
+      if (faltan[0] === "pacienteApellido" && !activo) {
+        pregunta =
+          fichaActual.consultaPara === "tercero" ? "¿Cuál es el apellido del paciente?" : "¿Cuál es tu apellido?";
+      }
+      if (faltan[0] === "dni" && !activo) {
+        pregunta =
+          fichaActual.consultaPara === "tercero" ? "¿Me pasás el DNI del paciente?" : "¿Me pasás tu DNI?";
+      }
+      if (faltan[0] === "sexo" && !activo) {
+        pregunta =
+          fichaActual.consultaPara === "tercero"
+            ? "¿El paciente es masculino o femenino?"
+            : "¿Sos masculino o femenino?";
+      }
+      seguimiento.datoPedido = faltan[0];
+    } else if (
+      daTurnos &&
+      !preguntaAccion &&
+      !resultadoAccion &&
+      (faltan[0] === "dni" ||
+        faltan[0] === "pacienteNombre" ||
+        faltan[0] === "pacienteApellido" ||
+        faltan[0] === "sexo" ||
+        faltan[0] === "contactoNombre")
+    ) {
+      pregunta = "¿Tenés algún profesional en especial?";
+      seguimiento.datoPedido = "profesional";
+    }
+  }
+  // Aviso único: este canal no asigna el turno; se toman datos para el equipo.
+  if (turnoNuevoSinAsignar && !yaAvisoTurnoSinAsignar(messages)) {
+    if (!bloques.some((parte) => /no puedo asignarte el turno ahora/i.test(parte))) {
+      bloques = [TEXTO_TURNO_SIN_ASIGNAR, ...bloques];
+    }
+  }
+  // Cierre de info: solo ofrecer más ayuda, sin empujar a sacar turno.
+  if (
+    !preguntaAccion &&
+    !conflicto &&
+    !sedeAjena &&
+    !cancelaExistente &&
+    !confirmarReserva &&
+    esInfo &&
+    faltan.length === 0 &&
+    !sedeInformada
+  ) {
+    pregunta = PREGUNTA_ALGO_MAS;
+  }
   if (confirmarReserva && !conflicto && !sedeAjena && !preguntaAccion) {
     seguimiento.derivacionPendiente = true;
     if (!faltan.length) pregunta = PREGUNTA_ALGO_MAS;
@@ -2443,6 +3096,8 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   const pedidoDePregunta = datoPedidoDePregunta(pregunta, resultadoAccion);
   if (pedidoDePregunta) seguimiento.datoPedido = pedidoDePregunta;
   else if (faltan[0] && !preguntaAccion) seguimiento.datoPedido = faltan[0];
+  // El cierre «algo más» no espera un dato de ficha.
+  if (esPreguntaAlgoMas(pregunta)) seguimiento.datoPedido = null;
   if (seguimiento.derivacionPendiente) {
     const derivado = tagsByName.get("derivado a asesor");
     if (derivado && !nextTagIds.has(derivado.id)) {
@@ -2457,4 +3112,85 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (conversation.assigneeKind === "none") {
     await saveAssignee(conversationId, { kind: "bot", name: identidad.nombre });
   }
+}
+
+function minutosInactividadDeConfig(bot: Record<string, unknown>): number {
+  const cierre =
+    bot.cierre && typeof bot.cierre === "object" ? (bot.cierre as Record<string, unknown>) : {};
+  const n = Number(cierre.minutosInactividad ?? 30);
+  if (!Number.isFinite(n)) return 30;
+  return Math.max(5, Math.min(24 * 60, Math.round(n)));
+}
+
+/**
+ * Si el bot habló último y la persona no respondió en X minutos,
+ * se despide y cierra la intención.
+ */
+export async function cerrarPorInactividad(
+  conversationId: string,
+  opts?: { forzar?: boolean; minutos?: number },
+): Promise<boolean> {
+  const conversation = await getConversation(conversationId);
+  if (!conversation || conversation.status !== "OPEN") return false;
+  if (conversation.assigneeKind === "user") return false;
+  if (conversation.contact?.isBlocked) return false;
+
+  const messages = await listRecentMessagesByConversation(conversationId, 30);
+  const last = messages[messages.length - 1];
+  if (!last || last.direction !== "OUTBOUND" || !last.text.trim()) return false;
+
+  const botDoc = await getWhatsappBotConfig();
+  const bot = botDoc?.data ?? {};
+  const identidad = textoIdentidad(bot);
+  const charla = textosCharla(bot, identidad.nombre, new Date());
+  // No repetir despedida.
+  if (sinTildes(last.text).includes(sinTildes(charla.cierre).slice(0, 40))) return false;
+
+  const minutos = opts?.minutos ?? minutosInactividadDeConfig(bot);
+  const edad = Date.now() - Date.parse(last.createdAt);
+  if (!opts?.forzar && (!Number.isFinite(edad) || edad < minutos * 60_000)) return false;
+
+  const esperando =
+    Boolean(conversation.datoPedido) ||
+    Boolean(conversation.intencionAbierta && conversation.intencionConcluida !== true) ||
+    esPreguntaAlgoMas(last.text) ||
+    /\?/.test(last.text);
+  if (!opts?.forzar && !esperando) return false;
+
+  await deliver(conversationId, charla.cierre);
+  await setConversationIntencion(conversationId, {
+    intencionAbierta: null,
+    intencionConcluida: true,
+    intencionPropuesta: null,
+    intencionCola: [],
+    advertenciasFuera: conversation.advertenciasFuera ?? 0,
+    derivacionPendiente: false,
+    temasAnotados: conversation.temasAnotados ?? [],
+    casos: conversation.casos ?? [],
+    casoActivoId: null,
+    datoPedido: null,
+    historialDatos: conversation.historialDatos ?? [],
+    pilaTemas: [],
+    ultimoResultado: conversation.ultimoResultado ?? null,
+    pausa: null,
+  });
+  return true;
+}
+
+/** Barrido de charlas abiertas del bot que quedaron sin respuesta. */
+export async function barrerInactividad(): Promise<number> {
+  const [pruebas, reales] = await Promise.all([
+    listConversations({ status: "OPEN", prueba: true, limit: 40 }),
+    listConversations({ status: "OPEN", prueba: false, limit: 40 }),
+  ]);
+  let cerradas = 0;
+  for (const conv of [...pruebas.items, ...reales.items]) {
+    if (conv.assigneeKind === "user") continue;
+    try {
+      if (await cerrarPorInactividad(conv.id)) cerradas += 1;
+    } catch (error) {
+      console.warn("[whatsapp] cierre por inactividad", conv.id, error);
+    }
+  }
+  return cerradas;
 }

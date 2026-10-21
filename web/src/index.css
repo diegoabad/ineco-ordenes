@@ -13389,6 +13389,20 @@ button.wa-tag:disabled {
   line-height: 1.45;
 }
 
+.wa-config-panel__turnos {
+  margin: 0 0 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface, #fff) 92%, var(--primary, #2563eb) 8%);
+}
+
+.wa-config-panel__turnos-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
 .wa-config-panel__empty {
   display: flex;
   flex-direction: column;

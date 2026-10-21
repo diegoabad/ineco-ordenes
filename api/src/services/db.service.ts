@@ -18,6 +18,7 @@ import {
 import { firestore } from "../config/firebase.js";
 import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails.js";
 import { normalizeNombrePersona } from "../lib/nombrePersona.js";
+import { createTtlCache } from "../lib/ttl-cache.js";
 import {
   calcPresupuestoTotales,
   normalizeRecargoExternoPorcentaje,
@@ -1644,11 +1645,19 @@ function normalizeBuscaTurnoConfig(raw: Record<string, unknown>): BuscaTurnoConf
   };
 }
 
+// Profesionales/prestaciones casi no cambian: no releer Firestore en cada turno del bot.
+const buscaTurnoCache = createTtlCache<BuscaTurnoConfig | null>(10 * 60_000);
+
 /** null si aún no hay config guardada. */
 export async function getBuscaTurnoConfig(): Promise<BuscaTurnoConfig | null> {
+  const cached = buscaTurnoCache.get();
+  if (cached !== undefined) return cached;
   const snap = await getDoc(doc(firestore, CONFIG, BUSCA_TURNO_CONFIG_DOC));
-  if (!snap.exists()) return null;
-  return normalizeBuscaTurnoConfig(snap.data() as Record<string, unknown>);
+  const value = snap.exists()
+    ? normalizeBuscaTurnoConfig(snap.data() as Record<string, unknown>)
+    : null;
+  buscaTurnoCache.set(value);
+  return value;
 }
 
 export async function saveBuscaTurnoConfig(
@@ -1667,6 +1676,7 @@ export async function saveBuscaTurnoConfig(
     throw new Error("La configuración de Busca turno está vacía");
   }
   await setDoc(doc(firestore, CONFIG, BUSCA_TURNO_CONFIG_DOC), normalized);
+  buscaTurnoCache.set(normalized);
   return normalized;
 }
 

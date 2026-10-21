@@ -104,9 +104,10 @@ export const ACCIONES: AccionDef[] = [
 
 const STOP = new Set([
   "dr", "dra", "doctor", "doctora", "el", "la", "los", "las", "de", "del", "con", "por", "para", "una", "uno", "un",
-  "quiero", "necesito", "busco", "buscar", "sacar", "sacame", "turno", "turnos", "horario", "horarios", "consulta",
-  "online", "presencial", "domicilio", "minuto", "minutos", "sede", "primera", "primero", "segunda", "segundo",
-  "vez", "mail", "soy", "femenino", "masculino", "anos", "edad", "ineco", "caba", "hijo", "hija",
+  "quiero", "necesito", "busco", "busca", "buscas", "buscar", "buscaba", "buscabas", "sacar", "sacame", "turno",
+  "turnos", "horario", "horarios", "consulta", "online", "presencial", "domicilio", "minuto", "minutos", "sede",
+  "primera", "primero", "segunda", "segundo", "vez", "mail", "soy", "femenino", "masculino", "anos", "edad",
+  "ineco", "caba", "hijo", "hija",
 ]);
 
 function norm(value: string): string {
@@ -159,6 +160,9 @@ export async function ejecutarAccion(
   if (clave === "profesionales.listarTratamientos" || clave === "turnos.listarTratamientos") {
     if (!config) return solo("No hay listas de profesionales ni prestaciones cargadas.");
     if (!query.length) return solo(listarTratamientos(config));
+    const nombrados = profesionalesNombrados(config, dicha);
+    const incompleto = textoNombreIncompleto(dicha, nombrados);
+    if (incompleto) return solo(incompleto);
     return solo(tratamientosDeProfesional(config, dicha));
   }
   if (clave === "prestaciones.listarProfesionales" || clave === "turnos.listarProfesionales") {
@@ -196,9 +200,19 @@ export function preguntaDeResultado(resultado: string, clave = ""): string {
   const texto = resultado.toLowerCase();
   if (!texto.trim()) return "";
   const buscado = resultado.match(/Buscás a ([^\n.]+)/i);
-  if (buscado?.[1]) return `¿Buscás a ${buscado[1].trim()}?`;
+  if (buscado?.[1]) return `¿Con ese nombre te referís a ${buscado[1].trim()}?`;
+  if (
+    texto.includes("hablar con alguien del equipo") &&
+    (texto.includes("seguir buscando") || texto.includes("1.") || texto.includes("qué preferís"))
+  ) {
+    return "¿Qué preferís?";
+  }
+  if (texto.includes("tratamiento aproximado") && texto.includes("nombre de un profesional")) {
+    return "¿Para qué tratamiento o con qué profesional te ayudo?";
+  }
   if (texto.includes("profesionales con ese nombre")) return "¿Cuál buscabas?";
-  if (texto.includes("falta el profesional")) return "¿Con qué profesional lo busco?";
+  if (texto.includes("tenemos estos profesionales")) return "¿Cuál de estos profesionales preferís?";
+  if (texto.includes("falta el profesional")) return "¿Tenés algún profesional en especial?";
   if (texto.includes("falta el tratamiento") || texto.includes("no hace ese tratamiento")) return "¿Para qué tratamiento?";
   if (texto.includes("estos son los tratamientos") || texto.includes("hay más de un cruce")) return "¿Cuál de estos tratamientos querés?";
   if (texto.includes("falta el horario")) return "¿Cuál de estos horarios querés?";
@@ -211,7 +225,7 @@ export function preguntaDeResultado(resultado: string, clave = ""): string {
     texto.includes("no hay un turno dado") ||
     texto.includes("no encontré un turno")
   ) {
-    return "¿Necesitás algo más?";
+    return "¿Te puedo ayudar en algo más?";
   }
   if (texto.includes("no es paciente") || texto.includes("hay que pedir nombre")) return "¿Cuál es tu nombre?";
   if (texto.includes("para confirmar la anulación")) return "¿Confirmás que lo anulo?";
@@ -219,26 +233,95 @@ export function preguntaDeResultado(resultado: string, clave = ""): string {
   if (texto.includes("elegí el turno a anular")) return "¿Cuál de estos turnos querés anular?";
   if (texto.includes("elegí el turno a cambiar")) return "¿Cuál de estos turnos querés cambiar?";
   if (texto.includes("cambio confirmado")) return "¿Para qué tratamiento y con qué profesional busco el turno nuevo?";
-  if (texto.includes("quedó sin anular") || texto.includes("quedó sin cambios")) return "¿Necesitás algo más?";
-  if (clave === "turnos.delPaciente" && /\d{4}-\d{2}-\d{2}/.test(resultado)) return "¿Necesitás algo más con ese turno?";
+  if (texto.includes("quedó sin anular") || texto.includes("quedó sin cambios")) {
+    return "¿Te puedo ayudar en algo más?";
+  }
+  if (clave === "turnos.delPaciente" && /\d{4}-\d{2}-\d{2}/.test(resultado)) {
+    return "¿Te puedo ayudar en algo más?";
+  }
   if (texto.includes("esa opción no está") || texto.includes("ese horario no está")) return "¿Cuál de estas opciones querés?";
   if (texto.includes("no hay turnos libres")) return "¿Busco más adelante?";
   if (texto.includes("puedo buscar más adelante")) return "¿Busco más adelante?";
+  if (texto.includes("siguientes turnos libres") || texto.includes("turnos libres")) {
+    return "¿Cuál de estos horarios querés?";
+  }
   if (/\d{4}-\d{2}-\d{2}/.test(resultado)) return "¿Cuál de estos horarios querés?";
-  if (clave === "turnos.listarProfesionales") return "¿Con qué profesional lo busco?";
+  if (clave === "turnos.listarProfesionales") return "¿Cuál de estos profesionales preferís?";
   if (clave === "turnos.listarTratamientos") return "¿Para qué tratamiento?";
   return "";
 }
+
+/** No sabe / no elige tratamiento. */
+export function noSabeTratamiento(texto: string): boolean {
+  const t = sinAcentos(texto).replace(/[!¡.?,]/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (
+    /\b(no se|ni idea|no tengo idea|no se cual|no se que|no se el tratamiento|no se para que|no se bien|no tengo claro|no se bien que)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return /^(no|nop|ninguno|ninguna|ni idea)$/.test(t);
+}
+
+/** No tiene profesional en especial: listar los de la prestación. */
+export function sinPreferenciaProfesional(texto: string): boolean {
+  const t = sinAcentos(texto).replace(/[!¡.?,]/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (
+    /\b(cualquiera|el que sea|el que tengan|no tengo preferencia|sin preferencia|no en especial|en especial|me da igual|indistinto|da igual|el primero que|no conozco|no se de ningun|no tengo (un )?profesional|sin profesional|ningun profesional|no tengo doctor|sin doctor)\b/.test(
+      t,
+    )
+  ) {
+    // «en especial» solo cuenta si niega (no / ninguno / sin).
+    if (/\ben especial\b/.test(t) && !/\b(no|sin|ningun)/.test(t)) return false;
+    return true;
+  }
+  return /^(no|nop|ninguno|ninguna|cualquiera|me da igual|da igual)$/.test(t);
+}
+
+/** Eligió hablar con una persona del equipo. */
+export function eligeDerivacionOrientacion(texto: string): boolean {
+  const t = sinAcentos(texto).replace(/[!¡.?,]/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(2|dos)$/.test(t)) return true;
+  return /\b(equipo|humano|persona|asesor|operador|alguien|deriv|hablar con|que me llamen|con una persona)\b/.test(t);
+}
+
+/** Eligió seguir buscando opciones solo. */
+export function eligeBuscarOrientacion(texto: string): boolean {
+  const t = sinAcentos(texto).replace(/[!¡.?,]/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(1|uno)$/.test(t)) return true;
+  return /\b(buscar|buscando|seguir|opcion|opciones|profesional|tratamiento|yo (lo )?busco|seguimos|continuar)\b/.test(t);
+}
+
+export const TEXTO_ORIENTACION_TURNO =
+  "Sin problema. Podés:\n1. Seguir buscando acá (un profesional o un tratamiento aproximado)\n2. Hablar con alguien del equipo\n\n¿Qué preferís?";
 
 function sinTildes(texto: string): string {
   return texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 }
 
 function opcionesDe(resultado: string): string[] {
+  // Si hay horarios con fecha exacta, esas son las opciones (no los encabezados legibles).
+  const conIso = resultado
+    .split("\n")
+    .map((linea) => linea.trim())
+    .filter((linea) => /\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(linea))
+    .filter((linea) => !/^ClavesISO:/i.test(linea));
+  if (conIso.length) return conIso;
   return resultado
     .split("\n")
     .map((linea) => linea.trim())
-    .filter((linea) => linea && !/^(hay más de un cruce|no elijas)/i.test(linea) && !linea.endsWith(":"));
+    .filter(
+      (linea) =>
+        linea &&
+        !linea.endsWith(":") &&
+        !/^-\s*\d{1,2}:\d{2}/.test(linea) &&
+        !/^(hay más|no elijas|falta el|tenemos estos|busc[aá]s a|para |el (dr|dra|doctor)|además|tengo los siguientes|clavesiso|jueves|lunes|martes|mi[eé]rcoles|viernes|s[aá]bado|domingo)/i.test(
+          linea,
+        ),
+    );
 }
 
 /** Si elige «la primera» o un horario de la lista anterior, la consulta queda con esa línea. */
@@ -258,10 +341,15 @@ export function completarConsulta(texto: string, consulta: string, previo: strin
     if (hora) indice = opciones.findIndex((linea) => linea.includes(hora[1]!));
   }
   if (indice < 0 || !opciones[indice]) return base;
+  // Preferir «Con Profesional — Tratamiento:», no el título del listado legible.
   const encabezado = previo
     .split("\n")
     .map((linea) => linea.trim())
-    .find((linea) => linea.endsWith(":"));
+    .find((linea) => /—/.test(linea) && linea.endsWith(":"))
+    ?? previo
+      .split("\n")
+      .map((linea) => linea.trim())
+      .find((linea) => linea.endsWith(":") && !/turnos libres|horarios/i.test(linea));
   return [encabezado?.replace(/:$/, "") ?? "", opciones[indice], base].filter(Boolean).join("\n");
 }
 
@@ -273,7 +361,15 @@ export function accionPorEleccion(texto: string, consulta: string, previo: strin
   const elige = /\bprimer[ao]?\b|\bsegund[ao]\b|\btercer[ao]?\b|\b(ese horario|esa consulta|esa opcion)\b/.test(t);
   if (!elige) return "";
   if (horaPedida(consulta) && !/turno dado:/i.test(previo)) return "turnos.reservar";
-  if (/hay más de un cruce/i.test(previo)) return "turnos.libres";
+  if (
+    /hay más de un cruce|estos son los tratamientos|profesionales con ese nombre|tenemos estos profesionales/i.test(
+      previo,
+    )
+  ) {
+    return "turnos.libres";
+  }
+  // «la primera» sobre una lista de horarios.
+  if (/\(\d{4}-\d{2}-\d{2}/.test(previo)) return "turnos.reservar";
   return "";
 }
 
@@ -340,10 +436,18 @@ export function textoDeTurnosPropios(modo: "anular" | "cambiar", listado: string
 
 export function opcionesOmitidas(respuesta: string, resultado: string): string {
   const texto = norm(respuesta);
+  // No reinyectar listados crudos de profesionales/códigos: el modelo ya tiene el resultado.
+  if (/falta el profesional|falta el tratamiento|busc[aá]s a |estos son los tratamientos/i.test(resultado)) {
+    return "";
+  }
+  // Los horarios se reinyectan legibles vía horariosOmitidos / formatearHorariosAgrupados.
+  if (/siguientes turnos libres|clavesiso:|\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}/i.test(resultado)) {
+    return "";
+  }
   return resultado
     .split("\n")
     .map((linea) => linea.trim())
-    .filter((linea) => linea.includes("—") || /\(\d{4,}\)/.test(linea) || /^[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9' .()-]{8,}$/.test(linea))
+    .filter((linea) => linea.includes("—") && !/\(\d{4}-\d{2}-\d{2}/.test(linea))
     .filter((linea) => {
       const firma = norm(linea).replace(/\d+/g, "").replace(/\s+/g, " ").trim();
       return firma.length >= 8 && !texto.includes(firma);
@@ -363,19 +467,35 @@ function tratamientosDeProfesional(config: BuscaTurnoConfig, consulta: string): 
   if (!profesionales.length) {
     return "Falta el profesional. No hay uno habilitado con ese nombre.";
   }
-  const lines = profesionales.slice(0, 8).map((profesional) => {
+  const filtro = tokens(consulta).filter((token) => token.length >= 5);
+  const nombres: string[] = [];
+  for (const profesional of profesionales.slice(0, 3)) {
     const prestaciones = Object.entries(config.prestaciones)
       .filter(([, prestacion]) => prestacion.enabled !== false)
       .filter(([, prestacion]) =>
         (prestacion.profesionales ?? []).some((item) => String(item.doc) === String(profesional.doc)),
       )
-      .map(([codigo, prestacion]) => `${prestacion.nombre || codigo} (${codigo})`);
-    const lista = prestaciones.length ? prestaciones.join("; ") : "ninguna prestación habilitada";
-    return `${profesional.nombre} (${profesional.doc}, sede ${profesional.sede || "sin sede"}): ${lista}`;
-  });
-  const extra =
-    profesionales.length > 8 ? `\nHay ${profesionales.length - 8} coincidencias más. No elijas una sola.` : "";
-  return lines.join("\n") + extra;
+      .filter(([, prestacion]) => {
+        if (!filtro.length) return true;
+        const nombre = norm(prestacion.nombre || "");
+        // Si el mensaje nombró un tipo (psiquiatría, etc.), priorizar esas.
+        return filtro.some((token) => nombre.includes(token));
+      });
+    const elegidas = (prestaciones.length ? prestaciones : Object.entries(config.prestaciones)
+      .filter(([, prestacion]) => prestacion.enabled !== false)
+      .filter(([, prestacion]) =>
+        (prestacion.profesionales ?? []).some((item) => String(item.doc) === String(profesional.doc)),
+      )).slice(0, 12);
+    for (const [codigo, prestacion] of elegidas) {
+      const nombre = (prestacion.nombre || codigo).trim();
+      const linea = `${nombre} (${codigo})`;
+      if (nombre && !nombres.includes(linea)) nombres.push(linea);
+    }
+  }
+  if (!nombres.length) return "Ese profesional no tiene tratamientos habilitados en busca turno.";
+  const quien = profesionales[0]?.nombre?.trim() || "ese profesional";
+  // El nombre va en el encabezado para no perderlo cuando eligen «la primera».
+  return `Estos son los tratamientos de ${quien}:\n${nombres.join("\n")}`;
 }
 
 function profesionalesDePrestacion(config: BuscaTurnoConfig, consulta: string): string {
@@ -389,13 +509,16 @@ function profesionalesDePrestacion(config: BuscaTurnoConfig, consulta: string): 
     for (const item of prestacion.profesionales ?? []) {
       const doc = String(item.doc);
       if (vistos.has(doc)) continue;
+      // Solo profesionales habilitados en busca turno.
+      const habilitado = habilitados(config).some((p) => String(p.doc) === doc);
+      if (!habilitado) continue;
       vistos.add(doc);
-      nombres.push(`${item.nombre || doc} (${doc})`);
+      nombres.push(item.nombre || doc);
     }
   }
   if (!nombres.length) return "No hay un profesional habilitado para esa consulta.";
   const extra = nombres.length > 12 ? `\nHay ${nombres.length - 12} más.` : "";
-  return nombres.slice(0, 12).join("\n") + extra;
+  return `Tenemos estos profesionales para esa consulta.\n${nombres.slice(0, 12).join("\n")}${extra}`;
 }
 
 function habilitados(config: BuscaTurnoConfig): BuscaTurnoProfesional[] {
@@ -459,30 +582,48 @@ function profesionalesNombrados(config: BuscaTurnoConfig, consulta: string, pers
   const deTratamiento = new Set(
     Object.entries(config.prestaciones).flatMap(([codigo, item]) => tokens(`${item.nombre} ${codigo}`)),
   );
-  const origen = persona.trim() ? persona : consulta;
-  const pedidos = tokens(origen).filter(
-    (token) => token.length >= 3 && !/^\d+$/.test(token) && !deTratamiento.has(token),
-  );
+  const pedidosDe = (origen: string) =>
+    tokens(origen).filter(
+      (token) =>
+        token.length >= 3 &&
+        !/^\d+$/.test(token) &&
+        !deTratamiento.has(token) &&
+        // Solo tokens que parecen parte de un nombre de profesional (ignora Ana/Pérez del paciente, etc.).
+        [...deAlguien].some((nombre) => tokenParecido(token, nombre)),
+    );
+  // «sí» u otras respuestas cortas no son un nombre: usar la consulta (p. ej. Buscás a CETKOVICH…).
+  const pedidosPersona = persona.trim() ? pedidosDe(persona) : [];
+  const pedidos = pedidosPersona.length ? pedidosPersona : pedidosDe(consulta);
   if (!pedidos.length) return [];
-  if (pedidos.some((token) => ![...deAlguien].some((nombre) => tokenParecido(token, nombre)))) return [];
-  let candidatos = lista;
-  for (const token of pedidos) {
-    const exactos = candidatos.filter((item) => tokensDeNombre(item.nombre).includes(token));
-    if (exactos.length) {
-      candidatos = exactos;
-      continue;
-    }
-    const medidos = candidatos
-      .map((item) => ({
-        item,
-        distancia: Math.min(...tokensDeNombre(item.nombre).map((nombre) => distancia(token, nombre))),
-      }))
-      .filter((item) => item.distancia <= topeParecido(token));
-    if (!medidos.length) return [];
-    const mejor = Math.min(...medidos.map((item) => item.distancia));
-    candidatos = medidos.filter((item) => item.distancia === mejor).map((item) => item.item);
+
+  // Puntúa por tokens que matchean: un apellido largo gana a un nombre corto del paciente.
+  const puntuados = lista
+    .map((item) => {
+      const propios = tokensDeNombre(item.nombre);
+      let puntos = 0;
+      let hits = 0;
+      for (const token of pedidos) {
+        const exacto = propios.includes(token);
+        const cerca = propios.some((nombre) => tokenParecido(token, nombre));
+        if (!exacto && !cerca) continue;
+        hits += 1;
+        puntos += exacto ? token.length * 2 : token.length;
+      }
+      return { item, hits, puntos };
+    })
+    .filter((row) => row.hits > 0);
+  if (!puntuados.length) return [];
+  const mejor = Math.max(...puntuados.map((row) => row.puntos));
+  const finalistas = puntuados.filter((row) => row.puntos === mejor).map((row) => row.item);
+  // Si el mensaje trae nombre+apellido de un solo profesional, priorizá ese.
+  if (pedidos.length >= 2 && finalistas.length > 1) {
+    const conTodos = finalistas.filter((item) => {
+      const propios = tokensDeNombre(item.nombre);
+      return pedidos.every((token) => propios.some((nombre) => tokenParecido(token, nombre)));
+    });
+    if (conTodos.length) return conTodos;
   }
-  return candidatos;
+  return finalistas;
 }
 
 function textoDelNombre(consulta: string, persona: string, config: BuscaTurnoConfig | null): string {
@@ -494,9 +635,9 @@ function textoDelNombre(consulta: string, persona: string, config: BuscaTurnoCon
 
 function textoNombreIncompleto(consulta: string, profesionales: BuscaTurnoProfesional[]): string {
   const pedidos = tokens(consulta).filter((token) =>
-    profesionales.some((item) => tienePalabra(item.nombre, token)),
+    profesionales.some((item) => tienePalabra(item.nombre, token) || tokensDeNombre(item.nombre).some((n) => tokenParecido(token, n))),
   );
-  if (pedidos.length >= 2 || !profesionales.length) return "";
+  if (!profesionales.length) return "";
   if (profesionales.length > 1) {
     const lista = profesionales
       .slice(0, 12)
@@ -505,14 +646,34 @@ function textoNombreIncompleto(consulta: string, profesionales: BuscaTurnoProfes
     const extra = profesionales.length > 12 ? `\nHay ${profesionales.length - 12} más.` : "";
     return `Tenemos estos profesionales con ese nombre o apellido.\n${lista}${extra}`;
   }
-  const unico = profesionales[0]?.nombre ?? "";
-  const propios = tokensDeNombre(unico);
-  if (propios.length >= 2) return `Buscás a ${unico}.`;
-  return "";
+  if (pedidos.length >= 2) return "";
+  const unico = profesionales[0]!;
+  const propios = tokensDeNombre(unico.nombre);
+  if (propios.length < 2) return "";
+  // En Medexis el formato es APELLIDO NOMBRES: si ya dijo el apellido, no hace falta confirmar.
+  const apellido = propios[0]!;
+  const dijoApellido = pedidos.some((token) => tokenParecido(token, apellido) || apellido.startsWith(token));
+  if (dijoApellido) return "";
+  return `Buscás a ${unico.nombre}.`;
 }
 
 function prestacionesDichas(config: BuscaTurnoConfig, consulta: string): [string, BuscaTurnoPrestacion][] {
-  const dichos = tokens(consulta).filter((token) => token.length >= 4);
+  // Si ya eligió un código concreto, usar el de la última línea con (código):
+  // la consulta suele traer toda la lista previa + la opción elegida al final.
+  let codigoElegido = "";
+  for (const linea of consulta.split("\n").map((item) => item.trim()).reverse()) {
+    const m = linea.match(/\((\d{3,})\)\s*$/);
+    if (m?.[1]) {
+      codigoElegido = m[1];
+      break;
+    }
+  }
+  if (codigoElegido) {
+    const prestacion = config.prestaciones[codigoElegido];
+    if (prestacion && prestacion.enabled !== false) return [[codigoElegido, prestacion]];
+  }
+
+  const dichos = tokens(consulta).filter((token) => token.length >= 4 && !/^\d+$/.test(token));
   return Object.entries(config.prestaciones).filter(([codigo, item]) => {
     if (item.enabled === false) return false;
     const nombre = norm(`${item.nombre} ${codigo}`);
@@ -542,8 +703,9 @@ function parDeConsulta(
   if (pares.length > 1) {
     const mismos = new Set(pares.map((par) => String(par.profesional.doc))).size === 1;
     if (mismos) {
-      const tratamientos = [...new Set(pares.map((par) => par.prestacion.nombre || par.codigo))];
-      return `Estos son los tratamientos:\n${tratamientos.slice(0, 12).join("\n")}`;
+      const quien = pares[0]!.profesional.nombre;
+      const tratamientos = [...new Set(pares.map((par) => `${par.prestacion.nombre || par.codigo} (${par.codigo})`))];
+      return `Estos son los tratamientos de ${quien}:\n${tratamientos.slice(0, 12).join("\n")}`;
     }
     return `Hay más de un cruce. No elijas uno.\n${pares
       .slice(0, 8)
@@ -717,9 +879,51 @@ function parGuardado(
 
 export function horariosOmitidos(respuesta: string, guardados: string): string {
   const dichos = new Set(lineasHorario(respuesta).map(claveHorario));
-  return lineasHorario(guardados)
-    .filter((linea) => !dichos.has(claveHorario(linea)))
-    .join("\n");
+  // Si la respuesta ya armó el listado legible, no reinyectar.
+  if (/siguientes turnos libres|tengo estos turnos|horarios libres:/i.test(respuesta)) return "";
+  const faltan = lineasHorario(guardados).filter((linea) => !dichos.has(claveHorario(linea)));
+  if (!faltan.length) return "";
+  return formatearHorariosAgrupados(faltan);
+}
+
+/** Lista legible agrupada por día, para WhatsApp. */
+export function formatearHorariosAgrupados(lineas: string[]): string {
+  const slots: { claveDia: string; etiqueta: string; hora: string }[] = [];
+  for (const linea of lineas) {
+    const m = linea.match(/\((\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::\d{2})?\)/);
+    if (!m) continue;
+    const [, y, mes, dia, hh, mm] = m;
+    const claveDia = `${y}-${mes}-${dia}`;
+    const cuando = new Date(`${claveDia}T12:00:00-03:00`);
+    const weekday = new Intl.DateTimeFormat("es-AR", {
+      weekday: "long",
+      timeZone: "America/Argentina/Buenos_Aires",
+    }).format(cuando);
+    const mesNombre = new Intl.DateTimeFormat("es-AR", {
+      month: "long",
+      timeZone: "America/Argentina/Buenos_Aires",
+    }).format(cuando);
+    const etiqueta = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dia} de ${mesNombre}`;
+    slots.push({ claveDia, etiqueta, hora: `${hh}:${mm}` });
+  }
+  if (!slots.length) return "";
+  const bloques: string[] = ["Tengo los siguientes turnos libres:"];
+  let diaActual = "";
+  for (const slot of slots) {
+    if (slot.claveDia !== diaActual) {
+      diaActual = slot.claveDia;
+      bloques.push("", slot.etiqueta);
+    }
+    bloques.push(`- ${slot.hora}`);
+  }
+  return bloques.join("\n");
+}
+
+function textoConHorarios(persona: string, aviso: string, lineas: string[]): string {
+  // Solo texto legible acá. Las fechas exactas viven en SalidaAccion.horarios.
+  const humano = formatearHorariosAgrupados(lineas);
+  const cuerpo = humano || lineas.join("\n");
+  return [persona, aviso, cuerpo].filter(Boolean).join("\n");
 }
 
 async function turnosLibres(
@@ -734,10 +938,15 @@ async function turnosLibres(
   const par = guardado ?? parDeConsulta(config, textoNombre, ctx.textoPersona ?? "");
   if (typeof par === "string") {
     if (par.startsWith("Falta el profesional")) {
-      return solo(`${par}\n${profesionalesDePrestacion(config, consulta)}`);
+      const sugeridos = profesionalesDePrestacion(config, consulta);
+      // Si no mencionó un tratamiento, no mezclar "sin prestación" con "sin profesional".
+      if (sugeridos.startsWith("No hay una prestación")) return solo(par);
+      return solo(`${par}\n${sugeridos}`);
     }
     if (par.startsWith("Falta el tratamiento") || par.startsWith("Ese profesional no hace")) {
-      return solo(`${par}\n${tratamientosDeProfesional(config, consulta)}`);
+      const lista = tratamientosDeProfesional(config, consulta);
+      if (lista.startsWith("Estos son los tratamientos")) return solo(lista);
+      return solo(`${par}\n${lista}`);
     }
     return solo(par);
   }
@@ -746,7 +955,7 @@ async function turnosLibres(
     return solo(`${par.profesional.nombre} figura en ${par.profesional.sede}. Por este canal los turnos libres son los de CABA.`);
   }
   const dni = dniDicho(consulta, ctx.dni || "");
-  const pareja = `${par.profesional.nombre} — ${par.prestacion.nombre || par.codigo}`;
+  const pareja = `${par.profesional.nombre} — ${par.prestacion.nombre || par.codigo} (${par.codigo})`;
   if (!dni) {
     return solo(`Falta el DNI del paciente para ver si ya está en INECO.\n${pareja}`);
   }
@@ -758,7 +967,11 @@ async function turnosLibres(
     const lista = previas.join("\n");
     return {
       texto: lista
-        ? `${persona.texto}\nAntes de estas fechas no hay otros turnos libres. Estos son los que ya tenía:\n${lista}`
+        ? textoConHorarios(
+            persona.texto,
+            "Antes de estas fechas no hay otros turnos libres. Estos son los que ya tenía:",
+            previas,
+          )
         : `${persona.texto}\nAntes de estas fechas no hay turnos libres de ${pareja}.`,
       hastaDia: desde,
       busqueda,
@@ -769,7 +982,13 @@ async function turnosLibres(
   if (desde >= TOPE_DIAS) {
     const lista = previas.join("\n");
     return {
-      texto: `${persona.texto}\nYa busqué hasta el ${fechaBa(TOPE_DIAS - 1)}.${lista ? ` Siguen estos horarios:\n${lista}` : ` No hay turnos libres de ${pareja}.`}`,
+      texto: lista
+        ? textoConHorarios(
+            persona.texto,
+            `Ya busqué hasta el ${fechaBa(TOPE_DIAS - 1)}. Siguen estos horarios:`,
+            previas,
+          )
+        : `${persona.texto}\nYa busqué hasta el ${fechaBa(TOPE_DIAS - 1)}. No hay turnos libres de ${pareja}.`,
       hastaDia: desde,
       busqueda,
       horarios: lista,
@@ -800,10 +1019,10 @@ async function turnosLibres(
   const aviso = !nuevos.length
     ? `No hay horarios nuevos ${periodo}. Siguen los que ya tenía:`
     : previas.length
-      ? `Sumé horarios más adelante y siguen los anteriores:`
-      : `${pareja}:`;
+      ? "Sumé horarios más adelante y siguen los anteriores:"
+      : `Con ${par.profesional.nombre} — ${par.prestacion.nombre || par.codigo}:`;
   return {
-    texto: `${persona.texto}\n${aviso}\n${lista}`,
+    texto: textoConHorarios(persona.texto, aviso, juntos),
     hastaDia: hasta,
     busqueda,
     horarios: lista,
@@ -815,7 +1034,10 @@ function lineasHorario(texto: string): string[] {
   return texto
     .split("\n")
     .map((linea) => linea.trim())
-    .filter((linea) => /\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(linea));
+    .filter((linea) => /\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(linea))
+    .filter((linea) => !/^ClavesISO:/i.test(linea))
+    // Solo slots completos, no una fecha suelta entre paréntesis.
+    .filter((linea) => !/^\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?\)\s*$/.test(linea));
 }
 
 function claveHorario(linea: string): string {
@@ -856,10 +1078,13 @@ export function horarioOfrecido(consulta: string, previo: string): boolean {
 
 export function textoOpcionInvalida(texto: string, previo: string): string {
   if (!previo.trim() || pideMasFechas(texto) || pideMasTemprano(texto)) return "";
-  const opciones = previo
-    .split("\n")
-    .map((linea) => linea.trim())
-    .filter((linea) => linea.includes("—") || /\(\d{4}-\d{2}-\d{2}/.test(linea));
+  const horarios = lineasHorario(previo);
+  const opciones = horarios.length
+    ? horarios
+    : previo
+        .split("\n")
+        .map((linea) => linea.trim())
+        .filter((linea) => linea.includes("—") || /\(\d{4}-\d{2}-\d{2}/.test(linea));
   if (opciones.length < 2) return "";
   const t = sinTildes(texto);
   if (/\bprimer[ao]?\b|\bsegund[ao]\b|\btercer[ao]?\b|\bcuart[ao]\b|\bquint[ao]\b/.test(t)) return "";
@@ -870,7 +1095,8 @@ export function textoOpcionInvalida(texto: string, previo: string): string {
     return tokens(linea).some((token) => token.length >= 4 && t.includes(token));
   });
   if (valida) return "";
-  return `Esa opción no está entre las que te pasé.\n${opciones.join("\n")}`;
+  const lista = horarios.length ? formatearHorariosAgrupados(horarios) : opciones.join("\n");
+  return `Esa opción no está entre las que te pasé.\n${lista}`;
 }
 
 async function reservarTurno(
@@ -879,7 +1105,9 @@ async function reservarTurno(
   ctx: ContextoAccion,
 ): Promise<SalidaAccion> {
   if (!config) return solo("No hay listas de profesionales ni prestaciones cargadas.");
-  const par = parDeConsulta(config, consulta);
+  // Si recién listamos libres, la pareja profesional|tratamiento ya está en busqueda.
+  const guardado = ctx.busqueda ? parGuardado(config, ctx.busqueda) : null;
+  const par = guardado ?? parDeConsulta(config, consulta);
   if (typeof par === "string") return solo(par);
   const cuando = horaPedida(consulta);
   if (!cuando) return solo("Falta el horario elegido. Primero hay que listar los turnos libres y que la persona elija uno.");
@@ -920,7 +1148,8 @@ async function reservarTurno(
     },
   });
   if (data && typeof data === "object" && (data as { Resultado?: string }).Resultado === "ERROR") {
-    return { texto: detalle(data) || "Medexis no pudo dar el turno.", ficha: persona.ficha };
+    // No devolvemos el detalle técnico de Medexis (precio cero, códigos, etc.).
+    return { texto: "No pude dar el turno. El sistema no pudo registrarlo.", ficha: persona.ficha };
   }
   return {
     texto: `Turno dado: ${par.profesional.nombre}, ${par.prestacion.nombre || par.codigo}, ${cuando}.`,
@@ -966,7 +1195,7 @@ async function cancelarTurno(
     query: { Fecha: cuando.slice(0, 10), PrestadorDocumento: String(profesional.doc) },
   });
   if (data && typeof data === "object" && (data as { Resultado?: string }).Resultado === "ERROR") {
-    return detalle(data) || "Medexis no devolvió el turno a cancelar.";
+    return "No pude cancelar el turno. El sistema no pudo registrarlo.";
   }
   const fila = filasTurno(data).find((row) => {
     const documento = String(row.PersonaDocumento || row.personaDocumento || "").replace(/\D/g, "");
@@ -987,12 +1216,11 @@ async function cancelarTurno(
         Sede: sede,
       },
     });
-  } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "";
-    return mensaje || "No pude cancelar el turno.";
+  } catch {
+    return "No pude cancelar el turno. El sistema no pudo registrarlo.";
   }
   if (anulado && typeof anulado === "object" && (anulado as { Resultado?: string }).Resultado === "ERROR") {
-    return detalle(anulado) || "No pude cancelar el turno.";
+    return "No pude cancelar el turno. El sistema no pudo registrarlo.";
   }
   return `Turno cancelado: ${profesional.nombre}, ${cuandoFila}.`;
 }

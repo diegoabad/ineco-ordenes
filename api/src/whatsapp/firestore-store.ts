@@ -99,6 +99,7 @@ function menuPasoDe(raw: unknown): MenuPaso | null {
   const paso = String(raw ?? "");
   const validos: MenuPaso[] = [
     "sede",
+    "algoMas",
     "menu",
     "turnos",
     "info",

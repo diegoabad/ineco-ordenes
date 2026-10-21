@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { createTtlCache } from "../lib/ttl-cache.js";
 
 const CONFIG_DOC = doc(firestore, "ordenes_config", "whatsapp_bot_config");
 
@@ -9,6 +10,8 @@ export type WhatsappBotConfigDoc = {
   json: string;
   updatedAt: string;
 };
+
+const botConfigCache = createTtlCache<WhatsappBotConfigDoc | null>(10 * 60_000);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -33,20 +36,30 @@ function parseJsonObject(text: string): Record<string, unknown> {
 }
 
 export async function getWhatsappBotConfig(): Promise<WhatsappBotConfigDoc | null> {
+  const cached = botConfigCache.get();
+  if (cached !== undefined) return cached;
   const snap = await getDoc(CONFIG_DOC);
-  if (!snap.exists()) return null;
+  if (!snap.exists()) {
+    botConfigCache.set(null);
+    return null;
+  }
   const raw = snap.data() as Record<string, unknown>;
 
   // Preferir el string: mantiene el orden de secciones/claves.
   if (typeof raw.json === "string" && raw.json.trim()) {
     try {
       const data = parseJsonObject(raw.json);
-      if (Object.keys(data).length === 0) return null;
-      return {
+      if (Object.keys(data).length === 0) {
+        botConfigCache.set(null);
+        return null;
+      }
+      const docValue = {
         data,
         json: raw.json,
         updatedAt: String(raw.updatedAt ?? ""),
       };
+      botConfigCache.set(docValue);
+      return docValue;
     } catch {
       /* fallback a data map */
     }
@@ -57,13 +70,41 @@ export async function getWhatsappBotConfig(): Promise<WhatsappBotConfigDoc | nul
     : isPlainObject(raw)
       ? stripMeta(raw)
       : null;
-  if (!data || Object.keys(data).length === 0) return null;
-  return {
+  if (!data || Object.keys(data).length === 0) {
+    botConfigCache.set(null);
+    return null;
+  }
+  const docValue = {
     data,
     json: JSON.stringify(data, null, 2),
     updatedAt: String(raw.updatedAt ?? ""),
   };
+  botConfigCache.set(docValue);
+  return docValue;
 }
+
+/**
+ * Si el bot puede buscar profesionales, horarios libres y reservar turnos.
+ * Default: true (comportamiento actual). Se lee de `turnos.darTurnos` o `darTurnos`.
+ */
+export function botDaTurnos(bot: Record<string, unknown> | null | undefined): boolean {
+  const seccion =
+    bot?.turnos && typeof bot.turnos === "object" && !Array.isArray(bot.turnos)
+      ? (bot.turnos as Record<string, unknown>)
+      : {};
+  const raw = seccion.darTurnos ?? bot?.darTurnos;
+  if (raw === false || raw === 0 || raw === "0" || raw === "no" || raw === "false") return false;
+  if (raw === true || raw === 1 || raw === "1" || raw === "si" || raw === "sí" || raw === "true") {
+    return true;
+  }
+  return true;
+}
+
+export const TEXTO_TURNO_SIN_ASIGNAR =
+  "Por este canal no puedo asignarte el turno ahora: lo va a dar una persona del equipo lo antes posible. Mientras tanto te voy a pedir unos datos para que sea más rápido.";
+
+export const TEXTO_TURNO_DATOS_LISTOS =
+  "Listo, con estos datos alguien del equipo te va a asignar el turno lo antes posible.";
 
 export async function saveWhatsappBotConfig(input: {
   data?: Record<string, unknown>;
@@ -100,5 +141,7 @@ export async function saveWhatsappBotConfig(input: {
     },
     { merge: false },
   );
-  return { data, json, updatedAt };
+  const docValue = { data, json, updatedAt };
+  botConfigCache.set(docValue);
+  return docValue;
 }

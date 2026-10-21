@@ -19,8 +19,35 @@ const EXAMPLE_JSON = `{
   "saludo": "Hola, ¿en qué te puedo ayudar?",
   "activo": true,
   "sedePorDefecto": "INECO",
-  "maxReintentos": 2
+  "maxReintentos": 2,
+  "turnos": {
+    "darTurnos": true
+  }
 }`;
+
+function leerDarTurnos(config: Record<string, unknown> | null): boolean {
+  if (!config) return true;
+  const seccion =
+    config.turnos && typeof config.turnos === "object" && !Array.isArray(config.turnos)
+      ? (config.turnos as Record<string, unknown>)
+      : {};
+  const raw = seccion.darTurnos ?? config.darTurnos;
+  if (raw === false || raw === 0 || raw === "0" || raw === "no" || raw === "false") return false;
+  return true;
+}
+
+function conDarTurnos(
+  config: Record<string, unknown> | null,
+  darTurnos: boolean,
+): Record<string, unknown> {
+  const base = { ...(config ?? {}) };
+  const prev =
+    base.turnos && typeof base.turnos === "object" && !Array.isArray(base.turnos)
+      ? (base.turnos as Record<string, unknown>)
+      : {};
+  base.turnos = { ...prev, darTurnos };
+  return base;
+}
 
 function formatSavedAt(iso: string): string {
   const d = new Date(iso);
@@ -177,6 +204,33 @@ export function WhatsAppConfigPanel({ openJsonRef, onStatusChange }: Props) {
       ) : null}
 
       <div className="wa-config-panel__body">
+        <section className="wa-config-panel__turnos">
+          <h3 className="wa-config-panel__turnos-title">Turnos</h3>
+          <p className="wa-config-panel__hint">
+            Aplica al bot de IA y al bot de menú. Si está en No, puede ver/cancelar turnos
+            existentes y tomar datos, pero el turno lo asigna un operador.
+          </p>
+          <label className={`wa-motor-toggle${leerDarTurnos(config) ? " is-on" : ""}`}>
+            <span className="wa-motor-toggle__label">Dar turnos (buscar profesionales, horarios y reservar)</span>
+            <span className="wa-motor-toggle__control">
+              <input
+                type="checkbox"
+                checked={leerDarTurnos(config)}
+                disabled={saving}
+                onChange={(e) => {
+                  const next = conDarTurnos(config, e.target.checked);
+                  setConfig(next);
+                  void persistConfig(next, e.target.checked ? "Dar turnos activado" : "Dar turnos desactivado");
+                }}
+              />
+              <span className="wa-motor-toggle__track" aria-hidden>
+                <span className="wa-motor-toggle__thumb" />
+              </span>
+              <span className="wa-motor-toggle__state">{leerDarTurnos(config) ? "Sí" : "No"}</span>
+            </span>
+          </label>
+        </section>
+
         {hasConfig ? (
           <JsonDynamicForm value={config} onChange={onConfigChange} />
         ) : (

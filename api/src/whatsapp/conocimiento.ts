@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { createTtlCache } from "../lib/ttl-cache.js";
 
 const CONFIG_DOC = doc(firestore, "ordenes_config", "whatsapp_conocimiento");
 
@@ -10,14 +11,24 @@ export type WhatsappConocimientoDoc = {
   updatedAt: string;
 };
 
+const conocimientoCache = createTtlCache<WhatsappConocimientoDoc>(10 * 60_000);
+
 export async function getWhatsappConocimiento(): Promise<WhatsappConocimientoDoc> {
+  const cached = conocimientoCache.get();
+  if (cached !== undefined) return cached;
   const snap = await getDoc(CONFIG_DOC);
-  if (!snap.exists()) return { text: "", updatedAt: "" };
+  if (!snap.exists()) {
+    const empty = { text: "", updatedAt: "" };
+    conocimientoCache.set(empty);
+    return empty;
+  }
   const raw = snap.data() as Record<string, unknown>;
-  return {
+  const value = {
     text: typeof raw.text === "string" ? raw.text : "",
     updatedAt: String(raw.updatedAt ?? ""),
   };
+  conocimientoCache.set(value);
+  return value;
 }
 
 export async function saveWhatsappConocimiento(
@@ -29,5 +40,7 @@ export async function saveWhatsappConocimiento(
   }
   const updatedAt = new Date().toISOString();
   await setDoc(CONFIG_DOC, { text: value, updatedAt }, { merge: false });
-  return { text: value, updatedAt };
+  const docValue = { text: value, updatedAt };
+  conocimientoCache.set(docValue);
+  return docValue;
 }

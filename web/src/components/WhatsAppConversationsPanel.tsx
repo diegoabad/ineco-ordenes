@@ -948,6 +948,22 @@ export function WhatsAppConversationsPanel({
 
   useEffect(() => {
     if (!pruebaMode || !selectedId) return;
+
+    const outboundDesdeEspera = (item: (typeof messages)[number]) => {
+      if (item.direction !== "OUTBOUND" || item.isDeleted) return false;
+      const desde = esperaDesdeRef.current;
+      if (desde == null) return false;
+      const at = Date.parse(item.createdAt ?? "");
+      return Number.isFinite(at) && at >= desde - 2000;
+    };
+
+    const cortarEsperaTyping = () => {
+      waitingReplyRef.current = false;
+      typingAtRef.current = null;
+      esperaDesdeRef.current = null;
+      if (!pumpingRef.current && colaRef.current.length === 0) setBotTyping(false);
+    };
+
     if (abrirRef.current === selectedId) {
       if (messages.some((item) => item.conversationId !== selectedId)) return;
       if (loadingMessages) {
@@ -955,21 +971,37 @@ export function WhatsAppConversationsPanel({
         return;
       }
       if (!vioCargaRef.current) return;
-      for (const item of messages) vistosRef.current.add(item.id);
+      // No marcar como "ya vistos" los outbound de la espera actual: si no, el typing queda pegado.
+      for (const item of messages) {
+        if (waitingReplyRef.current && outboundDesdeEspera(item)) continue;
+        vistosRef.current.add(item.id);
+      }
       abrirRef.current = null;
-      return;
+      // Seguir: puede haber respuesta del bot llegada durante la carga inicial.
     }
+
     const nuevos = messages.filter(
       (item) => item.direction === "OUTBOUND" && !item.isDeleted && !vistosRef.current.has(item.id),
     );
-    if (!nuevos.length) return;
+    if (!nuevos.length) {
+      if (waitingReplyRef.current && messages.some(outboundDesdeEspera)) {
+        cortarEsperaTyping();
+      }
+      return;
+    }
     for (const item of nuevos) vistosRef.current.add(item.id);
     waitingReplyRef.current = false;
     typingAtRef.current = null;
+    esperaDesdeRef.current = null;
 
     const reciente = ultimoBotRef.current > 0 && Date.now() - ultimoBotRef.current < 4000;
+    // Si ya hay cola en curso, sumar todos los nuevos; si no, el primero se muestra ya.
     const encolar =
-      reciente && colaRef.current.length === 0 ? nuevos.map((item) => item.id) : nuevos.slice(1).map((item) => item.id);
+      pumpingRef.current || colaRef.current.length > 0
+        ? nuevos.map((item) => item.id)
+        : reciente && colaRef.current.length === 0
+          ? nuevos.map((item) => item.id)
+          : nuevos.slice(1).map((item) => item.id);
     if (!encolar.length) {
       ultimoBotRef.current = Date.now();
       setBotTyping(false);
@@ -999,11 +1031,13 @@ export function WhatsAppConversationsPanel({
         colaRef.current = colaRef.current.slice(1);
         setOcultos([...colaRef.current]);
         ultimoBotRef.current = Date.now();
-        setBotTyping(false);
         if (!colaRef.current.length) {
           pumpingRef.current = false;
+          setBotTyping(false);
           return;
         }
+        // Entre globos: seguir mostrando "escribiendo" hasta el próximo.
+        setBotTyping(true);
         const gap = window.setTimeout(() => programarSiguiente(), 400);
         typingTimersRef.current.push(gap);
       }, 1100);

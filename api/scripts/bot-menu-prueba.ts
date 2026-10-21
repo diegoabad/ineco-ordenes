@@ -49,14 +49,20 @@ const conocimiento = `## Sedes
 ### CABA
 Marcelo Torcuato de Alvear 1632, Recoleta. Teléfono 0810-266-4203.
 
-### Ramos Mejía
-Teléfono (011) 5199-5600. WhatsApp 11 5035-4568.
+### Gran Buenos Aires — Zona Oeste
+
+**INECO Ramos Mejía (INDELO — Neurociencias del Oeste)**
+- Castelli 86, esquina Moreno, Ramos Mejía (partido de La Matanza).
+- Tel: (011) 5199-5600 · WhatsApp: 11 5035-4568.
+- Email: ramos@ineco.org.ar
+
+**INECO Moreno**
+- 12 de Octubre 1097, Moreno.
+- Tel: (011) 5199-5600 · WhatsApp: 11 4070-5558.
+- Email: moreno@ineco.org.ar
 
 ### Quilmes
 Calle Quilmes 45. WhatsApp 11 2555-1020.
-
-### Moreno
-Dirección Moreno 10. Teléfono 4444-5555.
 
 ### Pilar
 Dirección Pilar 20. Teléfono 6666-7777.
@@ -302,9 +308,32 @@ async function main(): Promise<void> {
   await caso(["P14", "R16"], "Sede Ramos Mejía (no CABA)", async () => {
     const s = await sesion("P14");
     await s.decir("2");
-    esperar("datos Ramos", /5199-5600|5035-4568/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 180));
+    const ramos = ultimo(s.messages);
+    esperar("datos Ramos", /5199-5600|5035-4568/.test(ramos), ramos.slice(0, 180));
+    esperar("solo Ramos, no Moreno sede", /Ramos Mej[ií]a/.test(ramos) && !/12 de Octubre|4070-5558|moreno@ineco/.test(ramos), ramos.slice(0, 280));
     esperar("etiqueta Ramos", nombres(s.conversation.tagIds).includes("Ramos Mejía") && !nombres(s.conversation.tagIds).includes("CABA"), nombres(s.conversation.tagIds));
-    esperar("sigue lista sedes", /CABA/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 100));
+    esperar("pregunta algo más", /Te puedo ayudar en algo más/i.test(ramos), ramos.slice(0, 200));
+    esperar("no repite lista completa", !/¿Para qué sucursal/.test(ramos), ramos.slice(0, 160));
+    await s.decir("1");
+    esperar("ofrece CABA o otra", /Continuar con CABA|Ver otra sucursal/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    await s.decir("1");
+    esperar("pasa a menú CABA", /Desde acá puedo ayudarte|Turnos|Información/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    esperar("etiqueta CABA", nombres(s.conversation.tagIds).includes("CABA") && !nombres(s.conversation.tagIds).includes("Ramos Mejía"), nombres(s.conversation.tagIds));
+  });
+
+  await caso(["P14b"], "Sede no CABA → ver otra sucursal", async () => {
+    const s = await sesion("P14b");
+    await s.decir("2");
+    await s.decir("1");
+    await s.decir("2");
+    esperar("vuelve lista sedes", /¿Para qué sucursal/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
+  });
+
+  await caso(["P14c"], "Sede no CABA → no, gracias", async () => {
+    const s = await sesion("P14c");
+    await s.decir("2");
+    await s.decir("2");
+    esperar("cierra amable", /disposición|escribime/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
   });
 
   await caso(["P15"], "Quilmes: datos de la sede", async () => {
@@ -313,8 +342,13 @@ async function main(): Promise<void> {
     await s.decir("2");
     await s.decir("1");
     await s.decir("3");
-    esperar("datos Quilmes", /Quilmes 45|2555-1020/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 180));
+    const quilmes = ultimo(s.messages);
+    esperar("datos Quilmes", /Quilmes 45|2555-1020/.test(quilmes), quilmes.slice(0, 180));
+    esperar("pregunta algo más", /Te puedo ayudar en algo más/i.test(quilmes), quilmes.slice(0, 200));
     esperar("etiqueta Quilmes", nombres(s.conversation.tagIds).includes("Quilmes"), nombres(s.conversation.tagIds));
+    await s.decir("1");
+    await s.decir("1");
+    esperar("menú acciones CABA", /Turnos|Información|Tratamientos|Quejas/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
   });
 
   await caso(["P16"], "Corrige de CABA a Rosario (última sede gana)", async () => {
@@ -330,7 +364,9 @@ async function main(): Promise<void> {
   await caso(["P18"], "Moreno desde la lista de sedes", async () => {
     const s = await sesion("P18");
     await s.decir("5");
-    esperar("datos Moreno", /Moreno 10|4444-5555/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    const moreno = ultimo(s.messages);
+    esperar("datos Moreno", /12 de Octubre|4070-5558|moreno@ineco/.test(moreno), moreno.slice(0, 180));
+    esperar("solo Moreno, no Ramos sede", /Moreno/.test(moreno) && !/5035-4568|ramos@ineco|Castelli 86/.test(moreno), moreno.slice(0, 280));
     esperar("etiqueta Moreno", nombres(s.conversation.tagIds).includes("Moreno"), nombres(s.conversation.tagIds));
   });
 
@@ -371,7 +407,9 @@ async function main(): Promise<void> {
     await irACaba(s);
     await s.decir("1");
     await s.decir("1");
-    esperar("pide DNI", /DNI/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
+    const dniMsg = ultimo(s.messages);
+    esperar("pide DNI", /DNI/i.test(dniMsg) && /sin puntos ni espacios/i.test(dniMsg), dniMsg.slice(0, 160));
+    esperar("volver en la misma frase", /tocá 0 para volver/i.test(dniMsg) && !/00\.\s*Cancelar/i.test(dniMsg), dniMsg.slice(0, 180));
     esperar("Pedido de turno + CABA", nombres(s.conversation.tagIds).includes("Pedido de turno") && nombres(s.conversation.tagIds).includes("CABA"), nombres(s.conversation.tagIds));
   });
 
@@ -384,13 +422,17 @@ async function main(): Promise<void> {
     await s.decir("Martín");
     esperar("pide apellido", /apellido/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 100));
     await s.decir("Pereyra");
-    esperar("pide sexo", /femenino|masculino/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 100));
-    await s.decir("2");
+    // Martín ⇒ masculino inferido; no pregunta sexo.
     esperar("pide email", /email/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 100));
+    esperar("sexo inferido", s.conversation.menuEstado?.sexo === "masculino", String(s.conversation.menuEstado?.sexo));
     await s.decir("mail-malo");
     esperar("email inválido", /email no es válido/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
     await s.decir("martin@ineco.test");
-    esperar("pide profesional", /profesional/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
+    esperar(
+      "pide profesional",
+      /médico en particular|indistinto/i.test(ultimo(s.messages)),
+      ultimo(s.messages).slice(0, 160),
+    );
     esperar(
       "ficha junta",
       s.conversation.menuEstado?.nombre === "Martín" &&
@@ -407,9 +449,9 @@ async function main(): Promise<void> {
     await s.decir("1");
     await s.decir("3");
     await s.decir("asdf");
-    esperar("letras no", /no parece un documento/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
+    esperar("letras no", /no parece un dni/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 140));
     await s.decir("1234");
-    esperar("muy corto no", /no parece un documento/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 120));
+    esperar("muy corto no", /no parece un dni/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 140));
     await s.decir("20.111.222");
     esperar("con puntos sí", /confirmar|sí o no|Elegí el turno|anular/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
   });
@@ -445,7 +487,11 @@ async function main(): Promise<void> {
     await s.decir("1");
     await s.decir("22222222");
     await s.decir("Fulano Inventado XYZ");
-    esperar("no hay profesional", /no hay un profesional habilitado/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    esperar(
+      "no hay profesional",
+      /no hay un profesional habilitado|no encontré ese nombre/i.test(ultimo(s.messages)),
+      ultimo(s.messages).slice(0, 160),
+    );
   });
 
   await caso(["AC01", "AC04"], "Varios con el apellido y confirmar Buscás a", async () => {
@@ -467,7 +513,11 @@ async function main(): Promise<void> {
     await s.decir("1");
     await s.decir("22222222");
     await s.decir("Marcelo");
-    esperar("Buscás a", /Buscás a CETKOVICH/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    esperar(
+      "confirma Cetkovich",
+      /Buscás a CETKOVICH|te referís a CETKOVICH/i.test(ultimo(s.messages)),
+      ultimo(s.messages).slice(0, 160),
+    );
     await s.decir("sí");
     esperar("tratamientos", /tratamientos de|CONSULTA PSIQUIATRIA/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 200));
   });
@@ -481,9 +531,53 @@ async function main(): Promise<void> {
     await s.decir("Marcelo");
     await s.decir("sí");
     await s.decir("1");
-    esperar("horarios", /horarios libres|presencial|virtual/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 220));
+    esperar(
+      "horarios",
+      /horarios libres|turnos libres|presencial|virtual|\d{1,2}:\d{2}/i.test(ultimo(s.messages)),
+      ultimo(s.messages).slice(0, 220),
+    );
     await s.decir("1");
     esperar("turno dado", /Turno dado/i.test(todos(s.messages)), todos(s.messages).slice(-160));
+  });
+
+  await caso(["W04err"], "Reserva falla: mensaje amigable + menú turnos", async () => {
+    const s = await sesion("W04err", {
+      async accion(clave, consulta = "") {
+        if (clave === "turnos.listarTratamientos") {
+          if (/cetkovich/i.test(consulta) && !/marcelo|gustavo/i.test(consulta)) {
+            return { texto: "Buscás a CETKOVICH MARCELO GUSTAVO." };
+          }
+          return {
+            texto: "Estos son los tratamientos de CETKOVICH MARCELO GUSTAVO:\nCONSULTA PSIQUIATRIA INECO (09001)",
+          };
+        }
+        if (clave === "turnos.libres") {
+          return {
+            texto: "Horarios libres",
+            horarios: "jue 3/12 11:00, presencial (2026-12-03 11:00:00)",
+            hastaDia: 20,
+            busqueda: "12719943|09001",
+          };
+        }
+        if (clave === "turnos.reservar") {
+          return { texto: "El codigo de prestacion no puede tener precio cero" };
+        }
+        return { texto: "ok" };
+      },
+    });
+    await irACaba(s);
+    await s.decir("1");
+    await s.decir("1");
+    await s.decir("22222222");
+    await s.decir("Cetkovich");
+    await s.decir("sí");
+    await s.decir("1");
+    await s.decir("1");
+    const t = ultimo(s.messages);
+    esperar("sin error técnico", !/precio cero|codigo de prestacion/i.test(t), t.slice(0, 200));
+    esperar("dijo que no pudo", /no pude darte ese turno|no pudo registrar/i.test(t), t.slice(0, 200));
+    esperar("menú turnos", /Sacar un turno|Ver mis turnos|Cancelar un turno/i.test(t), t.slice(0, 220));
+    esperar("paso turnos", s.conversation.menuEstado?.paso === "turnos", String(s.conversation.menuEstado?.paso));
   });
 
   await caso(["E08", "tratamientos"], "Lista de tratamientos + etiqueta", async () => {
@@ -495,7 +589,7 @@ async function main(): Promise<void> {
     esperar("etiqueta Psiquiatría", nombres(s.conversation.tagIds).includes("Psiquiatría"), nombres(s.conversation.tagIds));
   });
 
-  await caso(["nav"], "Opción inválida, volver y cancelar proceso", async () => {
+  await caso(["nav"], "Opción inválida y volver atrás cancela el flujo", async () => {
     const s = await sesion("nav");
     await s.decir("44");
     esperar("sede inválida", /no es válida/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 100));
@@ -506,9 +600,29 @@ async function main(): Promise<void> {
     await s.decir("1");
     await s.decir("33333333");
     await s.decir("0");
-    esperar("volver al DNI", /DNI/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 100));
-    await s.decir("00");
-    esperar("cancelar a menú", /Cancelé este proceso/i.test(ultimo(s.messages)) && /Turnos/.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 140));
+    esperar("0 cancela a turnos", /Listo, cancelé esto|Sacar un turno/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    esperar("sin cancelar proceso", !/Cancelé este proceso|00\./i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    await s.decir("0");
+    esperar("0 desde turnos al menú", /Turnos|Información|Tratamientos|Quejas/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+  });
+
+  await caso(["indistinto"], "Sin médico preferido: lista con indistinto", async () => {
+    const s = await sesion("indistinto", {
+      async accion(clave) {
+        if (clave === "turnos.listarProfesionales") {
+          return { texto: "CETKOVICH MARCELO GUSTAVO (12719943)\nBIANCHI VERÓNICA (29455053)" };
+        }
+        return { texto: "ok" };
+      },
+    });
+    await irACaba(s);
+    await s.decir("1");
+    await s.decir("1");
+    await s.decir("22222222");
+    await s.decir("indistinto");
+    const t = ultimo(s.messages);
+    esperar("lista médicos", /CETKOVICH|BIANCHI/i.test(t) && /Elegí un número/i.test(t), t.slice(0, 220));
+    esperar("pide profesional claro", /médico|indistinto/i.test(todos(s.messages)), todos(s.messages).slice(-300));
   });
 
   await caso(["Pilar"], "Pilar no CABA", async () => {
