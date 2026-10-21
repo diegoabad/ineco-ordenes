@@ -476,6 +476,19 @@ export function IconBuilding(p: IconProps) {
   );
 }
 
+/** Gestión profesional. */
+export function IconProfesional(p: IconProps) {
+  const s = base(p);
+  return (
+    <svg viewBox="0 0 24 24" {...s}>
+      <path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 19.5V21" />
+      <circle cx="10" cy="7.5" r="3.5" />
+      <path d="M18 8v6" />
+      <path d="M15 11h6" />
+    </svg>
+  );
+}
+
 /** Monitor / virtual. */
 export function IconMonitor(p: IconProps) {
   const s = base(p);

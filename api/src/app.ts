@@ -11,6 +11,7 @@ import { requireAuth, requireModule } from "./middleware/auth.middleware.js";
 import { medexisProxy } from "./middleware/medexis.proxy.js";
 import authRoutes from "./routes/auth.routes.js";
 import buscaTurnoRoutes from "./routes/busca-turno.routes.js";
+import gestionProfesionalRoutes from "./routes/gestion-profesional.routes.js";
 import configRoutes from "./routes/config.routes.js";
 import inicioRoutes from "./routes/inicio.routes.js";
 import medicosRoutes from "./routes/medicos.routes.js";
@@ -167,6 +168,12 @@ app.use(
   requireAuth,
   requireModule("busca-turno"),
   buscaTurnoRoutes,
+);
+app.use(
+  "/api/gestion-profesional",
+  requireAuth,
+  requireModule("gestion-profesional"),
+  gestionProfesionalRoutes,
 );
 app.use(
   "/api/whatsapp-crm",

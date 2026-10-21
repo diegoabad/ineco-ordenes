@@ -17,6 +17,7 @@ type Tab = "approved" | "pending" | "dominios";
 const SELECTABLE_MODULE_OPTIONS: { id: AppModuleId; label: string }[] = [
   { id: "whatsapp", label: "WhatsApp" },
   { id: "busca-turno", label: "Busca turno" },
+  { id: "gestion-profesional", label: "Gestión profesional" },
   { id: "ordenes", label: "Órdenes" },
   { id: "presupuestos", label: "Presupuestos" },
   { id: "pami", label: "PAMI" },
@@ -618,8 +619,8 @@ export function UsuariosPanel() {
                 Sistemas
               </label>
               <p className="usuarios-modules-hint">
-                No abre una pantalla. Es el dueño de los pedidos: ve todos, cambia estados y el
-                número de pendientes.
+                No abre una pantalla. Es el dueño de los pedidos: ve todos y cambia estados. El
+                número de pendientes solo lo ve dabad.
               </p>
             </div>
             <div className="fl-modal__footer">

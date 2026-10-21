@@ -55,6 +55,7 @@ function parseApproveBody(body: unknown): ApproveUserInput {
           m === "presupuestos" ||
           m === "pami" ||
           m === "busca-turno" ||
+          m === "gestion-profesional" ||
           m === "whatsapp" ||
           m === "pedidos-sistema" ||
           m === "usuarios",

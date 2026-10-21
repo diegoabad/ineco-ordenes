@@ -23,7 +23,7 @@ import {
   calcPresupuestoTotales,
   normalizeRecargoExternoPorcentaje,
 } from "../lib/presupuestoTotales.js";
-import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, MotivoRechazoPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoColorFila, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
+import type { AppDb, Medico, MedicoInput, ModalidadPresupuesto, MotivoRechazoPresupuesto, Paciente, PacienteInput, EmailEnvio, EmailEnvioInput, Prestacion, PrestacionInput, Presupuesto, PresupuestoColorFila, PresupuestoCreateInput, PresupuestoEstado, PresupuestoItem, PresupuestoUpdateInput, PresupuestosConfig, ProfesionalPresupuesto, TipoPrestacion, BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional, BuscaTurnoPrestacionProf, BuscaTurnoRegla, GestionCatalogoProfesional, GestionCatalogoTratamiento, GestionCategoria, GestionDepartamento, GestionPrecioCategoria, GestionProfesionalAsignacion, GestionProfesionalConfig, GestionProfesionalVista, GestionTratamiento, PedidoSistema, PedidoSistemaCreateInput, PedidoSistemaEstado, PedidoSistemaFoto, PedidoSistemaPrioridad, PedidoSistemaSeccion, PedidoSistemaUpdateInput } from "../types.js";
 import {
   DEFAULT_MODALIDADES_PRESUPUESTO,
   DEFAULT_TIPOS_PRESTACION,
@@ -77,6 +77,7 @@ const PRESUPUESTO_EMAIL_CONFIG_DOC = "email";
 const PRESUPUESTO_PLANTILLA_CONFIG_DOC = "plantilla";
 const PRESUPUESTOS_CONFIG_DOC = "presupuestos";
 const BUSCA_TURNO_CONFIG_DOC = "busca_turno";
+const GESTION_PROFESIONAL_CONFIG_DOC = "gestion_profesional";
 const PEDIDOS_SISTEMA = "ordenes_pedidos_sistema";
 
 function nowIso(): string {
@@ -1649,6 +1650,32 @@ function normalizeBuscaTurnoPrestacion(raw: unknown): BuscaTurnoPrestacion | nul
   };
 }
 
+const BUSCA_TURNO_DURACIONES = new Set([15, 30, 45, 60, 75, 90, 105, 120]);
+
+function normalizeBuscaTurnoReglas(raw: unknown): BuscaTurnoRegla[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: BuscaTurnoRegla[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const profesionalDoc = String(o.profesionalDoc ?? "").trim();
+    const prestacionCodigo = String(o.prestacionCodigo ?? "").trim();
+    const modalidad =
+      o.modalidad === "VIRTUAL" || o.modalidad === "PRESENCIAL" || o.modalidad === "TODAS"
+        ? o.modalidad
+        : "";
+    const duracionMin = Number(o.duracionMin);
+    if (!profesionalDoc || !prestacionCodigo || !modalidad) continue;
+    if (!BUSCA_TURNO_DURACIONES.has(duracionMin)) continue;
+    const id = `${profesionalDoc}|${prestacionCodigo}|${modalidad}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, profesionalDoc, prestacionCodigo, modalidad, duracionMin });
+  }
+  return out;
+}
+
 function normalizeBuscaTurnoConfig(raw: Record<string, unknown>): BuscaTurnoConfig {
   const profesionales = Array.isArray(raw.profesionales)
     ? raw.profesionales.map(normalizeBuscaTurnoProf).filter((p): p is BuscaTurnoProfesional => !!p)
@@ -1673,6 +1700,7 @@ function normalizeBuscaTurnoConfig(raw: Record<string, unknown>): BuscaTurnoConf
     sedesCarga: sedes.length ? sedes : ["INECO"],
     profesionales,
     prestaciones,
+    reglas: normalizeBuscaTurnoReglas(raw.reglas),
   };
 }
 
@@ -1680,9 +1708,13 @@ function normalizeBuscaTurnoConfig(raw: Record<string, unknown>): BuscaTurnoConf
 const buscaTurnoCache = createTtlCache<BuscaTurnoConfig | null>(10 * 60_000);
 
 /** null si aún no hay config guardada. */
-export async function getBuscaTurnoConfig(): Promise<BuscaTurnoConfig | null> {
-  const cached = buscaTurnoCache.get();
-  if (cached !== undefined) return cached;
+export async function getBuscaTurnoConfig(options?: {
+  fresh?: boolean;
+}): Promise<BuscaTurnoConfig | null> {
+  if (!options?.fresh) {
+    const cached = buscaTurnoCache.get();
+    if (cached !== undefined) return cached;
+  }
   const snap = await getDoc(doc(firestore, CONFIG, BUSCA_TURNO_CONFIG_DOC));
   const value = snap.exists()
     ? normalizeBuscaTurnoConfig(snap.data() as Record<string, unknown>)
@@ -1709,6 +1741,208 @@ export async function saveBuscaTurnoConfig(
   await setDoc(doc(firestore, CONFIG, BUSCA_TURNO_CONFIG_DOC), normalized);
   buscaTurnoCache.set(normalized);
   return normalized;
+}
+
+function emptyGestionConfig(): GestionProfesionalConfig {
+  return {
+    updatedAt: "",
+    updatedBy: null,
+    departamentos: [],
+    categorias: [],
+    profesionales: [],
+    tratamientos: [],
+  };
+}
+
+function textoCorto(value: unknown, max: number): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+}
+
+function dineroONull(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function codigoDesdeNombre(nombre: string): string {
+  const limpio = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const palabras = limpio.split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return "AREA";
+  if (palabras.length === 1) return palabras[0]!.slice(0, 8).toUpperCase();
+  return palabras
+    .map((p) => p[0] ?? "")
+    .join("")
+    .slice(0, 8)
+    .toUpperCase();
+}
+
+function normalizeGestionConfig(raw: unknown): GestionProfesionalConfig {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const departamentos: GestionDepartamento[] = [];
+  const vistosDep = new Set<string>();
+  if (Array.isArray(o.departamentos)) {
+    if (o.departamentos.length > 80) throw new Error("Hay demasiados departamentos");
+    for (const item of o.departamentos) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const id = textoCorto(row.id, 80);
+      const nombre = textoCorto(row.nombre, 80);
+      if (!id || !nombre || vistosDep.has(id)) continue;
+      vistosDep.add(id);
+      const codigo = textoCorto(row.codigo, 12).toUpperCase() || codigoDesdeNombre(nombre);
+      const orden = Number(row.orden);
+      departamentos.push({
+        id,
+        nombre,
+        codigo,
+        orden: Number.isFinite(orden) ? orden : departamentos.length,
+      });
+    }
+  }
+  departamentos.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre, "es"));
+
+  const categorias: GestionCategoria[] = [];
+  const vistosCat = new Set<string>();
+  if (Array.isArray(o.categorias)) {
+    if (o.categorias.length > 24) throw new Error("Hay demasiadas categorías");
+    for (const item of o.categorias) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const id = textoCorto(row.id, 80);
+      const nombre = textoCorto(row.nombre, 80);
+      if (!id || !nombre || vistosCat.has(id)) continue;
+      vistosCat.add(id);
+      const orden = Number(row.orden);
+      categorias.push({
+        id,
+        nombre,
+        orden: Number.isFinite(orden) ? orden : categorias.length,
+      });
+    }
+  }
+  categorias.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre, "es"));
+
+  const profesionales: GestionProfesionalAsignacion[] = [];
+  const vistosDoc = new Set<string>();
+  if (Array.isArray(o.profesionales)) {
+    if (o.profesionales.length > 4000) throw new Error("Hay demasiados profesionales");
+    for (const item of o.profesionales) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const docId = textoCorto(row.doc, 40);
+      if (!docId || vistosDoc.has(docId)) continue;
+      const categoriaId = vistosCat.has(textoCorto(row.categoriaId, 80))
+        ? textoCorto(row.categoriaId, 80)
+        : "";
+      const departamentoId = vistosDep.has(textoCorto(row.departamentoId, 80))
+        ? textoCorto(row.departamentoId, 80)
+        : "";
+      const visible = row.visible === true;
+      if (!visible && !categoriaId && !departamentoId) continue;
+      vistosDoc.add(docId);
+      profesionales.push({ doc: docId, visible, categoriaId, departamentoId });
+    }
+  }
+
+  const tratamientos: GestionTratamiento[] = [];
+  const vistosCod = new Set<string>();
+  if (Array.isArray(o.tratamientos)) {
+    if (o.tratamientos.length > 4000) throw new Error("Hay demasiados tratamientos");
+    for (const item of o.tratamientos) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const codigo = textoCorto(row.codigo, 40);
+      if (!codigo || vistosCod.has(codigo)) continue;
+      const departamentoId = vistosDep.has(textoCorto(row.departamentoId, 80))
+        ? textoCorto(row.departamentoId, 80)
+        : "";
+      const precios: Record<string, GestionPrecioCategoria> = {};
+      const preciosRaw = row.precios;
+      if (preciosRaw && typeof preciosRaw === "object" && !Array.isArray(preciosRaw)) {
+        for (const [catId, value] of Object.entries(preciosRaw as Record<string, unknown>)) {
+          if (!vistosCat.has(catId) || !value || typeof value !== "object") continue;
+          const celda = value as Record<string, unknown>;
+          const una = dineroONull(celda.una);
+          const tres = dineroONull(celda.tres);
+          if (una == null && tres == null) continue;
+          precios[catId] = { una, tres };
+        }
+      }
+      const valorVenta = dineroONull(row.valorVenta);
+      const precioLista = dineroONull(row.precioLista);
+      if (!departamentoId && Object.keys(precios).length === 0 && valorVenta == null && precioLista == null) {
+        continue;
+      }
+      vistosCod.add(codigo);
+      tratamientos.push({ codigo, departamentoId, precios, valorVenta, precioLista });
+    }
+  }
+
+  return {
+    updatedAt: textoCorto(o.updatedAt, 40),
+    updatedBy: o.updatedBy != null ? textoCorto(o.updatedBy, 120) || null : null,
+    departamentos,
+    categorias,
+    profesionales,
+    tratamientos,
+  };
+}
+
+function catalogoGestion(
+  config: BuscaTurnoConfig | null,
+): GestionProfesionalVista["catalogo"] {
+  if (!config) return { profesionales: [], tratamientos: [] };
+  const profesionales: GestionCatalogoProfesional[] = [];
+  const vistos = new Set<string>();
+  for (const p of config.profesionales) {
+    const docId = p.doc.trim();
+    if (!docId || vistos.has(docId)) continue;
+    vistos.add(docId);
+    profesionales.push({
+      doc: docId,
+      nombre: p.nombre.trim() || docId,
+      sede: p.sede.trim(),
+      enabled: p.enabled !== false,
+    });
+  }
+  profesionales.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+
+  const tratamientos: GestionCatalogoTratamiento[] = Object.entries(config.prestaciones)
+    .map(([codigo, prest]) => ({
+      codigo: codigo.trim(),
+      nombre: prest.nombre.trim() || codigo.trim(),
+      duracion: prest.duracion,
+      enabled: prest.enabled !== false,
+    }))
+    .filter((t) => t.codigo);
+  tratamientos.sort((a, b) => a.codigo.localeCompare(b.codigo, "es", { numeric: true }));
+  return { profesionales, tratamientos };
+}
+
+export async function getGestionProfesional(): Promise<GestionProfesionalVista> {
+  const [snap, busca] = await Promise.all([
+    getDoc(doc(firestore, CONFIG, GESTION_PROFESIONAL_CONFIG_DOC)),
+    getBuscaTurnoConfig({ fresh: true }),
+  ]);
+  const config = snap.exists()
+    ? normalizeGestionConfig(snap.data())
+    : emptyGestionConfig();
+  return { config, catalogo: catalogoGestion(busca) };
+}
+
+export async function saveGestionProfesional(
+  input: unknown,
+  updatedBy: string | null,
+): Promise<GestionProfesionalConfig> {
+  const normalized = normalizeGestionConfig(input);
+  const saved: GestionProfesionalConfig = {
+    ...normalized,
+    updatedAt: nowIso(),
+    updatedBy,
+  };
+  await setDoc(doc(firestore, CONFIG, GESTION_PROFESIONAL_CONFIG_DOC), saved);
+  return saved;
 }
 
 function isPedidoSeccion(value: unknown): value is PedidoSistemaSeccion {

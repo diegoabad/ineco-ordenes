@@ -14,6 +14,7 @@ export async function saveBuscaTurnoConfig(payload) {
       sedesCarga: payload.sedesCarga?.length ? payload.sedesCarga : ["INECO"],
       profesionales: payload.profesionales,
       prestaciones: payload.prestaciones,
+      reglas: Array.isArray(payload.reglas) ? payload.reglas : [],
     }),
   });
   return res.data;

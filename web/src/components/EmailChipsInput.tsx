@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "react-toastify";
 import { isEmailAddress, joinEmails, parseEmailList } from "../lib/emails";
+import { cargarRemitentes, filtrarRemitentes, type RemitenteMail } from "../lib/remitentesMail";
 
 type Props = {
   id?: string;
@@ -21,7 +23,56 @@ export function EmailChipsInput({
 }: Props) {
   const emails = parseEmailList(value);
   const [draft, setDraft] = useState("");
+  const [remitentes, setRemitentes] = useState<RemitenteMail[]>([]);
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const [activo, setActivo] = useState(0);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const locked = disabled || readOnly;
+
+  useEffect(() => {
+    if (locked) return;
+    let vivo = true;
+    void cargarRemitentes()
+      .then((items) => {
+        if (vivo) setRemitentes(items);
+      })
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+  }, [locked]);
+
+  const sugerencias = useMemo(
+    () => (locked ? [] : filtrarRemitentes(draft, remitentes, emails)),
+    [locked, draft, remitentes, emails],
+  );
+  const mostrarMenu = menuAbierto && sugerencias.length > 0;
+  const indiceActivo = Math.min(activo, Math.max(sugerencias.length - 1, 0));
+
+  useLayoutEffect(() => {
+    if (!mostrarMenu) return;
+    function place() {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [mostrarMenu, draft, sugerencias.length]);
+
+  function elegir(item: RemitenteMail) {
+    const next = parseEmailList(joinEmails([...emails, item.email]));
+    onChange?.(joinEmails(next));
+    setDraft("");
+    setMenuAbierto(false);
+    setActivo(0);
+  }
 
   function commit(raw: string) {
     const tokens = parseEmailList(raw);
@@ -47,7 +98,7 @@ export function EmailChipsInput({
   }
 
   return (
-    <div className={`email-chips${locked ? " is-disabled" : ""}`}>
+    <div ref={rootRef} className={`email-chips${locked ? " is-disabled" : ""}`}>
       {emails.map((email) => (
         <span key={email.toLowerCase()} className="email-chips__chip">
           <span>{email}</span>
@@ -72,8 +123,15 @@ export function EmailChipsInput({
           value={draft}
           placeholder={emails.length === 0 ? placeholder : ""}
           disabled={disabled}
+          role="combobox"
+          aria-expanded={mostrarMenu}
+          aria-autocomplete="list"
+          aria-controls={mostrarMenu ? `${id ?? "email-chips"}-sugerencias` : undefined}
+          onFocus={() => setMenuAbierto(true)}
           onChange={(e) => {
             const next = e.target.value;
+            setMenuAbierto(true);
+            setActivo(0);
             if (/[\s,;]/.test(next)) {
               commit(next);
               return;
@@ -81,8 +139,27 @@ export function EmailChipsInput({
             setDraft(next);
           }}
           onKeyDown={(e) => {
+            if (mostrarMenu && e.key === "ArrowDown") {
+              e.preventDefault();
+              setActivo((i) => (i + 1) % sugerencias.length);
+              return;
+            }
+            if (mostrarMenu && e.key === "ArrowUp") {
+              e.preventDefault();
+              setActivo((i) => (i - 1 + sugerencias.length) % sugerencias.length);
+              return;
+            }
+            if (e.key === "Escape") {
+              setMenuAbierto(false);
+              return;
+            }
             if (e.key === "Enter") {
               e.preventDefault();
+              if (mostrarMenu) {
+                const item = sugerencias[indiceActivo];
+                if (item) elegir(item);
+                return;
+              }
               commit(draft);
               return;
             }
@@ -91,6 +168,7 @@ export function EmailChipsInput({
             }
           }}
           onBlur={() => {
+            setMenuAbierto(false);
             if (draft.trim()) commit(draft);
           }}
           onPaste={(e) => {
@@ -101,6 +179,38 @@ export function EmailChipsInput({
           }}
         />
       )}
+      {mostrarMenu && menuPos
+        ? createPortal(
+        <ul
+          id={`${id ?? "email-chips"}-sugerencias`}
+          className="email-chips__menu"
+          role="listbox"
+          style={{ top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+        >
+          {sugerencias.map((item, index) => (
+            <li key={item.email.toLowerCase()} role="presentation">
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === indiceActivo}
+                className={`email-chips__option${index === indiceActivo ? " is-active" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  elegir(item);
+                }}
+                onMouseEnter={() => setActivo(index)}
+              >
+                <span className="email-chips__option-mail">{item.email}</span>
+                {item.nombre ? (
+                  <span className="email-chips__option-nombre">{item.nombre}</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { IconX, IconBuilding, IconMonitor } from '../Icons';
+import { IconX, IconBuilding, IconMonitor, IconTrash } from '../Icons';
 import { apiPost, getPersona, createTurno, config } from './medexisApi';
 import { fetchBuscaTurnoConfig, saveBuscaTurnoConfig } from './buscaTurnoConfigApi';
 import SearchableSelect from './SearchableSelect';
@@ -58,6 +58,56 @@ const MODALIDADES = [
   { value: 'PRESENCIAL', label: 'Presencial' },
   { value: 'VIRTUAL', label: 'Virtual' },
 ];
+
+/** Las agendas pueden ir de 15, 30 o 45 min. Las duraciones del buscador saltan de 15 en 15. */
+const PASO_MIN = 15;
+const DURACIONES_MIN = [15, 30, 45, 60, 75, 90, 105, 120];
+const REGLA_MODALIDADES = [
+  { value: 'TODAS', label: 'Todas' },
+  { value: 'PRESENCIAL', label: 'Presencial' },
+  { value: 'VIRTUAL', label: 'Virtual' },
+];
+
+function modalidadReglaValida(value) {
+  return value === 'TODAS' || value === 'PRESENCIAL' || value === 'VIRTUAL';
+}
+
+function labelModalidadRegla(value) {
+  if (value === 'TODAS') return 'Todas';
+  if (value === 'VIRTUAL') return 'Virtual';
+  return 'Presencial';
+}
+
+function labelDuracion(min) {
+  const n = Number(min);
+  if (n === 120) return '120 min (2 h)';
+  return `${n} min`;
+}
+
+/** Una sola regla por profesional + prestación + modalidad. */
+function normalizeReglas(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    const profesionalDoc = String(raw.profesionalDoc || '').trim();
+    const prestacionCodigo = String(raw.prestacionCodigo || '').trim();
+    const modalidad = modalidadReglaValida(raw.modalidad) ? raw.modalidad : '';
+    const duracionMin = Number(raw.duracionMin);
+    if (!profesionalDoc || !prestacionCodigo || !modalidad) continue;
+    if (!DURACIONES_MIN.includes(duracionMin)) continue;
+    const id = `${profesionalDoc}|${prestacionCodigo}|${modalidad}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, profesionalDoc, prestacionCodigo, modalidad, duracionMin });
+  }
+  return out;
+}
+
+function reglaKey(doc, prestacion, modalidad) {
+  return `${String(doc)}|${String(prestacion)}|${modalidad}`;
+}
 
 /** Virtual = edificio "Video-Consulta Medexis" (sector vacío en la práctica). */
 function isSlotVirtual(edificio) {
@@ -184,11 +234,13 @@ async function resolveStoredConfig() {
       setCachedFull({
         profesionales: remote.profesionales,
         prestaciones: remote.prestaciones,
+        reglas: normalizeReglas(remote.reglas),
       });
       return {
         version: 2,
         profesionales: remote.profesionales,
         prestaciones: remote.prestaciones,
+        reglas: normalizeReglas(remote.reglas),
         sedesCarga: Array.isArray(remote.sedesCarga) ? remote.sedesCarga : undefined,
         _source: 'firebase',
       };
@@ -203,30 +255,46 @@ async function resolveStoredConfig() {
   return null;
 }
 
-/** Solo entran códigos devueltos por la API en esta carga (p. ej. sede actual). No arrastrar códigos de otra sede. */
-function mergePrestacionesFromFetch(prevPrestaciones, newMap, enabledDocs) {
-  const enabledSet = new Set(enabledDocs);
+/**
+ * Actualiza nombres y vínculos desde Medexis.
+ * El tilde de una prestación que ya estaba se conserva (borrador primero, después lo guardado).
+ * Las que Medexis no devolvió en esta pasada también se quedan, para que no reaparezcan tildadas.
+ * Solo en la primera carga, sin nada guardado, se usa la lista por defecto.
+ */
+function mergePrestacionesFromFetch(prevPrestaciones, newMap, enabledDocs, draftRows) {
+  const enabledSet = new Set((enabledDocs || []).map((d) => String(d)));
+  const draftEnabled = new Map(
+    (draftRows || []).map((r) => [String(r.codigo), !!r.enabled])
+  );
+  const prev = prevPrestaciones || {};
+  const primeraCarga = Object.keys(prev).length === 0 && draftEnabled.size === 0;
   const merged = {};
-  const allCods = Object.keys(newMap);
 
-  for (const cod of allCods) {
-    const prev = prevPrestaciones?.[cod];
-    const fresh = newMap[cod];
-    const nombre = fresh?.nombre || prev?.nombre || cod;
+  for (const cod of new Set([...Object.keys(newMap || {}), ...Object.keys(prev)])) {
+    const fresh = newMap?.[cod];
+    const old = prev[cod];
+    const nombre = fresh?.nombre || old?.nombre || cod;
     const duracion =
-      typeof prev?.duracion === 'number' && prev.duracion > 0
-        ? prev.duracion
+      typeof old?.duracion === 'number' && old.duracion > 0
+        ? old.duracion
         : DEFAULT_DURACION;
-    const enabled =
-      prev !== undefined && prev !== null
-        ? prev.enabled !== false
-        : prestacionEnabledPorDefecto(cod);
+    let enabled;
+    if (draftEnabled.has(String(cod))) enabled = draftEnabled.get(String(cod));
+    else if (old) enabled = old.enabled !== false;
+    else enabled = primeraCarga ? prestacionEnabledPorDefecto(cod) : false;
 
     let profesionales;
     if (fresh?.profesionales?.length) {
       profesionales = fresh.profesionales.filter((p) => enabledSet.has(String(p.doc)));
-    } else if (prev?.profesionales?.length) {
-      profesionales = prev.profesionales.filter((p) => enabledSet.has(String(p.doc)));
+      const ya = new Set(profesionales.map((p) => String(p.doc)));
+      for (const pr of old?.profesionales || []) {
+        if (!ya.has(String(pr.doc)) && !enabledSet.has(String(pr.doc))) {
+          profesionales.push(pr);
+          ya.add(String(pr.doc));
+        }
+      }
+    } else if (old?.profesionales?.length) {
+      profesionales = old.profesionales;
     } else {
       profesionales = [];
     }
@@ -239,34 +307,6 @@ function mergePrestacionesFromFetch(prevPrestaciones, newMap, enabledDocs) {
     };
   }
   return merged;
-}
-
-/** Aplica el borrador de Config sobre la caché guardada (así Actualizar respeta toggles aunque no hayas Guardado). */
-function mergeUserDraftIntoCachedPrev(rawPrev, draftProfs, draftPrestRows) {
-  if (!rawPrev) return rawPrev;
-  let prev = rawPrev;
-  if (draftProfs?.length && rawPrev.profesionales?.length) {
-    const profEnabled = new Map(draftProfs.map((p) => [String(p.doc), !!p.enabled]));
-    prev = {
-      ...prev,
-      profesionales: rawPrev.profesionales.map((p) => {
-        const e = profEnabled.get(String(p.doc));
-        return e !== undefined ? { ...p, enabled: e } : p;
-      }),
-    };
-  }
-  if (draftPrestRows?.length && rawPrev.prestaciones && Object.keys(rawPrev.prestaciones).length) {
-    const prestEnabled = new Map(draftPrestRows.map((r) => [String(r.codigo), !!r.enabled]));
-    const prestaciones = { ...prev.prestaciones };
-    for (const cod of Object.keys(prestaciones)) {
-      const e = prestEnabled.get(String(cod));
-      if (e !== undefined) {
-        prestaciones[cod] = { ...prestaciones[cod], enabled: e };
-      }
-    }
-    prev = { ...prev, prestaciones };
-  }
-  return prev;
 }
 
 function slotDedupeKey(s) {
@@ -315,6 +355,110 @@ function fmtDayLabelTitulo(d) {
 }
 function fmtTime(d) {
   return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function minutoSlot(s) {
+  const d = s.fechaHora instanceof Date ? s.fechaHora : new Date(s.fechaHora);
+  if (isNaN(d.getTime())) return null;
+  return Math.floor(d.getTime() / 60000);
+}
+
+/** Mismo profesional y mismo lugar: no se encadenan módulos de otra sede o edificio. */
+function mismoBloque(a, b) {
+  return (
+    String(a.profesionalDoc) === String(b.profesionalDoc) &&
+    String(a.edificio || '') === String(b.edificio || '') &&
+    String(a.sector || '') === String(b.sector || '') &&
+    String(a.sede || '') === String(b.sede || '')
+  );
+}
+
+/**
+ * Ofertas que caben en `duracionMin`. El paso sale de los huecos reales del profesional:
+ * si están cada 45 min, 45 es un módulo y 90 ocupa dos (ej. 9:00 y 9:45).
+ * Si están cada 30, 60 ocupa 10:00 y 10:30, y 9:00 no entra si falta 9:30.
+ */
+function armarOfertasPorDuracion(slots, duracionMin) {
+  const duracion = Number(duracionMin);
+  if (!Number.isFinite(duracion) || duracion <= 0) return [];
+  const byBloque = new Map();
+  for (const s of slots) {
+    const k = [
+      String(s.profesionalDoc),
+      String(s.edificio || ''),
+      String(s.sector || ''),
+      String(s.sede || ''),
+    ].join('|');
+    if (!byBloque.has(k)) byBloque.set(k, []);
+    byBloque.get(k).push(s);
+  }
+  const ofertas = [];
+  for (const list of byBloque.values()) {
+    const byMin = new Map();
+    for (const s of list) {
+      const min = minutoSlot(s);
+      if (min == null || byMin.has(min)) continue;
+      byMin.set(min, s);
+    }
+    const minutos = [...byMin.keys()].sort((a, b) => a - b);
+    let modulo = null;
+    for (let i = 1; i < minutos.length; i++) {
+      const gap = minutos[i] - minutos[i - 1];
+      if (gap > 0 && gap % PASO_MIN === 0 && (modulo == null || gap < modulo)) modulo = gap;
+    }
+    const paso = modulo || (duracion % PASO_MIN === 0 ? duracion : null);
+    if (!paso || duracion % paso !== 0) continue;
+    const needed = duracion / paso;
+    for (const startMin of minutos) {
+      const start = byMin.get(startMin);
+      const modulos = [start];
+      let ok = true;
+      for (let i = 1; i < needed; i++) {
+        const next = byMin.get(startMin + i * paso);
+        if (!next || !mismoBloque(start, next)) {
+          ok = false;
+          break;
+        }
+        modulos.push(next);
+      }
+      if (ok) ofertas.push({ ...start, modulos, moduloMin: paso });
+    }
+  }
+  return ofertas;
+}
+
+/** La regla (profesional + prestación + modalidad del hueco) pisa la duración general. */
+function armarOfertasConReglas(slots, prestacionId, duracionGeneral, reglas) {
+  const index = new Map();
+  for (const r of normalizeReglas(reglas)) {
+    index.set(reglaKey(r.profesionalDoc, r.prestacionCodigo, r.modalidad), r.duracionMin);
+  }
+  const groups = new Map();
+  for (const s of slots) {
+    const mod = isSlotVirtual(s.edificio) ? 'VIRTUAL' : 'PRESENCIAL';
+    const prest = prestacionId || s.prestacionId;
+    const especifica = index.get(reglaKey(s.profesionalDoc, prest, mod));
+    const todas = index.get(reglaKey(s.profesionalDoc, prest, 'TODAS'));
+    const porRegla = especifica != null || todas != null;
+    const dur = porRegla ? (especifica != null ? especifica : todas) : duracionGeneral;
+    const tagged = { ...s, porRegla, duracionMin: dur };
+    if (!groups.has(dur)) groups.set(dur, []);
+    groups.get(dur).push(tagged);
+  }
+  const out = [];
+  for (const [dur, list] of groups) {
+    out.push(...armarOfertasPorDuracion(list, dur));
+  }
+  return out;
+}
+
+function textoModulos(modulos) {
+  const horas = (modulos || []).map((m) =>
+    fmtTime(m.fechaHora instanceof Date ? m.fechaHora : new Date(m.fechaHora))
+  );
+  if (horas.length <= 1) return horas[0] || '';
+  if (horas.length === 2) return `${horas[0]} y ${horas[1]}`;
+  return `${horas.slice(0, -1).join(', ')} y ${horas[horas.length - 1]}`;
 }
 
 /** Medexis TurnoNuevo: "YYYY-MM-DD HH:mm:ss" (hora local). */
@@ -371,6 +515,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [status, setStatus] = useState({ text: '', error: false, visible: false });
   const [prestacionId, setPrestacionId] = useState('');
   const [modalidad, setModalidad] = useState('TODOS');
+  const [duracionMin, setDuracionMin] = useState(30);
   const [searching, setSearching] = useState(false);
   const [slotsRaw, setSlotsRaw] = useState([]);
   const [searchReturnedEmpty, setSearchReturnedEmpty] = useState(false);
@@ -382,8 +527,19 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [configDraftPrestaciones, setConfigDraftPrestaciones] = useState([]);
   const [configSearchProf, setConfigSearchProf] = useState('');
   const [configSearchPrest, setConfigSearchPrest] = useState('');
+  const [reglas, setReglas] = useState([]);
+  const [configDraftReglas, setConfigDraftReglas] = useState([]);
+  const [reglaProfDoc, setReglaProfDoc] = useState('');
+  const [reglaPrestCod, setReglaPrestCod] = useState('');
+  const [reglaModalidad, setReglaModalidad] = useState('TODAS');
+  const [reglaDuracion, setReglaDuracion] = useState(120);
+  const [reglaModalOpen, setReglaModalOpen] = useState(false);
+  const [filtroReglaProf, setFiltroReglaProf] = useState('');
+  const [filtroReglaPrest, setFiltroReglaPrest] = useState('');
+  const [filtroReglaMod, setFiltroReglaMod] = useState('TODOS');
   const [configSaving, setConfigSaving] = useState(false);
   const configSaveLock = useRef(false);
+  const reglasRef = useRef([]);
 
   const sedePickerIntentRef = useRef(null);
   const pendingRefreshOptsRef = useRef(null);
@@ -448,11 +604,118 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       });
   }, [configDraftPrestaciones, configSearchPrest, prestaciones, esSedeCargada]);
 
+  const reglaProfOptions = useMemo(() => {
+    return sortProfesionalesAlfabetico(
+      configDraftProfesionales.filter((p) => esSedeCargada(p.sede) && p.enabled === true)
+    ).map((p) => ({
+      value: String(p.doc),
+      label: profLabelConDoc(p.nombre, p.doc),
+    }));
+  }, [configDraftProfesionales, esSedeCargada]);
+
+  const reglaPrestOptions = useMemo(() => {
+    if (!reglaProfDoc) return [];
+    const habilitadas = new Set(
+      configDraftPrestaciones.filter((r) => r.enabled === true).map((r) => String(r.codigo))
+    );
+    return Object.entries(prestaciones)
+      .filter(([cod, v]) => habilitadas.has(String(cod)))
+      .filter(([, v]) =>
+        (v.profesionales || []).some((p) => String(p.doc) === String(reglaProfDoc))
+      )
+      .sort((a, b) => (a[1].nombre || '').localeCompare(b[1].nombre || '', 'es'))
+      .map(([cod, v]) => {
+        const nombre = String(v.nombre || '').trim();
+        const label = nombre && nombre !== cod ? `${cod} - ${nombre}` : nombre || cod;
+        return { value: cod, label };
+      });
+  }, [prestaciones, reglaProfDoc, configDraftPrestaciones]);
+
+  useEffect(() => {
+    if (reglaProfDoc && !reglaProfOptions.some((o) => o.value === reglaProfDoc)) {
+      setReglaProfDoc('');
+    }
+  }, [reglaProfDoc, reglaProfOptions]);
+
+  useEffect(() => {
+    if (!reglaPrestCod) return;
+    if (!reglaPrestOptions.some((o) => o.value === reglaPrestCod)) setReglaPrestCod('');
+  }, [reglaPrestCod, reglaPrestOptions]);
+
+  const filtroPrestOptions = useMemo(() => {
+    const habilitadas = new Set(
+      configDraftPrestaciones.filter((r) => r.enabled === true).map((r) => String(r.codigo))
+    );
+    return Object.entries(prestaciones)
+      .filter(([cod, v]) => habilitadas.has(String(cod)))
+      .filter(([, v]) => {
+        if (!filtroReglaProf) return true;
+        return (v.profesionales || []).some((p) => String(p.doc) === String(filtroReglaProf));
+      })
+      .sort((a, b) => (a[1].nombre || '').localeCompare(b[1].nombre || '', 'es'))
+      .map(([cod, v]) => {
+        const nombre = String(v.nombre || '').trim();
+        const label = nombre && nombre !== cod ? `${cod} - ${nombre}` : nombre || cod;
+        return { value: cod, label };
+      });
+  }, [prestaciones, filtroReglaProf, configDraftPrestaciones]);
+
+  useEffect(() => {
+    if (!filtroReglaPrest) return;
+    if (!filtroPrestOptions.some((o) => o.value === filtroReglaPrest)) setFiltroReglaPrest('');
+  }, [filtroReglaPrest, filtroPrestOptions]);
+
+  const filtroProfSelectOptions = useMemo(
+    () => [{ value: '', label: 'Todos' }, ...reglaProfOptions],
+    [reglaProfOptions]
+  );
+  const filtroPrestSelectOptions = useMemo(
+    () => [{ value: '', label: 'Todos' }, ...filtroPrestOptions],
+    [filtroPrestOptions]
+  );
+  const filtroModSelectOptions = useMemo(
+    () => [
+      { value: 'TODOS', label: 'Todos' },
+      { value: 'TODAS', label: 'Todas las modalidades' },
+      { value: 'PRESENCIAL', label: 'Presencial' },
+      { value: 'VIRTUAL', label: 'Virtual' },
+    ],
+    []
+  );
+
+  const reglasVisibles = useMemo(() => {
+    const nombreProf = (doc) =>
+      profesionalesCatalog.find((p) => String(p.doc) === String(doc))?.nombre || doc;
+    const nombrePrest = (cod) => prestaciones[cod]?.nombre || cod;
+    return [...configDraftReglas]
+      .filter((r) => {
+        if (filtroReglaProf && String(r.profesionalDoc) !== String(filtroReglaProf)) return false;
+        if (filtroReglaPrest && String(r.prestacionCodigo) !== String(filtroReglaPrest)) return false;
+        if (filtroReglaMod !== 'TODOS' && r.modalidad !== filtroReglaMod) return false;
+        return true;
+      })
+      .sort((a, b) => {
+      const byProf = String(nombreProf(a.profesionalDoc)).localeCompare(String(nombreProf(b.profesionalDoc)), 'es', {
+        sensitivity: 'base',
+      });
+      if (byProf) return byProf;
+      return String(nombrePrest(a.prestacionCodigo)).localeCompare(String(nombrePrest(b.prestacionCodigo)), 'es', {
+        sensitivity: 'base',
+      });
+    });
+  }, [configDraftReglas, profesionalesCatalog, prestaciones, filtroReglaProf, filtroReglaPrest, filtroReglaMod]);
+
+  const reglasDeBusqueda = useMemo(
+    () => reglas.filter((r) => String(r.prestacionCodigo) === String(prestacionId)),
+    [reglas, prestacionId]
+  );
+
   const slotsFiltered = useMemo(() => {
-    if (modalidad === 'VIRTUAL') return slotsRaw.filter((s) => isSlotVirtual(s.edificio));
-    if (modalidad === 'PRESENCIAL') return slotsRaw.filter((s) => !isSlotVirtual(s.edificio));
-    return slotsRaw;
-  }, [slotsRaw, modalidad]);
+    let list = slotsRaw;
+    if (modalidad === 'VIRTUAL') list = list.filter((s) => isSlotVirtual(s.edificio));
+    else if (modalidad === 'PRESENCIAL') list = list.filter((s) => !isSlotVirtual(s.edificio));
+    return armarOfertasConReglas(list, prestacionId, duracionMin, reglas);
+  }, [slotsRaw, modalidad, duracionMin, prestacionId, reglas]);
 
   const resultsSummaryDisplay = useMemo(() => {
     if (!slotsRaw.length || !prestacionId) return '';
@@ -460,11 +723,14 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     const days = new Set(slotsFiltered.map((s) => fmtDateKey(s.fechaHora))).size;
     const filtroLabel =
       modalidad === 'VIRTUAL' ? ' virtuales' : modalidad === 'PRESENCIAL' ? ' presenciales' : '';
+    const durLabel = slotsFiltered.some((s) => s.porRegla)
+      ? ' · reglas de duración'
+      : ` de ${duracionMin} min`;
     if (!slotsFiltered.length) {
-      return `0 turnos${filtroLabel} (de ${slotsRaw.length}) para "${nombrePrest}"`;
+      return `0 turnos${filtroLabel}${durLabel} (de ${slotsRaw.length} módulos) para "${nombrePrest}"`;
     }
-    return `${slotsFiltered.length} turno${slotsFiltered.length !== 1 ? 's' : ''}${filtroLabel} disponibles para "${nombrePrest}" · ${days} día${days !== 1 ? 's' : ''}`;
-  }, [slotsRaw, slotsFiltered, prestacionId, prestaciones, modalidad]);
+    return `${slotsFiltered.length} turno${slotsFiltered.length !== 1 ? 's' : ''}${filtroLabel}${durLabel} disponibles para "${nombrePrest}" · ${days} día${days !== 1 ? 's' : ''}`;
+  }, [slotsRaw, slotsFiltered, prestacionId, prestaciones, modalidad, duracionMin]);
 
   const enabledProfDocs = useMemo(
     () => new Set(profesionalesCatalog.filter((p) => p.enabled).map((p) => String(p.doc))),
@@ -549,14 +815,16 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   }, []);
 
   const persistState = useCallback(async (profs, prest, opts = {}) => {
-    const { silent = true } = opts;
-    setCachedFull({ profesionales: profs, prestaciones: prest });
+    const { silent = true, reglas: reglasOpt } = opts;
+    const reglasPayload = normalizeReglas(reglasOpt ?? reglasRef.current);
+    setCachedFull({ profesionales: profs, prestaciones: prest, reglas: reglasPayload });
     try {
       await saveBuscaTurnoConfig({
         version: 2,
         sedesCarga: sedesCargaRef.current?.length ? sedesCargaRef.current : ['INECO'],
         profesionales: profs,
         prestaciones: prest,
+        reglas: reglasPayload,
       });
     } catch (e) {
       console.warn('No se pudo guardar config Busca turno en Firebase', e);
@@ -574,6 +842,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         applyConfigDraft = false,
         draftProfesionales = [],
         draftPrestaciones = [],
+        draftReglas,
       } = opts;
       if (!forceRefresh) {
         setPrestacionId('');
@@ -604,6 +873,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           }
           setProfesionalesCatalog(cached.profesionales);
           setPrestaciones(cached.prestaciones);
+          const reglasNorm = normalizeReglas(cached.reglas);
+          reglasRef.current = reglasNorm;
+          setReglas(reglasNorm);
           setCacheLoaded(true);
           setCacheDot('ok');
           const nPrest = Object.values(cached.prestaciones).filter((p) => p.enabled !== false).length;
@@ -613,7 +885,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           setProgress(null);
           // Migración: si solo estaba en local, subir a Firebase.
           if (cached._source === 'local') {
-            void persistState(cached.profesionales, cached.prestaciones);
+            void persistState(cached.profesionales, cached.prestaciones, { reglas: reglasNorm });
           }
           return;
         }
@@ -702,44 +974,72 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         const fromApi = Object.values(prestadoresMap);
         let rawPrev = await resolveStoredConfig();
         if (!rawPrev) rawPrev = getCachedFull();
-        const shouldApplyDraft =
-          applyConfigDraft &&
-          rawPrev &&
-          (draftProfesionales.length > 0 || draftPrestaciones.length > 0);
-        const prev = shouldApplyDraft
-          ? mergeUserDraftIntoCachedPrev(rawPrev, draftProfesionales, draftPrestaciones)
-          : rawPrev;
-        let catalog = fromApi.map((p) => {
-          const old = prev?.profesionales?.find((x) => String(x.doc) === p.doc);
-          return {
-            doc: p.doc,
+        const prev = rawPrev;
+        const profEnabled = new Map();
+        for (const p of prev?.profesionales || []) {
+          profEnabled.set(String(p.doc), !!p.enabled);
+        }
+        if (applyConfigDraft) {
+          for (const p of draftProfesionales || []) {
+            profEnabled.set(String(p.doc), !!p.enabled);
+          }
+        }
+        const haySeleccionPrevia = profEnabled.size > 0;
+        let catalog = fromApi.map((p) => ({
+          doc: p.doc,
+          nombre: p.nombre,
+          sede: p.sede,
+          enabled: profEnabled.has(String(p.doc))
+            ? profEnabled.get(String(p.doc))
+            : haySeleccionPrevia
+              ? false
+              : true,
+        }));
+        const vistos = new Set(catalog.map((p) => String(p.doc)));
+        for (const p of prev?.profesionales || []) {
+          const doc = String(p.doc);
+          if (vistos.has(doc)) continue;
+          catalog.push({
+            doc,
             nombre: p.nombre,
-            sede: p.sede,
-            enabled: old ? !!old.enabled : true,
-          };
-        });
+            sede: p.sede || 'INECO',
+            enabled: profEnabled.has(doc) ? profEnabled.get(doc) : !!p.enabled,
+          });
+          vistos.add(doc);
+        }
 
         let toFetch = catalog.filter((p) => p.enabled);
         if (toFetch.length === 0) {
-          if (fromApi.length === 0) {
+          if (fromApi.length === 0 && catalog.length === 0) {
             setCacheDot('error');
             setCacheLabel('No hay profesionales');
             setProgress(null);
             return;
           }
-          if (prev?.prestaciones && Object.keys(prev.prestaciones).length > 0) {
+          if (haySeleccionPrevia || (prev?.prestaciones && Object.keys(prev.prestaciones).length > 0)) {
+            const prestKeep = mergePrestacionesFromFetch(
+              prev?.prestaciones || {},
+              {},
+              [],
+              applyConfigDraft ? draftPrestaciones : []
+            );
             setProfesionalesCatalog(catalog);
-            setPrestaciones(prev.prestaciones);
+            setPrestaciones(prestKeep);
             setCacheLoaded(true);
             setCacheDot('warning');
             setCacheLabel('Actualizar cancelado: habilitá al menos un profesional en Config');
             setProgress(null);
             setStatus({
-              text: 'No se consultó la API: ningún profesional habilitado. Abrí Config y marcá al menos uno, luego Actualizar.',
+              text: 'No se consultaron prestaciones: ningún profesional está tildado. Los tildes no se modificaron.',
               error: true,
               visible: true,
             });
-            applyDraftFromServer(catalog, prev.prestaciones);
+            applyDraftFromServer(catalog, prestKeep);
+            await persistState(catalog, prestKeep, {
+              reglas: normalizeReglas(
+                Array.isArray(draftReglas) ? draftReglas : (prev?.reglas ?? reglasRef.current)
+              ),
+            });
             return;
           }
           catalog = fromApi.map((p) => ({ ...p, enabled: true }));
@@ -811,11 +1111,21 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
 
         const enabledDocs = toFetch.map((p) => p.doc);
         const prevPrest = prev?.prestaciones || {};
-        const merged = mergePrestacionesFromFetch(prevPrest, map, enabledDocs);
+        const merged = mergePrestacionesFromFetch(
+          prevPrest,
+          map,
+          enabledDocs,
+          applyConfigDraft ? draftPrestaciones : []
+        );
 
         setPrestaciones(merged);
         setProfesionalesCatalog(catalog);
-        await persistState(catalog, merged);
+        const reglasKeep = normalizeReglas(
+          Array.isArray(draftReglas) ? draftReglas : (prev?.reglas ?? reglasRef.current)
+        );
+        reglasRef.current = reglasKeep;
+        setReglas(reglasKeep);
+        await persistState(catalog, merged, { reglas: reglasKeep });
         setCacheLoaded(true);
         setCacheDot('ok');
         const nVis = Object.values(merged).filter((x) => x.enabled !== false).length;
@@ -900,13 +1210,22 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         }))
         .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     );
+    setConfigDraftReglas(normalizeReglas(reglas));
     setConfigSearchProf('');
     setConfigSearchPrest('');
-    setConfigTab('profesionales');
-  }, [profesionalesCatalog, prestaciones]);
+  }, [profesionalesCatalog, prestaciones, reglas]);
 
+  const configAbiertaRef = useRef(false);
   useEffect(() => {
-    if (configView) prepareConfigDrafts();
+    if (!configView) {
+      configAbiertaRef.current = false;
+      return;
+    }
+    if (!configAbiertaRef.current) {
+      setConfigTab('profesionales');
+      configAbiertaRef.current = true;
+    }
+    prepareConfigDrafts();
   }, [configView, prepareConfigDrafts]);
 
   const openConfigModal = useCallback(() => {
@@ -955,10 +1274,14 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       }
     }
 
+    const reglasLimpias = normalizeReglas(configDraftReglas);
     try {
       setProfesionalesCatalog(newCatalog);
       setPrestaciones(newPrest);
-      await persistState(newCatalog, newPrest, { silent: false });
+      reglasRef.current = reglasLimpias;
+      setReglas(reglasLimpias);
+      setConfigDraftReglas(reglasLimpias);
+      await persistState(newCatalog, newPrest, { silent: false, reglas: reglasLimpias });
       setConfigDraftProfesionales(newCatalog.map((p) => ({ ...p })));
       setConfigDraftPrestaciones(
         Object.entries(newPrest)
@@ -987,11 +1310,89 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   }, [
     configDraftProfesionales,
     configDraftPrestaciones,
+    configDraftReglas,
     profesionalesCatalog,
     prestaciones,
     persistState,
     prestacionId,
   ]);
+
+  const persistirReglas = useCallback(async (lista, mensaje) => {
+    if (configSaveLock.current) return false;
+    configSaveLock.current = true;
+    setConfigSaving(true);
+    const reglasLimpias = normalizeReglas(lista);
+    try {
+      await persistState(profesionalesCatalog, prestaciones, { silent: false, reglas: reglasLimpias });
+      reglasRef.current = reglasLimpias;
+      setReglas(reglasLimpias);
+      setConfigDraftReglas(reglasLimpias);
+      toast.success(mensaje);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      window.setTimeout(() => {
+        configSaveLock.current = false;
+        setConfigSaving(false);
+      }, 400);
+    }
+  }, [persistState, profesionalesCatalog, prestaciones]);
+
+  const agregarRegla = useCallback(async () => {
+    if (!reglaProfDoc || !reglaPrestCod) {
+      toast.error('Elegí el profesional y la prestación.');
+      return;
+    }
+    const keyPar = (r) =>
+      String(r.profesionalDoc) === String(reglaProfDoc) &&
+      String(r.prestacionCodigo) === String(reglaPrestCod);
+    const delPar = configDraftReglas.filter(keyPar);
+    let next;
+    let mensaje;
+    if (reglaModalidad === 'TODAS') {
+      next = [
+        ...configDraftReglas.filter((r) => !keyPar(r)),
+        {
+          profesionalDoc: reglaProfDoc,
+          prestacionCodigo: reglaPrestCod,
+          modalidad: 'TODAS',
+          duracionMin: Number(reglaDuracion),
+        },
+      ];
+      mensaje = 'Regla guardada para todas las modalidades.';
+    } else {
+      const todas = delPar.find((r) => r.modalidad === 'TODAS');
+      const otra = reglaModalidad === 'PRESENCIAL' ? 'VIRTUAL' : 'PRESENCIAL';
+      next = configDraftReglas.filter(
+        (r) => !keyPar(r) || (r.modalidad !== reglaModalidad && r.modalidad !== 'TODAS')
+      );
+      if (todas) {
+        next.push({
+          profesionalDoc: reglaProfDoc,
+          prestacionCodigo: reglaPrestCod,
+          modalidad: otra,
+          duracionMin: todas.duracionMin,
+        });
+      }
+      next.push({
+        profesionalDoc: reglaProfDoc,
+        prestacionCodigo: reglaPrestCod,
+        modalidad: reglaModalidad,
+        duracionMin: Number(reglaDuracion),
+      });
+      mensaje = delPar.some((r) => r.modalidad === reglaModalidad) ? 'Regla actualizada.' : 'Regla guardada.';
+    }
+    const ok = await persistirReglas(next, mensaje);
+    if (ok) setReglaModalOpen(false);
+  }, [reglaProfDoc, reglaPrestCod, reglaModalidad, reglaDuracion, configDraftReglas, persistirReglas]);
+
+  const quitarRegla = useCallback((id) => {
+    void persistirReglas(
+      configDraftReglas.filter((r) => r.id !== id),
+      'Regla quitada.'
+    );
+  }, [configDraftReglas, persistirReglas]);
 
   const buscar = useCallback(
     async (startOffset = 0, append = false) => {
@@ -1213,6 +1614,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setPrestadorFilter('');
     setSelectedPrestadorDocsByPrestacion({});
     setModalidad('TODOS');
+    setDuracionMin(30);
     clearStatus();
     closeAssignModal();
   }, [clearStatus, closeAssignModal]);
@@ -1312,36 +1714,44 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         setAssignLoading(false);
         return;
       }
-      const turnoFh = formatTurnoFechaHoraMedexis(
-        slot.fechaHora instanceof Date ? slot.fechaHora : new Date(slot.fechaHora)
-      );
-      if (!turnoFh) {
-        setAssignError('La fecha y hora del turno no son válidas.');
-        setAssignLoading(false);
-        return;
+      const modulos = slot.modulos?.length ? slot.modulos : [slot];
+      const turnoItems = [];
+      for (const m of modulos) {
+        const turnoFh = formatTurnoFechaHoraMedexis(
+          m.fechaHora instanceof Date ? m.fechaHora : new Date(m.fechaHora)
+        );
+        if (!turnoFh) {
+          setAssignError('La fecha y hora del turno no son válidas.');
+          setAssignLoading(false);
+          return;
+        }
+        turnoItems.push({
+          PersonaTipoDocumento: 'AR',
+          PersonaDocumento: String(personaData.PersonaDocumento ?? assignDni.trim()),
+          PersonaNombre: personaData.PersonaNombre ?? '',
+          PersonaApellido: personaData.PersonaApellido ?? '',
+          PersonaFechaNacimiento: fechaNac,
+          PersonaSexo: (personaData.PersonaSexo || 'MASCULINO').toUpperCase().replace('OTRO', 'MASCULINO'),
+          PersonaEmail: personaData.PersonaEmail ?? '',
+          PersonaTelefonoCel: personaData.PersonaTelefonoCel ?? '',
+          PersonaIdioma: 'es',
+          PrestadorDocumento: m.profesionalDoc,
+          Sede: (m.sede && String(m.sede).trim()) || 'INECO',
+          TurnoFechaHora: turnoFh,
+          TurnoPrestacion: String(m.prestacionId || slot.prestacionId),
+          GeneraPago: personaData._manual ? 'N' : 'S',
+          TurnoX: 1,
+        });
       }
-      const turnoItem = {
-        PersonaTipoDocumento: 'AR',
-        PersonaDocumento: String(personaData.PersonaDocumento ?? assignDni.trim()),
-        PersonaNombre: personaData.PersonaNombre ?? '',
-        PersonaApellido: personaData.PersonaApellido ?? '',
-        PersonaFechaNacimiento: fechaNac,
-        PersonaSexo: (personaData.PersonaSexo || 'MASCULINO').toUpperCase().replace('OTRO', 'MASCULINO'),
-        PersonaEmail: personaData.PersonaEmail ?? '',
-        PersonaTelefonoCel: personaData.PersonaTelefonoCel ?? '',
-        PersonaIdioma: 'es',
-        PrestadorDocumento: slot.profesionalDoc,
-        Sede: (slot.sede && String(slot.sede).trim()) || 'INECO',
-        TurnoFechaHora: turnoFh,
-        TurnoPrestacion: String(slot.prestacionId),
-        GeneraPago: personaData._manual ? 'N' : 'S',
-        TurnoX: 1,
-      };
-      await createTurno({ turno: [turnoItem] });
-      const k = slotDedupeKey(slot);
-      setSlotsRaw((prev) => prev.filter((s) => slotDedupeKey(s) !== k));
+      await createTurno({ turno: turnoItems });
+      const ocupados = new Set(modulos.map((m) => slotDedupeKey(m)));
+      setSlotsRaw((prev) => prev.filter((s) => !ocupados.has(slotDedupeKey(s))));
       closeAssignModal();
-      toast.success('Turno asignado correctamente.');
+      toast.success(
+        modulos.length > 1
+          ? `Se asignaron ${modulos.length} turnos (${textoModulos(modulos)}) al mismo paciente.`
+          : 'Turno asignado correctamente.'
+      );
     } catch (e) {
       setAssignError(e.message || 'Error al asignar el turno.');
     } finally {
@@ -1430,30 +1840,51 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 >
                   Prestaciones
                 </button>
-              </div>
-              <div className="config-sync-strip">
                 <button
                   type="button"
-                  className="btn btn-refresh-config"
-                  disabled={progress != null || configSaving}
-                  onClick={() => {
-                    const next = ['INECO'];
-                    sedesCargaRef.current = next;
-                    setSedesCarga(next);
-                    writeSedesCarga(next);
-                    loadCache(true, {
-                      syncConfigDraft: true,
-                      applyConfigDraft: true,
-                      draftProfesionales: configDraftProfesionales,
-                      draftPrestaciones: configDraftPrestaciones,
-                    });
-                  }}
+                  className={configTab === 'reglas' ? 'config-tab active' : 'config-tab'}
+                  onClick={() => setConfigTab('reglas')}
                 >
-                  {progress != null
-                    ? 'Actualizando datos desde Medexis…'
-                    : 'Actualizar datos desde Medexis'}
+                  Reglas
                 </button>
-                {progress != null && (
+              </div>
+              <div className="config-sync-strip">
+                <div className="config-sync-actions">
+                  {configTab === 'reglas' && (
+                    <button
+                      type="button"
+                      className="btn btn-refresh-config"
+                      onClick={() => setReglaModalOpen(true)}
+                    >
+                      Agregar regla
+                    </button>
+                  )}
+                  {configTab !== 'reglas' && (
+                  <button
+                    type="button"
+                    className="btn btn-refresh-config"
+                    disabled={progress != null || configSaving}
+                    onClick={() => {
+                      const next = ['INECO'];
+                      sedesCargaRef.current = next;
+                      setSedesCarga(next);
+                      writeSedesCarga(next);
+                      loadCache(true, {
+                        syncConfigDraft: true,
+                        applyConfigDraft: true,
+                        draftProfesionales: configDraftProfesionales,
+                        draftPrestaciones: configDraftPrestaciones,
+                        draftReglas: configDraftReglas,
+                      });
+                    }}
+                  >
+                    {progress != null
+                      ? 'Actualizando datos desde Medexis…'
+                      : 'Actualizar datos desde Medexis'}
+                  </button>
+                  )}
+                </div>
+                {progress != null && configTab !== 'reglas' && (
                   <div className="config-progress-track">
                     <div className="config-progress-bar" style={{ width: `${progress}%` }} />
                   </div>
@@ -1579,7 +2010,94 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                   )}
                 </div>
               )}
+              {configTab === 'reglas' && (
+                <div className="config-tab-panel">
+                  <div className="reglas-filtros">
+                    <div className="field">
+                      <label>Profesional</label>
+                      <SearchableSelect
+                        options={filtroProfSelectOptions}
+                        value={filtroReglaProf}
+                        onChange={setFiltroReglaProf}
+                        placeholder="Todos"
+                        maxHeight={240}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Prestación</label>
+                      <SearchableSelect
+                        options={filtroPrestSelectOptions}
+                        value={filtroReglaPrest}
+                        onChange={setFiltroReglaPrest}
+                        placeholder="Todos"
+                        maxHeight={240}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Modalidad</label>
+                      <SearchableSelect
+                        options={filtroModSelectOptions}
+                        value={filtroReglaMod}
+                        onChange={setFiltroReglaMod}
+                        placeholder="Todos"
+                        maxHeight={220}
+                      />
+                    </div>
+                  </div>
+                  <div className="config-scroll reglas-table-wrap">
+                    {reglasVisibles.length > 0 ? (
+                      <table className="reglas-table">
+                        <thead>
+                          <tr>
+                            <th>Profesional</th>
+                            <th>Prestación</th>
+                            <th>Modalidad</th>
+                            <th>Duración</th>
+                            <th className="reglas-table-accion" aria-label="Acciones" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reglasVisibles.map((r) => {
+                            const prof = profesionalesCatalog.find((p) => String(p.doc) === String(r.profesionalDoc));
+                            const prest = prestaciones[r.prestacionCodigo];
+                            const prestLabel = prest?.nombre
+                              ? `${r.prestacionCodigo} - ${prest.nombre}`
+                              : r.prestacionCodigo;
+                            return (
+                              <tr key={r.id}>
+                                <td>{profLabelConDoc(prof?.nombre || '', r.profesionalDoc)}</td>
+                                <td>{prestLabel}</td>
+                                <td>{labelModalidadRegla(r.modalidad)}</td>
+                                <td>{labelDuracion(r.duracionMin)}</td>
+                                <td className="reglas-table-accion">
+                                  <button
+                                    type="button"
+                                    className="regla-del"
+                                    onClick={() => quitarRegla(r.id)}
+                                    disabled={configSaving}
+                                    aria-label="Eliminar regla"
+                                    title="Eliminar regla"
+                                  >
+                                    <IconTrash size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="config-list-empty">
+                        {configDraftReglas.length === 0
+                          ? 'Todavía no hay reglas.'
+                          : 'Ninguna regla coincide con el filtro.'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
+            {configTab !== 'reglas' && (
             <div className="modal-footer config-footer">
               <button
                 type="button"
@@ -1590,6 +2108,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 Guardar
               </button>
             </div>
+            )}
         </div>
       ) : (
       <>
@@ -1618,6 +2137,19 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
               {MODALIDADES.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Duración</label>
+            <select
+              value={duracionMin}
+              onChange={(e) => setDuracionMin(Number(e.target.value))}
+            >
+              {DURACIONES_MIN.map((min) => (
+                <option key={min} value={min}>
+                  {min} min
                 </option>
               ))}
             </select>
@@ -1790,13 +2322,24 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         </div>
       )}
 
-      {slotsRaw.length > 0 && dayEntries.length === 0 && modalidad !== 'TODOS' && (
+      {slotsRaw.length > 0 && dayEntries.length === 0 && (
         <div className="empty-state">
           <p className="empty-state-text">
-            No hay turnos {modalidad === 'VIRTUAL' ? 'virtuales' : 'presenciales'} en estos
-            resultados.
+            {reglasDeBusqueda.length > 0
+              ? 'No hay turnos que cumplan la duración. Si el profesional tiene una regla, esa manda sobre la duración general.'
+              : `No hay ${duracionMin} minutos seguidos libres${
+                  modalidad === 'VIRTUAL'
+                    ? ' en modalidad virtual'
+                    : modalidad === 'PRESENCIAL'
+                      ? ' en modalidad presencial'
+                      : ''
+                }.`}
           </p>
-          <p className="empty-state-hint">Probá con “Todos” o cambiá la modalidad.</p>
+          <p className="empty-state-hint">
+            {reglasDeBusqueda.length > 0
+              ? 'La regla pide huecos consecutivos del mismo profesional y la misma modalidad.'
+              : 'Hacen falta turnos seguidos del mismo profesional que sumen esa duración. El módulo puede ser de 15, 30 o 45 min.'}
+          </p>
         </div>
       )}
 
@@ -1864,27 +2407,39 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                               sede !== 'INECO' ? sede : '',
                             ].filter(Boolean);
                             const lugar = lugarBits.join(' · ');
+                            const modulos = s.modulos?.length ? s.modulos : [s];
+                            const ocupa =
+                              modulos.length > 1
+                                ? `Ocupa ${modulos.length} módulos: ${textoModulos(modulos)}`
+                                : '';
+                            const reglaTxt = s.porRegla
+                              ? `Regla · ${labelDuracion(s.duracionMin || (s.moduloMin || PASO_MIN) * modulos.length)}`
+                              : '';
+                            const detalle = [ocupa, reglaTxt].filter(Boolean).join(' · ');
                             return (
                               <button
                                 key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}
                                 type="button"
-                                className={`slot-card slot-card-compact${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}`}
+                                className={`slot-card slot-card-compact${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalle ? ' slot-card--multi' : ''}`}
                                 onClick={() => openAssignModal(s)}
-                                title={`Elegir este horario (${modLabel}${lugar ? ` · ${lugar}` : ''})`}
-                                aria-label={`Asignar turno ${fmtTime(s.fechaHora)} · ${modLabel}${lugar ? ` · ${lugar}` : ''}`}
+                                title={`Elegir este horario (${modLabel}${detalle ? ` · ${detalle}` : ''}${lugar ? ` · ${lugar}` : ''})`}
+                                aria-label={`Asignar turno ${fmtTime(s.fechaHora)}${detalle ? `. ${detalle}` : ''} · ${modLabel}${lugar ? ` · ${lugar}` : ''}`}
                               >
-                                <span
-                                  className="slot-mod-icon"
-                                  title={modLabel}
-                                  aria-hidden
-                                >
-                                  {virtual ? (
-                                    <IconMonitor size={14} />
-                                  ) : (
-                                    <IconBuilding size={14} />
-                                  )}
+                                <span className="slot-time-row">
+                                  <span
+                                    className="slot-mod-icon"
+                                    title={modLabel}
+                                    aria-hidden
+                                  >
+                                    {virtual ? (
+                                      <IconMonitor size={14} />
+                                    ) : (
+                                      <IconBuilding size={14} />
+                                    )}
+                                  </span>
+                                  <span className="slot-time">{fmtTime(s.fechaHora)}</span>
                                 </span>
-                                <span className="slot-time">{fmtTime(s.fechaHora)}</span>
+                                {detalle ? <span className="slot-modulos">{detalle}</span> : null}
                               </button>
                             );
                           })}
@@ -1917,6 +2472,90 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       )}
 
 
+      {reglaModalOpen && (
+        <div className="fl-modal-backdrop" role="presentation">
+          <div
+            className="fl-modal fl-modal--busca-regla"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="busca-regla-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="fl-modal__header">
+              <h2 id="busca-regla-title">Agregar regla</h2>
+              <button
+                type="button"
+                className="fl-icon-btn"
+                onClick={() => setReglaModalOpen(false)}
+                aria-label="Cerrar"
+              >
+                <IconX size={18} />
+              </button>
+            </div>
+            <div className="fl-modal__body">
+              <div className="reglas-modal-form">
+                <div className="field">
+                  <label>Profesional</label>
+                  <SearchableSelect
+                    options={reglaProfOptions}
+                    value={reglaProfDoc}
+                    onChange={setReglaProfDoc}
+                    placeholder={reglaProfOptions.length ? 'Elegí un profesional...' : 'Sin profesionales habilitados'}
+                    disabled={reglaProfOptions.length === 0}
+                    maxHeight={240}
+                  />
+                </div>
+                <div className="field">
+                  <label>Prestación</label>
+                  <SearchableSelect
+                    options={reglaPrestOptions}
+                    value={reglaPrestCod}
+                    onChange={setReglaPrestCod}
+                    placeholder={
+                      !reglaProfDoc
+                        ? 'Primero elegí un profesional'
+                        : reglaPrestOptions.length
+                          ? 'Prestaciones que atiende...'
+                          : 'Este profesional no tiene prestaciones tildadas'
+                    }
+                    disabled={!reglaProfDoc || reglaPrestOptions.length === 0}
+                    maxHeight={240}
+                  />
+                </div>
+                <div className="field">
+                  <label>Modalidad</label>
+                  <select value={reglaModalidad} onChange={(e) => setReglaModalidad(e.target.value)}>
+                    {REGLA_MODALIDADES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Duración</label>
+                  <select value={reglaDuracion} onChange={(e) => setReglaDuracion(Number(e.target.value))}>
+                    {DURACIONES_MIN.map((min) => (
+                      <option key={min} value={min}>
+                        {labelDuracion(min)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="fl-modal__footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setReglaModalOpen(false)} disabled={configSaving}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn-primary" onClick={agregarRegla} disabled={configSaving}>
+                {configSaving ? 'Guardando...' : 'Agregar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedSlotForAssign && (
         <div className="fl-modal-backdrop" role="presentation">
           <div
@@ -1942,6 +2581,27 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                   <span className="modal-slot-label">Hora</span>
                   <span className="modal-slot-value modal-slot-value--time">{fmtTime(selectedSlotForAssign.fechaHora)}</span>
                 </div>
+                <div className="modal-slot-row">
+                  <span className="modal-slot-label">Duración</span>
+                  <span className="modal-slot-value">
+                    {labelDuracion(
+                      selectedSlotForAssign.duracionMin ||
+                        (selectedSlotForAssign.moduloMin || PASO_MIN) *
+                          (selectedSlotForAssign.modulos?.length || 1)
+                    )}
+                    {selectedSlotForAssign.porRegla ? ' · según regla' : ''}
+                  </span>
+                </div>
+                {(selectedSlotForAssign.modulos?.length || 1) > 1 && (
+                  <div className="modal-slot-row">
+                    <span className="modal-slot-label">Módulos</span>
+                    <span className="modal-slot-value modal-slot-value--time">
+                      Ocupa {selectedSlotForAssign.modulos.length} módulos:{' '}
+                      {textoModulos(selectedSlotForAssign.modulos)}. Se van a crear{' '}
+                      {selectedSlotForAssign.modulos.length} turnos para el mismo paciente.
+                    </span>
+                  </div>
+                )}
                 <div className="modal-slot-row">
                   <span className="modal-slot-label">Modalidad</span>
                   <span className="modal-slot-value">
@@ -2137,7 +2797,11 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                     onClick={handleAsignarTurno}
                     disabled={assignLoading}
                   >
-                    {assignLoading ? 'Asignando...' : 'Asignar turno'}
+                    {assignLoading
+                      ? 'Asignando...'
+                      : (selectedSlotForAssign.modulos?.length || 1) > 1
+                        ? `Asignar ${selectedSlotForAssign.modulos.length} turnos`
+                        : 'Asignar turno'}
                   </button>
                 </>
               )}

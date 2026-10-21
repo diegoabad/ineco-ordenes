@@ -10,6 +10,12 @@ export type PresupuestosSection =
   | "config";
 export type PamiSection = "historial" | "analisis";
 export type BuscaTurnoSection = "turnos" | "config";
+export type GestionProfesionalSection =
+  | "cuadro"
+  | "profesionales"
+  | "tratamientos"
+  | "departamentos"
+  | "categorias";
 export type WhatsappSection =
   | "conversaciones"
   | "metricas"
@@ -30,6 +36,7 @@ export type AccordionModuleId =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "gestion-profesional"
   | "whatsapp";
 
 export type AppSection =
@@ -37,6 +44,7 @@ export type AppSection =
   | PresupuestosSection
   | PamiSection
   | BuscaTurnoSection
+  | GestionProfesionalSection
   | WhatsappSection;
 
 export type AppNavTarget =
@@ -45,6 +53,7 @@ export type AppNavTarget =
   | { module: "presupuestos"; section: PresupuestosSection }
   | { module: "pami"; section: PamiSection }
   | { module: "busca-turno"; section: BuscaTurnoSection }
+  | { module: "gestion-profesional"; section: GestionProfesionalSection }
   | { module: "whatsapp"; section: WhatsappSection };
 
 export const ORDENES_SECTIONS: { id: OrdenesSection; label: string }[] = [
@@ -73,6 +82,14 @@ export const BUSCA_TURNO_SECTIONS: { id: BuscaTurnoSection; label: string }[] = 
   { id: "config", label: "Configuración" },
 ];
 
+export const GESTION_PROFESIONAL_SECTIONS: { id: GestionProfesionalSection; label: string }[] = [
+  { id: "cuadro", label: "Cuadro" },
+  { id: "profesionales", label: "Profesionales" },
+  { id: "tratamientos", label: "Tratamientos" },
+  { id: "departamentos", label: "Departamentos" },
+  { id: "categorias", label: "Categorías" },
+];
+
 export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "conversaciones", label: "Conversaciones" },
   { id: "metricas", label: "Métricas" },
@@ -95,6 +112,7 @@ export function isAccordionModule(module: AppModuleId): module is AccordionModul
     module === "presupuestos" ||
     module === "pami" ||
     module === "busca-turno" ||
+    module === "gestion-profesional" ||
     module === "whatsapp"
   );
 }

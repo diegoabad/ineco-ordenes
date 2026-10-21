@@ -74,7 +74,6 @@ export function PdfViewerModal({
 
     const container = pagesRef.current;
     let cancelled = false;
-    let objectUrl = "";
 
     setLoading(true);
     setError("");
@@ -85,8 +84,9 @@ export function PdfViewerModal({
         const pdfjs = await loadPdfJs();
         if (cancelled) return;
 
-        objectUrl = URL.createObjectURL(blob);
-        const pdf = await pdfjs.getDocument({ url: objectUrl }).promise;
+        const data = new Uint8Array(await blob.arrayBuffer());
+        if (cancelled) return;
+        const pdf = await pdfjs.getDocument({ data }).promise;
         if (cancelled) return;
 
         const scroller = scrollerRef.current;
@@ -128,14 +128,12 @@ export function PdfViewerModal({
         if (!cancelled) setError("No se pudo mostrar el PDF.");
       } finally {
         if (!cancelled) setLoading(false);
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
       }
     })();
 
     return () => {
       cancelled = true;
       container.replaceChildren();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [open, blob]);
 

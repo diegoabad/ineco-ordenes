@@ -24,6 +24,7 @@ import {
 } from "../services/dataService";
 import { calcPresupuestoTotales } from "../lib/presupuestoTotales";
 import {
+  DEFAULT_TIPOS_PRESTACION,
   esTipoTratamiento,
   etiquetaFrecuencia,
   type ModalidadPresupuesto,
@@ -31,6 +32,7 @@ import {
   type Presupuesto,
   type PresupuestoFormData,
   type ProfesionalPresupuesto,
+  type TipoPrestacion,
 } from "../types";
 import type { PresupuestoPlantillaVar } from "../types/presupuestoPlantilla";
 import { PRESUPUESTO_PLANTILLA_VAR_LABELS } from "../types/presupuestoPlantilla";
@@ -39,6 +41,20 @@ import { EmailChipsInput } from "./EmailChipsInput";
 import { IconGrip, IconSearch, IconX } from "./Icons";
 import { PdfViewerModal } from "./PdfViewerModal";
 import { ProfesionalPresupuestoField } from "./ProfesionalPresupuestoField";
+import { TipoPrestacionChip } from "./TipoPrestacionChip";
+
+type FiltroTipoPrestacion = "todas" | "tratamiento" | "evaluacion";
+
+function grupoTipoPrestacion(nombre: string): Exclude<FiltroTipoPrestacion, "todas"> | "otras" {
+  const tipo = nombre
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (tipo === "tratamiento") return "tratamiento";
+  if (tipo === "evaluacion") return "evaluacion";
+  return "otras";
+}
 
 const PLANTILLA_VAR_GROUPS: { title: string; keys: readonly PresupuestoPlantillaVar[] }[] = [
   { title: "Paciente", keys: ["nombrePaciente", "email"] },
@@ -135,6 +151,8 @@ export function PresupuestoFormModal({
   const [saving, setSaving] = useState(false);
   const [accion, setAccion] = useState<"crear" | "enviar" | null>(null);
   const [busquedaPrest, setBusquedaPrest] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState<FiltroTipoPrestacion>("todas");
+  const [tiposPrestacion, setTiposPrestacion] = useState<TipoPrestacion[]>(DEFAULT_TIPOS_PRESTACION);
   const [plantillaBody, setPlantillaBody] = useState("");
   const [plantillaBodyExterno, setPlantillaBodyExterno] = useState("");
   const [recargoExternoPorcentaje, setRecargoExternoPorcentaje] = useState(0);
@@ -181,8 +199,12 @@ export function PresupuestoFormModal({
         setPlantillaBody("");
         setPlantillaBodyExterno("");
       });
+    setFiltroTipo("todas");
     void fetchPresupuestosConfig()
-      .then((cfg) => setRecargoExternoPorcentaje(cfg.recargoExternoPorcentaje ?? 0))
+      .then((cfg) => {
+        setRecargoExternoPorcentaje(cfg.recargoExternoPorcentaje ?? 0);
+        if (cfg.tiposPrestacion?.length) setTiposPrestacion(cfg.tiposPrestacion);
+      })
       .catch(() => setRecargoExternoPorcentaje(0));
     setForm(
       initial
@@ -239,11 +261,15 @@ export function PresupuestoFormModal({
 
   const prestacionesFiltradas = useMemo(() => {
     const q = busquedaPrest.trim().toLowerCase();
+    const porTipo =
+      filtroTipo === "todas"
+        ? prestaciones
+        : prestaciones.filter((p) => grupoTipoPrestacion(p.tipo) === filtroTipo);
     const filtradas = q
-      ? prestaciones.filter((p) =>
+      ? porTipo.filter((p) =>
           [p.titulo, p.tipo, p.descripcion].join(" ").toLowerCase().includes(q),
         )
-      : prestaciones;
+      : porTipo;
 
     return [...filtradas].sort((a, b) => {
       const aOk = prestacionTienePrecios(a);
@@ -251,7 +277,7 @@ export function PresupuestoFormModal({
       if (aOk === bOk) return 0;
       return aOk ? -1 : 1;
     });
-  }, [prestaciones, busquedaPrest]);
+  }, [prestaciones, busquedaPrest, filtroTipo]);
 
   const puedeGuardar = useMemo(() => {
     if (!form.nombrePaciente.trim()) return false;
@@ -440,51 +466,79 @@ export function PresupuestoFormModal({
     );
   }
 
-  async function actualizarPdfDesdePlantilla() {
-    if (!pdfPreview) return;
-    if (!pdfPreview.plantillaHtml.trim()) {
-      toast.warning("La plantilla no puede estar vacía");
-      return;
-    }
+  const pdfGenRef = useRef(0);
 
+  async function regenerarPdf(
+    html: string,
+    ctx: PresupuestoPlantillaContext,
+    fecha: string,
+    avisar = false,
+  ) {
+    if (!html.trim()) {
+      toast.warning("La plantilla no puede estar vacía");
+      return null;
+    }
+    const gen = ++pdfGenRef.current;
     setPdfPreview((prev) => (prev ? { ...prev, updatingPdf: true } : prev));
     try {
-      const body = renderPresupuestoPlantillaBody(
-        pdfPreview.plantillaHtml,
-        pdfPreview.plantillaCtx,
-      );
-      const blob = pdfBlobFromDoc(
-        generarPdfPresupuesto({ fecha: pdfPreview.fecha, body }),
-      );
+      const body = renderPresupuestoPlantillaBody(html, ctx);
+      const blob = pdfBlobFromDoc(generarPdfPresupuesto({ fecha, body }));
       const pdfBase64 = await blobToBase64(blob);
-      setPdfPreview((prev) =>
-        prev
-          ? {
-              ...prev,
-              blob,
-              pdfBase64,
-              plantillaBaselineHtml: prev.plantillaHtml,
-              plantillaDirty: false,
-              updatingPdf: false,
-            }
-          : prev,
-      );
-      toast.success("PDF actualizado");
+      if (pdfGenRef.current !== gen) return { blob, pdfBase64 };
+      setPdfPreview((prev) => {
+        if (!prev) return prev;
+        const sigue = richHtmlEquivalent(prev.plantillaHtml, html);
+        return {
+          ...prev,
+          blob,
+          pdfBase64,
+          plantillaBaselineHtml: sigue ? prev.plantillaHtml : prev.plantillaBaselineHtml,
+          plantillaDirty: sigue
+            ? false
+            : !richHtmlEquivalent(prev.plantillaHtml, prev.plantillaBaselineHtml),
+          updatingPdf: false,
+        };
+      });
+      if (avisar) toast.success("PDF actualizado");
+      return { blob, pdfBase64 };
     } catch (error) {
-      setPdfPreview((prev) => (prev ? { ...prev, updatingPdf: false } : prev));
-      toast.error(
-        error instanceof Error ? error.message : "No se pudo actualizar el PDF",
-      );
+      if (pdfGenRef.current === gen) {
+        setPdfPreview((prev) => (prev ? { ...prev, updatingPdf: false } : prev));
+        toast.error(
+          error instanceof Error ? error.message : "No se pudo actualizar el PDF",
+        );
+      }
+      return null;
     }
   }
+
+  useEffect(() => {
+    if (!pdfPreview?.plantillaDirty) return;
+    const html = pdfPreview.plantillaHtml;
+    const ctx = pdfPreview.plantillaCtx;
+    const fecha = pdfPreview.fecha;
+    const timer = window.setTimeout(() => {
+      void regenerarPdf(html, ctx, fecha);
+    }, 400);
+    return () => window.clearTimeout(timer);
+    // regenerarPdf lee el preview vigente; el efecto se dispara con el HTML editado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfPreview?.plantillaDirty, pdfPreview?.plantillaHtml, pdfPreview?.fecha]);
 
   async function confirmarPdfPreview() {
     if (!pdfPreview) return;
 
-    const { pdfBase64, modo } = pdfPreview;
+    const modo = pdfPreview.modo;
     setAccion(modo);
     setSaving(true);
     try {
+      const regenerado = await regenerarPdf(
+        pdfPreview.plantillaHtml,
+        pdfPreview.plantillaCtx,
+        pdfPreview.fecha,
+      );
+      if (!regenerado) return;
+      const pdfBase64 = regenerado.pdfBase64;
       const payload = {
         nombrePaciente: normalizeNombrePersona(form.nombrePaciente),
         profesional: normalizeNombrePersona(form.profesional),
@@ -669,18 +723,30 @@ export function PresupuestoFormModal({
               <p className="text-muted">No hay prestaciones en el catálogo.</p>
             ) : (
               <>
-                <div className="presup-prest-search table-search">
-                  <span className="table-search__icon" aria-hidden>
-                    <IconSearch size={16} />
-                  </span>
-                  <input
-                    id="presup-prest-search"
-                    type="search"
-                    value={busquedaPrest}
-                    onChange={(e) => setBusquedaPrest(e.target.value)}
-                    placeholder="Filtrar prestaciones…"
-                    aria-label="Filtrar prestaciones"
-                  />
+                <div className="presup-prest-filtros">
+                  <div className="presup-prest-search table-search">
+                    <span className="table-search__icon" aria-hidden>
+                      <IconSearch size={16} />
+                    </span>
+                    <input
+                      id="presup-prest-search"
+                      type="search"
+                      value={busquedaPrest}
+                      onChange={(e) => setBusquedaPrest(e.target.value)}
+                      placeholder="Filtrar prestaciones…"
+                      aria-label="Filtrar prestaciones"
+                    />
+                  </div>
+                  <select
+                    className="presup-prest-tipo"
+                    value={filtroTipo}
+                    aria-label="Filtrar por tipo"
+                    onChange={(e) => setFiltroTipo(e.target.value as FiltroTipoPrestacion)}
+                  >
+                    <option value="todas">Todas</option>
+                    <option value="tratamiento">Tratamiento</option>
+                    <option value="evaluacion">Evaluación</option>
+                  </select>
                 </div>
                 <ul className="presup-prest-list">
                   {prestacionesFiltradas.map((p) => {
@@ -703,7 +769,10 @@ export function PresupuestoFormModal({
                             aria-disabled={!selectable}
                           />
                           <span className="presup-prest-card__content">
-                            <span className="presup-prest-card__title">{p.titulo}</span>
+                            <span className="presup-prest-card__title">
+                              <span className="presup-prest-card__title-text">{p.titulo}</span>
+                              <TipoPrestacionChip nombre={p.tipo} tipos={tiposPrestacion} />
+                            </span>
                             <span className="presup-prest-card__precios">
                               <span className="presup-prest-card__precio">
                                 <span className="presup-prest-card__precio-label">
@@ -838,7 +907,10 @@ export function PresupuestoFormModal({
                     <span className="presup-orden-item__num" aria-hidden>
                       {index + 1}
                     </span>
-                    <span className="presup-orden-item__title">{p.titulo}</span>
+                    <span className="presup-orden-item__title">
+                      <span className="presup-orden-item__name">{p.titulo}</span>
+                      <TipoPrestacionChip nombre={p.tipo} tipos={tiposPrestacion} />
+                    </span>
                   </li>
                 );
               })}
@@ -977,9 +1049,9 @@ export function PresupuestoFormModal({
               <div>
                 <h3>Plantilla del presupuesto</h3>
                 <p className="text-muted">
-                  {pdfPreview.plantillaDirty
-                    ? "Hay cambios sin aplicar al PDF."
-                    : "Las variables se reemplazan al actualizar el PDF."}
+                  {pdfPreview.updatingPdf || pdfPreview.plantillaDirty
+                    ? "Actualizando el PDF…"
+                    : "El PDF muestra este presupuesto."}
                 </p>
               </div>
               <div className="presup-pdf-plantilla__toolbar-actions">
@@ -1006,7 +1078,14 @@ export function PresupuestoFormModal({
                 <button
                   type="button"
                   className="btn btn-outline btn-sm"
-                  onClick={() => void actualizarPdfDesdePlantilla()}
+                  onClick={() =>
+                    void regenerarPdf(
+                      pdfPreview.plantillaHtml,
+                      pdfPreview.plantillaCtx,
+                      pdfPreview.fecha,
+                      true,
+                    )
+                  }
                   disabled={
                     saving ||
                     pdfPreview.updatingPdf ||

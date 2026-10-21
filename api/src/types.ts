@@ -297,6 +297,7 @@ export type AppModuleId =
   | "presupuestos"
   | "pami"
   | "busca-turno"
+  | "gestion-profesional"
   | "whatsapp"
   | "pedidos-sistema"
   | "usuarios";
@@ -307,6 +308,7 @@ export const ALL_APP_MODULES: AppModuleId[] = [
   "presupuestos",
   "pami",
   "busca-turno",
+  "gestion-profesional",
   "whatsapp",
   "pedidos-sistema",
   "usuarios",
@@ -542,6 +544,15 @@ export type BuscaTurnoPrestacion = {
   profesionales: BuscaTurnoPrestacionProf[];
 };
 
+/** Duración fija para un profesional + prestación + modalidad. Pisa la duración general del buscador. */
+export type BuscaTurnoRegla = {
+  id: string;
+  profesionalDoc: string;
+  prestacionCodigo: string;
+  modalidad: "PRESENCIAL" | "VIRTUAL" | "TODAS";
+  duracionMin: number;
+};
+
 export type BuscaTurnoConfig = {
   version: 2;
   updatedAt: string;
@@ -549,5 +560,74 @@ export type BuscaTurnoConfig = {
   sedesCarga: string[];
   profesionales: BuscaTurnoProfesional[];
   prestaciones: Record<string, BuscaTurnoPrestacion>;
+  reglas: BuscaTurnoRegla[];
+};
+
+/** Área de la grilla de precios (Fonoaudiología, Infanto, TO…). */
+export type GestionDepartamento = {
+  id: string;
+  nombre: string;
+  codigo: string;
+  orden: number;
+};
+
+/** Columna de precio (Jefe, S. Senior, Senior, Staff…). */
+export type GestionCategoria = {
+  id: string;
+  nombre: string;
+  orden: number;
+};
+
+/** Qué profesionales del catálogo de Busca turno se usan, y con qué categoría y área. */
+export type GestionProfesionalAsignacion = {
+  doc: string;
+  visible: boolean;
+  categoriaId: string;
+  departamentoId: string;
+};
+
+/** Verde = 1 cuota. Azul = 3 cuotas. */
+export type GestionPrecioCategoria = {
+  una: number | null;
+  tres: number | null;
+};
+
+export type GestionTratamiento = {
+  codigo: string;
+  departamentoId: string;
+  precios: Record<string, GestionPrecioCategoria>;
+  valorVenta: number | null;
+  precioLista: number | null;
+};
+
+export type GestionProfesionalConfig = {
+  updatedAt: string;
+  updatedBy: string | null;
+  departamentos: GestionDepartamento[];
+  categorias: GestionCategoria[];
+  profesionales: GestionProfesionalAsignacion[];
+  tratamientos: GestionTratamiento[];
+};
+
+export type GestionCatalogoProfesional = {
+  doc: string;
+  nombre: string;
+  sede: string;
+  enabled: boolean;
+};
+
+export type GestionCatalogoTratamiento = {
+  codigo: string;
+  nombre: string;
+  duracion: number;
+  enabled: boolean;
+};
+
+export type GestionProfesionalVista = {
+  config: GestionProfesionalConfig;
+  catalogo: {
+    profesionales: GestionCatalogoProfesional[];
+    tratamientos: GestionCatalogoTratamiento[];
+  };
 };
 

@@ -28,6 +28,7 @@ import { loadLastNav, saveLastNav } from "./lib/lastModuleStorage";
 import {
   type AppNavTarget,
   type BuscaTurnoSection,
+  type GestionProfesionalSection,
   type OrdenesSection,
   type PamiSection,
   type PresupuestosSection,
@@ -47,6 +48,7 @@ import { PacienteFormModal } from "./components/PacienteFormModal";
 import { PresupuestosModule } from "./components/PresupuestosModule";
 import { PamiModule } from "./components/PamiModule";
 import { BuscaTurnoModule } from "./components/BuscaTurnoModule";
+import { GestionProfesionalModule } from "./components/gestion-profesional/GestionProfesionalModule";
 import { WhatsAppModule } from "./components/WhatsAppModule";
 import { UsuariosPanel } from "./components/UsuariosPanel";
 import { PedidosSistemaPanel } from "./components/PedidosSistemaPanel";
@@ -112,6 +114,7 @@ function firstAllowedModule(
     "inicio",
     "whatsapp",
     "busca-turno",
+    "gestion-profesional",
     "ordenes",
     "presupuestos",
     "pami",
@@ -128,6 +131,7 @@ export default function App() {
       "inicio",
       "whatsapp",
       "busca-turno",
+      "gestion-profesional",
       "ordenes",
       "presupuestos",
       "pami",
@@ -143,6 +147,8 @@ export default function App() {
     useState<PresupuestosSection>("presupuestos");
   const [pamiSection, setPamiSection] = useState<PamiSection>("historial");
   const [buscaTurnoSection, setBuscaTurnoSection] = useState<BuscaTurnoSection>("turnos");
+  const [gestionProfesionalSection, setGestionProfesionalSection] =
+    useState<GestionProfesionalSection>("cuadro");
   const [whatsappSection, setWhatsappSection] =
     useState<WhatsappSection>("conversaciones");
   const skipModulePersist = useRef(false);
@@ -218,6 +224,9 @@ export default function App() {
     } else if (nextModule === "busca-turno") {
       if (nextSection) setBuscaTurnoSection(nextSection as BuscaTurnoSection);
       else nextSection = buscaTurnoSection;
+    } else if (nextModule === "gestion-profesional") {
+      if (nextSection) setGestionProfesionalSection(nextSection as GestionProfesionalSection);
+      else nextSection = gestionProfesionalSection;
     } else if (nextModule === "whatsapp") {
       if (nextSection) setWhatsappSection(nextSection as WhatsappSection);
       else nextSection = whatsappSection;
@@ -249,9 +258,11 @@ export default function App() {
               ? pamiSection
               : module === "busca-turno"
                 ? buscaTurnoSection
-                : module === "whatsapp"
-                  ? whatsappSection
-                  : undefined,
+                : module === "gestion-profesional"
+                  ? gestionProfesionalSection
+                  : module === "whatsapp"
+                    ? whatsappSection
+                    : undefined,
     });
   }, [
     user,
@@ -260,6 +271,7 @@ export default function App() {
     presupuestosSection,
     pamiSection,
     buscaTurnoSection,
+    gestionProfesionalSection,
     whatsappSection,
     canAccessModule,
   ]);
@@ -910,6 +922,8 @@ export default function App() {
       setPamiSection(target.section);
     } else if (target.module === "busca-turno") {
       setBuscaTurnoSection(target.section);
+    } else if (target.module === "gestion-profesional") {
+      setGestionProfesionalSection(target.section);
     } else if (target.module === "whatsapp") {
       setWhatsappSection(target.section);
     }
@@ -924,9 +938,11 @@ export default function App() {
           ? pamiSection
           : module === "busca-turno"
             ? buscaTurnoSection
-            : module === "whatsapp"
-              ? whatsappSection
-              : null;
+            : module === "gestion-profesional"
+              ? gestionProfesionalSection
+              : module === "whatsapp"
+                ? whatsappSection
+                : null;
 
   const sidebar = (
     <AppSidebar
@@ -1009,6 +1025,14 @@ export default function App() {
           <BuscaTurnoModule
             section={buscaTurnoSection}
             onSectionChange={setBuscaTurnoSection}
+          />
+        ) : module === "gestion-profesional" ? (
+          <GestionProfesionalModule
+            section={gestionProfesionalSection}
+            onSectionChange={setGestionProfesionalSection}
+            onIrABuscaTurno={() =>
+              handleNavigate({ module: "busca-turno", section: "turnos" })
+            }
           />
         ) : module === "whatsapp" ? (
           <WhatsAppModule section={whatsappSection} />

@@ -15,6 +15,7 @@ const MODULE_LABELS: Record<AppModuleId, string> = {
   presupuestos: "Presupuestos",
   pami: "PAMI",
   "busca-turno": "Busca turno",
+  "gestion-profesional": "Gestión profesional",
   whatsapp: "WhatsApp",
   "pedidos-sistema": "Pedidos sistema",
   usuarios: "Usuarios",

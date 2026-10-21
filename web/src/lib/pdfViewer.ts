@@ -5,7 +5,7 @@ const PDF_WORKER_URL =
 
 export type PdfJsLib = {
   GlobalWorkerOptions: { workerSrc: string };
-  getDocument: (src: { url: string }) => { promise: Promise<PdfJsDocument> };
+  getDocument: (src: { url?: string; data?: Uint8Array }) => { promise: Promise<PdfJsDocument> };
 };
 
 export type PdfJsDocument = {

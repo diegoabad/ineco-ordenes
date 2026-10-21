@@ -7,6 +7,7 @@ import { usePendingUsers } from "../auth/PendingUsersContext";
 import type { AppModuleId } from "../auth/AuthContext";
 import {
   BUSCA_TURNO_SECTIONS,
+  GESTION_PROFESIONAL_SECTIONS,
   ORDENES_SECTIONS,
   PAMI_SECTIONS,
   PRESUPUESTOS_SECTIONS,
@@ -23,6 +24,7 @@ import {
   IconOrders,
   IconPami,
   IconPedidos,
+  IconProfesional,
   IconPresupuesto,
   IconUsers,
   IconWhatsapp,
@@ -90,6 +92,10 @@ function FlatNavButtons({
   });
 }
 
+function esDabad(email: string | null | undefined): boolean {
+  return email?.trim().toLowerCase().split("@")[0] === "dabad";
+}
+
 function AccordionGroup({
   id,
   label,
@@ -154,6 +160,7 @@ export function AppSidebar({
   const showPresupuestos = allowedModules.includes("presupuestos");
   const showPami = allowedModules.includes("pami");
   const showBuscaTurno = allowedModules.includes("busca-turno");
+  const showGestionProfesional = allowedModules.includes("gestion-profesional");
   const showWhatsapp = allowedModules.includes("whatsapp");
   const top = TOP_ITEMS.filter((item) => allowedModules.includes(item.id));
   const config = [
@@ -252,6 +259,32 @@ export function AppSidebar({
           </AccordionGroup>
         ) : null}
 
+        {showGestionProfesional ? (
+          <AccordionGroup
+            id="gestion-profesional"
+            label="Gestión profesional"
+            Icon={IconProfesional}
+            open={expanded === "gestion-profesional"}
+            active={module === "gestion-profesional"}
+            onToggle={() => toggleGroup("gestion-profesional")}
+          >
+            {GESTION_PROFESIONAL_SECTIONS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`app-sidebar__subbtn${
+                  module === "gestion-profesional" && section === item.id ? " is-active" : ""
+                }`}
+                onClick={() =>
+                  navigateSection({ module: "gestion-profesional", section: item.id })
+                }
+              >
+                {item.label}
+              </button>
+            ))}
+          </AccordionGroup>
+        ) : null}
+
         {showOrdenes ? (
           <AccordionGroup
             id="ordenes"
@@ -337,7 +370,7 @@ export function AppSidebar({
               onNavigate={navigateFlat}
               badges={{
                 ...(isAdmin ? { usuarios: pendingUsersCount } : {}),
-                ...(user?.sistemas ? { "pedidos-sistema": pedidosPendientesCount } : {}),
+                ...(esDabad(user?.email) ? { "pedidos-sistema": pedidosPendientesCount } : {}),
               }}
             />
           </nav>

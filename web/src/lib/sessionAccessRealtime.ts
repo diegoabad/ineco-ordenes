@@ -17,6 +17,7 @@ function isModuleId(value: unknown): value is AppModuleId {
     value === "presupuestos" ||
     value === "pami" ||
     value === "busca-turno" ||
+    value === "gestion-profesional" ||
     value === "whatsapp" ||
     value === "pedidos-sistema" ||
     value === "usuarios"

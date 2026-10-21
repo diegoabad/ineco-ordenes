@@ -175,7 +175,7 @@
 
 .search-row {
   display: grid;
-  grid-template-columns: minmax(280px, 2fr) minmax(140px, 1fr) auto;
+  grid-template-columns: minmax(240px, 2fr) minmax(130px, 0.8fr) minmax(110px, 0.6fr) auto;
   gap: 1.25rem;
   align-items: end;
 }
@@ -1006,6 +1006,34 @@
   gap: 0.35rem;
 }
 
+.slot-time-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.slot-card-compact.slot-card--multi {
+  height: auto;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.65rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  text-align: left;
+}
+
+.slot-modulos {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--color-text-muted, #8a7a82);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.slot-card-compact:hover .slot-modulos {
+  color: var(--color-primary);
+}
+
 .slot-mod-icon {
   display: inline-flex;
   align-items: center;
@@ -1506,6 +1534,13 @@ button.slot-card.slot-card-compact:focus-visible {
   flex-shrink: 0;
 }
 
+.config-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .config-progress-track {
   height: 6px;
   width: 100%;
@@ -1593,9 +1628,119 @@ button.slot-card.slot-card-compact:focus-visible {
 .config-hint {
   font-size: 0.8125rem;
   color: var(--color-text-muted);
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.75rem;
   line-height: 1.45;
   flex-shrink: 0;
+}
+
+.reglas-filtros {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1.4fr) minmax(140px, 0.7fr);
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 0.85rem;
+  flex-shrink: 0;
+}
+
+.reglas-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.reglas-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) minmax(180px, 1.5fr) minmax(120px, 0.7fr) minmax(130px, 0.7fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 0.85rem;
+  flex-shrink: 0;
+}
+
+.reglas-form-add {
+  height: 42px;
+}
+
+.reglas-table-wrap {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.config-scroll.reglas-table-wrap {
+  padding: 0;
+}
+
+.reglas-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.reglas-table th,
+.reglas-table td {
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.reglas-table th {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-soft);
+  background: var(--color-surface);
+}
+
+.reglas-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.reglas-table tbody tr:hover td {
+  background: var(--color-primary-light);
+}
+
+.reglas-table th.reglas-table-accion,
+.reglas-table td.reglas-table-accion {
+  width: 3rem;
+  text-align: right;
+}
+
+.regla-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #b42318;
+  cursor: pointer;
+}
+
+.regla-del:hover:not(:disabled) {
+  background: #fde8ea;
+  color: #b42318;
+}
+
+.regla-del:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fl-modal.fl-modal--busca-regla {
+  width: min(100%, 640px);
+}
+
+@media (max-width: 900px) {
+  .reglas-form,
+  .reglas-filtros {
+    grid-template-columns: 1fr;
+  }
 }
 
 .config-search-input {

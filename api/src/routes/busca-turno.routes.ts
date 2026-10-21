@@ -18,6 +18,7 @@ function parseBody(body: unknown): Omit<BuscaTurnoConfig, "updatedAt" | "version
       raw.prestaciones && typeof raw.prestaciones === "object" && !Array.isArray(raw.prestaciones)
         ? (raw.prestaciones as BuscaTurnoConfig["prestaciones"])
         : {},
+    reglas: Array.isArray(raw.reglas) ? (raw.reglas as BuscaTurnoConfig["reglas"]) : [],
     updatedBy: raw.updatedBy != null ? String(raw.updatedBy) : null,
   };
 }

@@ -1,6 +1,7 @@
 import type { AppModuleId } from "../auth/AuthContext";
 import {
   BUSCA_TURNO_SECTIONS,
+  GESTION_PROFESIONAL_SECTIONS,
   ORDENES_SECTIONS,
   PAMI_SECTIONS,
   PRESUPUESTOS_SECTIONS,
@@ -8,6 +9,7 @@ import {
   isAccordionModule,
   type AppSection,
   type BuscaTurnoSection,
+  type GestionProfesionalSection,
   type OrdenesSection,
   type PamiSection,
   type PresupuestosSection,
@@ -24,6 +26,7 @@ const VALID_MODULES = new Set<AppModuleId>([
   "presupuestos",
   "pami",
   "busca-turno",
+  "gestion-profesional",
   "whatsapp",
   "pedidos-sistema",
   "usuarios",
@@ -33,6 +36,7 @@ const ORDENES_IDS = new Set(ORDENES_SECTIONS.map((s) => s.id));
 const PRESUPUESTOS_IDS = new Set(PRESUPUESTOS_SECTIONS.map((s) => s.id));
 const PAMI_IDS = new Set(PAMI_SECTIONS.map((s) => s.id));
 const BUSCA_TURNO_IDS = new Set(BUSCA_TURNO_SECTIONS.map((s) => s.id));
+const GESTION_PROFESIONAL_IDS = new Set(GESTION_PROFESIONAL_SECTIONS.map((s) => s.id));
 const WHATSAPP_IDS = new Set(WHATSAPP_SECTIONS.map((s) => s.id));
 
 export type LastNav = {
@@ -57,6 +61,12 @@ function normalizeSection(module: AppModuleId, section: unknown): AppSection | u
   }
   if (module === "busca-turno" && BUSCA_TURNO_IDS.has(section as BuscaTurnoSection)) {
     return section as BuscaTurnoSection;
+  }
+  if (
+    module === "gestion-profesional" &&
+    GESTION_PROFESIONAL_IDS.has(section as GestionProfesionalSection)
+  ) {
+    return section as GestionProfesionalSection;
   }
   if (module === "whatsapp" && WHATSAPP_IDS.has(section as WhatsappSection)) {
     return section as WhatsappSection;
