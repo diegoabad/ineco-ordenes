@@ -109,7 +109,8 @@ const casos: Caso[] = [
     id: "P19",
     categoria: "Coberturas",
     titulo: "CABA → Info → Coberturas → OSDE",
-    pasos: [{ user: "1" }, { user: "2" }, { user: "2" }, { user: "1" }],
+    // Lista: 1 Galeno · 2 Medicus · 3 Omint · 4 OSDE
+    pasos: [{ user: "1" }, { user: "2" }, { user: "2" }, { user: "4" }],
   },
   {
     id: "P12",
@@ -131,15 +132,17 @@ const casos: Caso[] = [
     id: "R06",
     categoria: "Turnos",
     titulo: "No paciente: DNI + nombre + apellido + sexo + email",
+    // DNI inventado: 33333333 existe en Medexis (JULIO CESAR LUNA) y rompe el flujo.
+    // Nombre ambiguo (Alex): si usamos Martín el menú infiere sexo y saltea ese paso.
     pasos: [
       { user: "1" },
       { user: "1" },
       { user: "1" },
-      { user: "33333333" },
-      { user: "Martín" },
+      { user: "88001122" },
+      { user: "Alex" },
       { user: "Pereyra" },
       { user: "2" },
-      { user: "martin.menu.prueba@example.com" },
+      { user: "alex.menu.prueba@example.com" },
     ],
   },
   {
@@ -205,7 +208,7 @@ const casos: Caso[] = [
       { user: "1" },
       { user: "1" },
       { user: "1" },
-      { user: "33333333" },
+      { user: "45999881" },
       { user: "0" },
       { user: "00" },
     ],
