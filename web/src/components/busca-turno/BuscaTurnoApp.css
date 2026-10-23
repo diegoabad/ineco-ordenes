@@ -1110,7 +1110,7 @@
   text-align: center;
 }
 
-.slot-card-compact:hover .slot-modulos {
+.busca-turno:not(.busca-turno--compact) .slot-card-compact:hover .slot-modulos {
   color: var(--color-primary);
 }
 
@@ -1124,7 +1124,7 @@
   opacity: 0.95;
 }
 
-.slot-card-compact:hover .slot-mod-icon {
+.busca-turno:not(.busca-turno--compact) .slot-card-compact:hover .slot-mod-icon {
   color: var(--color-primary);
 }
 
@@ -1147,7 +1147,7 @@ button.slot-card.slot-card-compact:focus-visible {
   outline-offset: 2px;
 }
 
-.slot-card-compact:hover {
+.busca-turno:not(.busca-turno--compact) .slot-card-compact:hover {
   border-color: var(--color-primary);
   background: var(--color-primary-light);
   box-shadow: none;
@@ -1186,7 +1186,7 @@ button.slot-card.slot-card-compact:focus-visible {
   color: var(--color-text);
 }
 
-.slot-card-compact:hover .slot-time {
+.busca-turno:not(.busca-turno--compact) .slot-card-compact:hover .slot-time {
   color: var(--color-primary);
 }
 
@@ -2165,6 +2165,29 @@ button.slot-card.slot-card-compact:focus-visible {
   font-size: 0.8rem;
 }
 
+.busca-turno--compact .busca-compact-fuera {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.busca-turno--compact .busca-compact-fuera .field {
+  width: 100%;
+  gap: 0.2rem;
+}
+
+.busca-turno--compact .busca-compact-fuera .btn-limpiar {
+  width: 100%;
+  margin-left: 0;
+  height: 1.9rem;
+  padding: 0 0.65rem;
+  font-size: 0.75rem;
+}
+
 .busca-turno--compact .results-summary-row {
   display: flex;
   flex-direction: column;
@@ -2231,23 +2254,28 @@ button.slot-card.slot-card-compact:focus-visible {
 .busca-turno--compact .day-group {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.15rem 0 0.35rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.busca-turno--compact .day-group:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
+.busca-turno--compact .day-group.is-collapsed {
+  gap: 0;
 }
 
 .busca-turno--compact .day-header {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.35rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.45rem;
   margin: 0;
-  padding: 0.5rem 0.55rem;
+  padding: 0.45rem 0.5rem;
   font-size: 0.78rem;
   border-radius: 8px;
   border: 1px solid #e4d2d8;
@@ -2256,18 +2284,27 @@ button.slot-card.slot-card-compact:focus-visible {
   box-sizing: border-box;
 }
 
+.busca-turno--compact .day-header-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .busca-turno--compact .day-header-label {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 750;
   letter-spacing: -0.01em;
   text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .busca-turno--compact .day-counts {
-  width: 100%;
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+  width: auto;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
 }
 
 .busca-turno--compact .day-count {
@@ -2279,19 +2316,19 @@ button.slot-card.slot-card-compact:focus-visible {
 }
 
 .busca-turno--compact .day-count--ocupado {
-  background: color-mix(in srgb, #8a6b75 12%, #fff);
-  color: #6a555d;
-  border-color: color-mix(in srgb, #8a6b75 26%, #fff);
+  background: color-mix(in srgb, #b42318 14%, #fff);
+  color: #9b1c1c;
+  border-color: color-mix(in srgb, #b42318 28%, #fff);
 }
 
 .busca-turno--compact .day-prof-list {
-  gap: 0.45rem;
-  padding: 0 0.05rem;
+  gap: 0.65rem;
+  padding: 0.15rem 0.05rem 0.1rem;
 }
 
 .busca-turno--compact .day-prof-block,
 .busca-turno--compact .prof-block {
-  padding: 0.45rem 0.45rem 0.5rem;
+  padding: 0.65rem 0.55rem 0.6rem;
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--color-border);
@@ -2307,28 +2344,35 @@ button.slot-card.slot-card-compact:focus-visible {
 
 .busca-turno--compact .day-prof-header {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.3rem;
-  margin-bottom: 0.4rem;
-  padding-bottom: 0.35rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: 0.55rem;
+  padding: 0.1rem 0 0.5rem;
   border-bottom: 1px dashed color-mix(in srgb, var(--color-border) 85%, transparent);
 }
 
 .busca-turno--compact .day-prof-name,
 .busca-turno--compact .prof-name {
-  font-size: 0.78rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.84rem;
   font-weight: 750;
   margin-bottom: 0;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-text);
 }
 
 .busca-turno--compact .day-prof-counts {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
   gap: 0.25rem;
 }
 
@@ -2355,16 +2399,19 @@ button.slot-card.slot-card-compact:focus-visible {
   max-width: 100%;
   flex: 0 0 auto;
   height: auto;
-  min-height: 2.15rem;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.75rem;
+  min-height: 2.2rem;
+  padding: 0.42rem 0.45rem 0.42rem 0.4rem;
+  font-size: 0.72rem;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   justify-content: flex-start;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 0.15rem;
+  align-items: center;
+  gap: 0.3rem;
   box-sizing: border-box;
-  border-radius: 8px;
+  border-radius: 7px;
   border-left-width: 3px;
+  text-align: left;
 }
 
 .busca-turno--compact .slot-card-compact.slot-card--libre {
@@ -2374,21 +2421,11 @@ button.slot-card.slot-card-compact:focus-visible {
   color: #1a3d2c;
 }
 
-.busca-turno--compact .slot-card-compact.slot-card--libre:hover {
-  background: color-mix(in srgb, #1f8a5b 12%, #fff);
-  border-color: color-mix(in srgb, #1f8a5b 42%, #e2d4d9);
-}
-
 .busca-turno--compact .slot-card-compact.slot-card--ocupado {
-  background: #f3f0f1;
+  background: #f3f1f2;
   border-color: #ddd6d8;
-  border-left-color: #9a8a90;
-  color: #6b6568;
-}
-
-.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover {
-  background: #ebe6e8;
-  border-color: #cfc6c9;
+  border-left-color: #9a8f93;
+  color: #5c5559;
 }
 
 .busca-turno--compact .day-prof-block:nth-child(even) .slot-card-compact.slot-card--libre {
@@ -2397,37 +2434,78 @@ button.slot-card.slot-card-compact:focus-visible {
 }
 
 .busca-turno--compact .day-prof-block:nth-child(even) .slot-card-compact.slot-card--ocupado {
-  background: #f3f0f1;
+  background: #f3f1f2;
   border-color: #ddd6d8;
 }
 
-.busca-turno--compact .slot-time-row {
-  width: 100%;
-  justify-content: flex-start;
-  gap: 0.35rem;
+.busca-turno--compact .slot-card-compact .slot-mod-icon {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  opacity: 0.9;
+}
+
+.busca-turno--compact .slot-card--libre .slot-mod-icon {
+  color: #1f8a5b;
+}
+
+.busca-turno--compact .slot-card--ocupado .slot-mod-icon {
+  color: #7a7478;
 }
 
 .busca-turno--compact .slot-time {
-  font-size: 0.82rem;
+  flex: 0 0 auto;
+  font-size: 0.74rem;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  line-height: 1.2;
 }
 
 .busca-turno--compact .slot-card--libre .slot-time {
   color: #145c3a;
 }
 
+.busca-turno--compact .slot-card--ocupado .slot-time {
+  color: #5c5559;
+}
+
+.busca-turno--compact .slot-meta {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  font-weight: 650;
+  color: #4d6b5a;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.busca-turno--compact .slot-paciente {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #5c5559;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
 .busca-turno--compact .slot-estado {
   margin-left: auto;
   flex: 0 0 auto;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 750;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
-  padding: 0.12rem 0.35rem;
+  padding: 0.1rem 0.32rem;
   border-radius: 999px;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .busca-turno--compact .slot-estado--libre {
@@ -2436,26 +2514,72 @@ button.slot-card.slot-card-compact:focus-visible {
 }
 
 .busca-turno--compact .slot-estado--ocupado {
-  background: color-mix(in srgb, #8a6b75 16%, #fff);
-  color: #6a555d;
-}
-
-.busca-turno--compact .slot-paciente {
-  display: block;
-  width: 100%;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: #5c5559;
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: color-mix(in srgb, #b42318 14%, #fff);
+  color: #9b1c1c;
+  border: 1px solid color-mix(in srgb, #b42318 28%, #fff);
 }
 
 .busca-turno--compact .slot-modulos {
-  font-size: 0.66rem;
-  line-height: 1.25;
-  opacity: 0.9;
+  display: none;
+}
+
+/* En la barra: hover sin bordó; solo un leve refuerzo del color propio */
+.busca-turno--compact .slot-card-compact:hover,
+.busca-turno--compact button.slot-card.slot-card-compact:hover {
+  box-shadow: none;
+  transform: none;
+  filter: none;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover,
+.busca-turno--compact .day-prof-block:nth-child(even) .slot-card-compact.slot-card--libre:hover {
+  background: color-mix(in srgb, #1f8a5b 12%, #fff);
+  border-color: color-mix(in srgb, #1f8a5b 40%, #e2d4d9);
+  border-left-color: #1f8a5b;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover .slot-time,
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover .slot-meta,
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover .slot-estado,
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover .slot-mod-icon {
+  color: #145c3a;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover .slot-mod-icon {
+  color: #1f8a5b;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover .slot-estado--libre {
+  background: color-mix(in srgb, #1f8a5b 16%, #fff);
+  color: #176b46;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover,
+.busca-turno--compact .day-prof-block:nth-child(even) .slot-card-compact.slot-card--ocupado:hover {
+  background: #ebe7e9;
+  border-color: #cfc6c9;
+  border-left-color: #9a8f93;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover .slot-time,
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover .slot-paciente,
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover .slot-modulos {
+  color: #5c5559;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover .slot-mod-icon {
+  color: #7a7478;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover .slot-estado--ocupado {
+  background: color-mix(in srgb, #b42318 14%, #fff);
+  color: #9b1c1c;
+  border-color: color-mix(in srgb, #b42318 28%, #fff);
+}
+
+.busca-turno--compact .slot-grid.slot-grid-by-prof,
+.busca-turno--compact .slot-grid-by-prof {
+  gap: 0.3rem;
 }
 
 .busca-turno--compact .load-more-wrap {

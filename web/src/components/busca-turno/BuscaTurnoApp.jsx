@@ -736,6 +736,15 @@ function textoModulos(modulos) {
   return `${horas.slice(0, -1).join(', ')} y ${horas[horas.length - 1]}`;
 }
 
+/** Rango horario inicio–fin (p. ej. 09:00–11:00) a partir del primer módulo + duración. */
+function fmtRangoHorario(inicio, durMin) {
+  const start = inicio instanceof Date && !isNaN(inicio.getTime()) ? inicio : new Date(inicio);
+  if (isNaN(start.getTime())) return '';
+  if (!(Number(durMin) > 0)) return fmtTime(start);
+  const end = new Date(start.getTime() + Number(durMin) * 60000);
+  return `${fmtTime(start)}–${fmtTime(end)}`;
+}
+
 /** Medexis TurnoNuevo: "YYYY-MM-DD HH:mm:ss" (hora local). */
 function formatTurnoFechaHoraMedexis(d) {
   const x = d instanceof Date && !isNaN(d.getTime()) ? d : new Date(d);
@@ -2562,7 +2571,6 @@ function App({
               </strong>
               <span>
                 {MODALIDADES.find((m) => m.value === modalidad)?.label || modalidad}
-                {duracionAplicable ? ` · ${labelDuracion(duracionAplicable)}` : ''}
               </span>
             </span>
             <span className="busca-filtros-acordeon__chevron" aria-hidden>
@@ -2602,24 +2610,26 @@ function App({
               ))}
             </select>
           </div>
-          <div className="field">
-            <label>Duración</label>
-            <select
-              value={duracionAplicable ?? ''}
-              onChange={(e) => setDuracionMin(Number(e.target.value))}
-              disabled={duracionesAgenda.length === 0}
-            >
-              {duracionesAgenda.length === 0 ? (
-                <option value="">Al llegar las agendas</option>
-              ) : (
-                duracionesAgenda.map((min) => (
-                  <option key={min} value={min}>
-                    {labelDuracion(min)}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
+          {!compact ? (
+            <div className="field">
+              <label>Duración</label>
+              <select
+                value={duracionAplicable ?? ''}
+                onChange={(e) => setDuracionMin(Number(e.target.value))}
+                disabled={duracionesAgenda.length === 0}
+              >
+                {duracionesAgenda.length === 0 ? (
+                  <option value="">Al llegar las agendas</option>
+                ) : (
+                  duracionesAgenda.map((min) => (
+                    <option key={min} value={min}>
+                      {labelDuracion(min)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          ) : null}
           <div className="search-actions">
             <button
               type="button"
@@ -2645,7 +2655,41 @@ function App({
         </div>
         )}
 
-        {(slotsRaw.length > 0 || searchReturnedEmpty) && (
+        {compact ? (
+          <div className="busca-compact-fuera">
+            <div className="field">
+              <label>Duración</label>
+              <select
+                value={duracionAplicable ?? ''}
+                onChange={(e) => setDuracionMin(Number(e.target.value))}
+                disabled={duracionesAgenda.length === 0}
+              >
+                {duracionesAgenda.length === 0 ? (
+                  <option value="">Al llegar las agendas</option>
+                ) : (
+                  duracionesAgenda.map((min) => (
+                    <option key={min} value={min}>
+                      {labelDuracion(min)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            {(slotsRaw.length > 0 || searchReturnedEmpty) ? (
+              <button
+                type="button"
+                className="btn btn-limpiar"
+                onClick={limpiarBusqueda}
+                disabled={searching}
+                title="Quitar prestación, resultados y volver al estado inicial"
+              >
+                Limpiar
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!compact && (slotsRaw.length > 0 || searchReturnedEmpty) ? (
           <div className="results-summary-row">
             {searchReturnedEmpty && slotsRaw.length === 0 ? (
               <div className="results-summary visible">Sin turnos en este rango</div>
@@ -2660,7 +2704,7 @@ function App({
               Limpiar
             </button>
           </div>
-        )}
+        ) : null}
         {prestacionId && profesionalesForPrestacion.length === 0 && (
           <p className="prestadores-picker-empty">
             No hay prestadores habilitados en Config para esta prestación (sedes: {sedesCarga.join(', ')}).
@@ -2929,7 +2973,9 @@ function App({
                       return (
                       <div key={doc} className="day-prof-block">
                         <div className="day-prof-header">
-                          <span className="day-prof-name">{profLabelConDoc(nombre, doc)}</span>
+                          <span className="day-prof-name">
+                            {compact ? titleCase(nombre || '') : profLabelConDoc(nombre, doc)}
+                          </span>
                           {compact ? (
                             <span className="day-prof-counts" aria-label={`${libresProf} libres, ${ocupadosProf.length} ocupados`}>
                               <span className="day-count">{libresProf} libre{libresProf !== 1 ? 's' : ''}</span>
@@ -2955,19 +3001,45 @@ function App({
                               const primero = grupo.turnos[0];
                               const ultimo = grupo.turnos[grupo.turnos.length - 1];
                               const virtual = isSlotVirtual(primero.edificio);
-                              const modalidadTxt = virtual
-                                ? 'Virtual'
-                                : [primero.edificio, primero.sector].filter(Boolean).join(' · ') || 'Presencial';
+                              const sedeTxt = virtual
+                                ? ''
+                                : [primero.edificio, primero.sector].filter(Boolean).join(' · ');
+                              const modalidadTxt = virtual ? 'Virtual' : sedeTxt || 'Presencial';
                               const paciente = primero.personaNombre || 'Paciente';
                               const varios = grupo.turnos.length > 1;
-                              const rango = varios
-                                ? `${fmtTime(primero.fechaHora)}–${fmtTime(ultimo.fechaHora)}`
-                                : fmtTime(primero.fechaHora);
                               const durMin = duracionOcupadoMin(grupo, pasoPorProf.get(String(doc)));
+                              const rango = durMin
+                                ? fmtRangoHorario(primero.fechaHora, durMin)
+                                : varios
+                                  ? `${fmtTime(primero.fechaHora)}–${fmtTime(ultimo.fechaHora)}`
+                                  : fmtTime(primero.fechaHora);
                               const durTxt = durMin ? `dur: ${durMin} min` : '';
                               const detalleOc = [durTxt, varios ? `${grupo.turnos.length} turnos` : '']
                                 .filter(Boolean)
                                 .join(' · ');
+                              if (compact) {
+                                return (
+                                  <button
+                                    key={`oc-${doc}-${new Date(primero.fechaHora).getTime()}-${i}`}
+                                    type="button"
+                                    className={`slot-card slot-card-compact slot-card--ocupado${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}`}
+                                    onClick={() => {
+                                      setOcupadoError('');
+                                      setOcupadoConfirmar(null);
+                                      setSelectedOcupado(grupo);
+                                    }}
+                                    title={sedeTxt || undefined}
+                                    aria-label={`Turno ocupado ${rango}. ${modalidadTxt}. ${paciente}${detalleOc ? `. ${detalleOc}` : ''}`}
+                                  >
+                                    <span className="slot-mod-icon" aria-hidden>
+                                      {virtual ? <IconMonitor size={13} /> : <IconBuilding size={13} />}
+                                    </span>
+                                    <span className="slot-time">{rango}</span>
+                                    <span className="slot-paciente">{paciente}</span>
+                                    <span className="slot-estado slot-estado--ocupado">Ocupado</span>
+                                  </button>
+                                );
+                              }
                               return (
                                 <button
                                   key={`oc-${doc}-${new Date(primero.fechaHora).getTime()}-${i}`}
@@ -2978,7 +3050,7 @@ function App({
                                     setOcupadoConfirmar(null);
                                     setSelectedOcupado(grupo);
                                   }}
-                                  title={paciente}
+                                  title={sedeTxt || undefined}
                                   aria-label={`Turno ocupado ${rango}. ${modalidadTxt}. ${paciente}${detalleOc ? `. ${detalleOc}` : ''}`}
                                 >
                                   <span className="slot-time-row">
@@ -2990,22 +3062,20 @@ function App({
                                       )}
                                     </span>
                                     <span className="slot-time">{rango}</span>
-                                    {compact ? <span className="slot-estado slot-estado--ocupado">Ocupado</span> : null}
                                   </span>
-                                  {compact ? (
-                                    <span className="slot-paciente">{paciente}</span>
-                                  ) : null}
                                   {detalleOc ? <span className="slot-modulos">{detalleOc}</span> : null}
                                 </button>
                               );
                             }
                             const s = celda.item;
                             const virtual = isSlotVirtual(s.edificio);
-                            const tooltip = virtual
-                              ? 'Virtual'
-                              : [s.edificio, s.sector].filter(Boolean).join(' · ') || 'Presencial';
+                            const sedeTxt = virtual
+                              ? ''
+                              : [s.edificio, s.sector].filter(Boolean).join(' · ');
+                            const tooltip = virtual ? 'Virtual' : sedeTxt || 'Presencial';
                             const modulos = s.modulos?.length ? s.modulos : [s];
                             const durMin = duracionLibreMin(s, pasoPorProf.get(String(doc)));
+                            const rangoLibre = fmtRangoHorario(s.fechaHora, durMin);
                             const durTxt = durMin ? `dur: ${durMin} min` : '';
                             const ocupa =
                               modulos.length > 1
@@ -3013,21 +3083,36 @@ function App({
                                 : '';
                             const reglaTxt = s.porRegla ? 'Regla' : '';
                             const detalle = [durTxt, ocupa, reglaTxt].filter(Boolean).join(' · ');
+                            if (compact) {
+                              return (
+                                <button
+                                  key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}
+                                  type="button"
+                                  className={`slot-card slot-card-compact slot-card--libre${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}`}
+                                  onClick={() => openAssignModal(s)}
+                                  title={sedeTxt || undefined}
+                                  aria-label={`Asignar turno ${rangoLibre}. ${tooltip}${detalle ? `. ${detalle}` : ''}`}
+                                >
+                                  <span className="slot-mod-icon" aria-hidden>
+                                    {virtual ? <IconMonitor size={13} /> : <IconBuilding size={13} />}
+                                  </span>
+                                  <span className="slot-time">{rangoLibre}</span>
+                                  {durMin ? <span className="slot-meta">{durMin} min</span> : null}
+                                  <span className="slot-estado slot-estado--libre">Libre</span>
+                                </button>
+                              );
+                            }
                             return (
                               <button
                                 key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}
                                 type="button"
-                                className={`slot-card slot-card-compact slot-card--libre${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalle ? ' slot-card--multi' : ''}`}
+                                className={`slot-card slot-card-compact${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalle ? ' slot-card--multi' : ''}`}
                                 onClick={() => openAssignModal(s)}
-                                title={tooltip}
+                                title={sedeTxt || undefined}
                                 aria-label={`Asignar turno ${fmtTime(s.fechaHora)}. ${tooltip}${detalle ? `. ${detalle}` : ''}`}
                               >
                                 <span className="slot-time-row">
-                                  <span
-                                    className="slot-mod-icon"
-                                    title={tooltip}
-                                    aria-hidden
-                                  >
+                                  <span className="slot-mod-icon" aria-hidden>
                                     {virtual ? (
                                       <IconMonitor size={14} />
                                     ) : (
@@ -3035,7 +3120,6 @@ function App({
                                     )}
                                   </span>
                                   <span className="slot-time">{fmtTime(s.fechaHora)}</span>
-                                  {compact ? <span className="slot-estado slot-estado--libre">Libre</span> : null}
                                 </span>
                                 {detalle ? <span className="slot-modulos">{detalle}</span> : null}
                               </button>
