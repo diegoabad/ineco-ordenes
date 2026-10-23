@@ -80,8 +80,32 @@ function labelModalidadRegla(value) {
 
 function labelDuracion(min) {
   const n = Number(min);
-  if (n === 120) return '120 min (2 h)';
+  if (n > 0 && n % 60 === 0) {
+    const h = n / 60;
+    return `${n} min (${h} h)`;
+  }
   return `${n} min`;
+}
+
+/** Minutos que ocupa una oferta libre: el paso de la agenda por cada módulo. */
+function duracionLibreMin(slot, pasoDia) {
+  const mods = slot?.modulos?.length ? slot.modulos : [slot];
+  const propio = Number(slot?.moduloMin);
+  const pasoPropio = propio === 15 || propio === 30 || propio === 45 || propio === 60 ? propio : 0;
+  const paso = pasoPropio || (Number(pasoDia) > 0 ? Number(pasoDia) : 0);
+  if (paso > 0) return paso * mods.length;
+  return null;
+}
+
+/** Minutos de un bloque ocupado. Si hay varios seguidos, el hueco entre ellos es el paso. */
+function duracionOcupadoMin(grupo, pasoDia) {
+  const turnos = grupo?.turnos || [];
+  if (turnos.length >= 2) {
+    const a = minutoSlot(turnos[0]);
+    const b = minutoSlot(turnos[1]);
+    if (a != null && b != null && b > a) return (b - a) * turnos.length;
+  }
+  return Number(pasoDia) > 0 ? Number(pasoDia) : null;
 }
 
 /** Una sola regla por profesional + prestación + modalidad. */
@@ -470,7 +494,7 @@ function agruparOcupadosMismoPaciente(lista) {
     const mismoLugar = !!(ultimo && lugarOcupado(ultimo) === lugarOcupado(turno));
     const mismoDia = min != null && minPrev != null && mismoDiaMinutos(minPrev, min);
     let seguido = false;
-    if (mismoDia && (gap === 15 || gap === 30 || gap === 45)) {
+    if (mismoDia && (gap === 15 || gap === 30 || gap === 45 || gap === 60)) {
       if (grupo.turnos.length < 2) seguido = true;
       else seguido = gap === minutoSlot(grupo.turnos[1]) - minutoSlot(grupo.turnos[0]);
     }
@@ -480,31 +504,16 @@ function agruparOcupadosMismoPaciente(lista) {
   return grupos;
 }
 
-function gcdMin(a, b) {
-  let x = Math.abs(a);
-  let y = Math.abs(b);
-  while (y) {
-    const t = y;
-    y = x % y;
-    x = t;
-  }
-  return x;
-}
-
 /**
- * Paso de la agenda de ESTE bloque, sin mirar otros profesionales.
- * 15, 30, 45 o 60 si aparecen. Si solo se ven huecos más grandes (el módulo del
- * medio está ocupado), el paso es 15, 30 o 45 según el máximo común divisor.
- * Una agenda en punto (9, 10, 11) es de 60. Un hueco de 60 entre módulos de 30 no.
+ * Paso de la agenda: el hueco entre turnos seguidos, libres u ocupados.
+ * 16:00 y 17:00 son un slot de 60. Un hueco de 120 no se parte en 30.
  */
 function detectarPaso(minutos) {
   const counts = new Map();
-  const gaps = [];
   for (let i = 1; i < minutos.length; i++) {
     const gap = minutos[i] - minutos[i - 1];
     if (gap <= 0 || gap % PASO_MIN !== 0) continue;
     if (!mismoDiaMinutos(minutos[i - 1], minutos[i])) continue;
-    gaps.push(gap);
     if (gap === 15 || gap === 30 || gap === 45 || gap === 60) {
       counts.set(gap, (counts.get(gap) || 0) + 1);
     }
@@ -518,15 +527,7 @@ function detectarPaso(minutos) {
       veces = n;
     }
   }
-  if (paso) return paso;
-  if (!gaps.length) return null;
-  let g = gaps[0];
-  for (let i = 1; i < gaps.length; i++) g = gcdMin(g, gaps[i]);
-  if (g === 60) return 60;
-  for (const p of [45, 30, 15]) {
-    if (g % p === 0) return p;
-  }
-  return null;
+  return paso;
 }
 
 function diaDeMinuto(min) {
@@ -534,18 +535,6 @@ function diaDeMinuto(min) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-function ofertasDeUnModulo(byMin, moduloMin) {
-  const out = [];
-  for (const start of byMin.values()) {
-    out.push({ ...start, modulos: [start], moduloMin });
-  }
-  return out;
-}
-
-/**
- * El paso sale de libres y dados del mismo día. Si un día tiene un solo hueco,
- * se usa el paso que ya se vio en otros días de esa agenda.
- */
 function minutosDeSlots(slots) {
   const out = [];
   for (const s of slots) {
@@ -566,16 +555,12 @@ function agruparMinutosPorDia(minutos) {
 }
 
 function pasosDeGrilla(libres, ocupados) {
-  const diasLibres = agruparMinutosPorDia(libres);
   const diasTodos = agruparMinutosPorDia([...libres, ...ocupados]);
   const pasos = new Map();
   const vistos = [];
-  const dias = new Set([...diasLibres.keys(), ...diasTodos.keys()]);
-  for (const dia of dias) {
-    const soloLibres = [...new Set(diasLibres.get(dia) || [])].sort((a, b) => a - b);
-    const todos = [...new Set(diasTodos.get(dia) || [])].sort((a, b) => a - b);
-    // Si los libres ya marcan el paso, los dados no lo achican.
-    const paso = detectarPaso(soloLibres) || detectarPaso(todos);
+  for (const [dia, mins] of diasTodos) {
+    const todos = [...new Set(mins)].sort((a, b) => a - b);
+    const paso = detectarPaso(todos);
     if (!paso) continue;
     pasos.set(dia, paso);
     vistos.push(paso);
@@ -594,18 +579,44 @@ function pasosDeGrilla(libres, ocupados) {
   return { pasos, fallback };
 }
 
+/** Opciones del selector: 1, 2, 3 o 4 slots de cada agenda que ya llegó. */
+function duracionesDePasos(pasos) {
+  const out = new Set();
+  for (const paso of pasos) {
+    if (!paso) continue;
+    for (let n = 1; n <= 4; n++) out.add(paso * n);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+function pasosDeAgendas(slots, ocupados) {
+  const porDoc = new Map();
+  const meter = (lista, clave) => {
+    for (const s of lista || []) {
+      const doc = String(s.profesionalDoc || '');
+      if (!porDoc.has(doc)) porDoc.set(doc, { libres: [], ocupados: [] });
+      porDoc.get(doc)[clave].push(s);
+    }
+  };
+  meter(slots, 'libres');
+  meter(ocupados, 'ocupados');
+  const vistos = new Set();
+  for (const grupo of porDoc.values()) {
+    const { pasos, fallback } = pasosDeGrilla(minutosDeSlots(grupo.libres), minutosDeSlots(grupo.ocupados));
+    for (const p of pasos.values()) vistos.add(p);
+    if (fallback) vistos.add(fallback);
+  }
+  return [...vistos];
+}
+
 /**
- * Ofertas que caben en `duracionMin` para los huecos que ya son de un solo
- * profesional y una sola duración. No se mezclan acá con otra agenda.
- * 45 es un módulo y 90 ocupa 9:00 y 9:45. En una agenda de 30, 60 ocupa
- * 10:00 y 10:30; 9:00 no entra si falta 9:30. 75 en una agenda de 60 ocupa
- * dos horas: 10:00 no entra si a las 11:00 ya hay turno (solo quedan 60 libres).
+ * Ofertas que caben en `duracionMin` para los huecos de un solo profesional.
+ * La duración tiene que ser 1, 2, 3 o 4 slots de esa agenda. En una de 60 min
+ * no entra 30 ni 90. 10:00 no entra en 120 min si a las 11:00 ya hay turno.
  * Los turnos dados no se ofrecen: marcan el paso y el hueco hasta el próximo ocupado.
- * Sin regla, si no se puede medir la agenda, se muestran igual los huecos.
  */
 function armarOfertasPorDuracion(slots, duracionMin, opts) {
   const duracion = Number(duracionMin);
-  const conservar = !!opts?.conservarSiNoEntra;
   const ocupados = opts?.ocupados || [];
   if (!Number.isFinite(duracion) || duracion <= 0) return [];
   const { pasos, fallback } = pasosDeGrilla(minutosDeSlots(slots), minutosDeSlots(ocupados));
@@ -622,7 +633,6 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
   }
   const ocupadosMin = minutosDeSlots(ocupados);
   const ofertas = [];
-  const duracionDeUnModulo = duracion === 15 || duracion === 30 || duracion === 45 || duracion === 60;
   for (const list of byBloque.values()) {
     const byMin = new Map();
     for (const s of list) {
@@ -630,25 +640,19 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
       if (min == null || byMin.has(min)) continue;
       byMin.set(min, s);
     }
-    const sueltos = [];
     const encadenados = [];
-    let midio = false;
     for (const startMin of byMin.keys()) {
       const paso = pasos.get(diaDeMinuto(startMin)) || fallback;
       const start = byMin.get(startMin);
+      if (!paso || duracion % paso !== 0) continue;
+      const needed = duracion / paso;
+      if (needed < 1 || needed > 4) continue;
       let siguienteOcupado = null;
       for (const min of ocupadosMin) {
         if (min <= startMin || !mismoDiaMinutos(startMin, min)) continue;
         if (siguienteOcupado == null || min < siguienteOcupado) siguienteOcupado = min;
       }
-      // 10:00 no entra en 75 min si a las 11:00 ya hay turno: solo quedan 60 libres.
       if (siguienteOcupado != null && siguienteOcupado - startMin < duracion) continue;
-      if (!paso) {
-        sueltos.push(start);
-        continue;
-      }
-      midio = true;
-      const needed = Math.ceil(duracion / paso);
       const modulos = [start];
       let ok = true;
       for (let i = 1; i < needed; i++) {
@@ -663,10 +667,6 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
       if (ok) encadenados.push({ ...start, modulos, moduloMin: paso });
     }
     if (encadenados.length) ofertas.push(...encadenados);
-    const mostrarSueltos = conservar || (!midio && duracionDeUnModulo);
-    if (sueltos.length && mostrarSueltos) {
-      ofertas.push(...ofertasDeUnModulo(new Map(sueltos.map((s) => [minutoSlot(s), s])), duracion));
-    }
   }
   return ofertas;
 }
@@ -986,6 +986,22 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     [reglas, prestacionId]
   );
 
+  const duracionesAgenda = useMemo(() => {
+    const mismaModalidad = (s) => {
+      if (modalidad === 'VIRTUAL') return isSlotVirtual(s.edificio);
+      if (modalidad === 'PRESENCIAL') return !isSlotVirtual(s.edificio);
+      return true;
+    };
+    return duracionesDePasos(pasosDeAgendas(slotsRaw.filter(mismaModalidad), dadosRaw.filter(mismaModalidad)));
+  }, [slotsRaw, dadosRaw, modalidad]);
+
+  const duracionAplicable = duracionesAgenda.includes(duracionMin) ? duracionMin : duracionesAgenda[0] || null;
+
+  useEffect(() => {
+    if (!duracionesAgenda.length) return;
+    if (!duracionesAgenda.includes(duracionMin)) setDuracionMin(duracionesAgenda[0]);
+  }, [duracionesAgenda, duracionMin]);
+
   const slotsFiltered = useMemo(() => {
     // 1) libres por prestación y profesional, cruzados con los dados de esa fecha.
     // 2) modalidad. 3) duración: regla si ese profesional tiene, si no la general.
@@ -996,8 +1012,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     };
     const list = slotsRaw.filter(mismaModalidad);
     const dados = dadosRaw.filter(mismaModalidad);
-    return armarOfertasConReglas(list, prestacionId, duracionMin, reglas, dados);
-  }, [slotsRaw, dadosRaw, modalidad, duracionMin, prestacionId, reglas]);
+    if (!duracionAplicable) return [];
+    return armarOfertasConReglas(list, prestacionId, duracionAplicable, reglas, dados);
+  }, [slotsRaw, dadosRaw, modalidad, duracionAplicable, prestacionId, reglas]);
 
   const enabledProfDocs = useMemo(
     () => new Set(profesionalesCatalog.filter((p) => p.enabled).map((p) => String(p.doc))),
@@ -2545,14 +2562,19 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           <div className="field">
             <label>Duración</label>
             <select
-              value={duracionMin}
+              value={duracionAplicable ?? ''}
               onChange={(e) => setDuracionMin(Number(e.target.value))}
+              disabled={duracionesAgenda.length === 0}
             >
-              {DURACIONES_MIN.map((min) => (
-                <option key={min} value={min}>
-                  {min} min
-                </option>
-              ))}
+              {duracionesAgenda.length === 0 ? (
+                <option value="">Al llegar las agendas</option>
+              ) : (
+                duracionesAgenda.map((min) => (
+                  <option key={min} value={min}>
+                    {labelDuracion(min)}
+                  </option>
+                ))
+              )}
             </select>
           </div>
           <div className="search-actions">
@@ -2726,7 +2748,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           <p className="empty-state-text">
             {reglasDeBusqueda.length > 0
               ? 'No hay turnos que cumplan la duración. Si el profesional tiene una regla, esa manda sobre la duración general.'
-              : `No hay ${duracionMin} minutos seguidos libres${
+              : !duracionesAgenda.length
+                ? 'Llegaron turnos, pero no hay dos seguidos para calcular cuánto dura cada slot.'
+                : `No hay ${labelDuracion(duracionAplicable)} seguidos libres${
                   modalidad === 'VIRTUAL'
                     ? ' en modalidad virtual'
                     : modalidad === 'PRESENCIAL'
@@ -2737,7 +2761,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
           <p className="empty-state-hint">
             {reglasDeBusqueda.length > 0
               ? 'La regla pide huecos consecutivos del mismo profesional y la misma modalidad.'
-              : 'Hacen falta turnos seguidos del mismo profesional que sumen esa duración. El módulo puede ser de 15, 30 o 45 min.'}
+              : 'La duración tiene que ser 1, 2, 3 o 4 slots de la agenda. Si el turno es de una hora, no se puede pedir una hora y media.'}
           </p>
         </div>
       )}
@@ -2794,7 +2818,26 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
             }
             let bloquesOcupados = 0;
             for (const lista of gruposPorProf.values()) bloquesOcupados += lista.length;
-            const totalDia = sorted.length + bloquesOcupados;
+            const libresDia = sorted.length;
+            const pasoPorProf = new Map();
+            for (const block of profBlocks) {
+              const mins = [];
+              for (const s of block.slots) {
+                const mods = s.modulos?.length ? s.modulos : [s];
+                for (const m of mods) {
+                  const min = minutoSlot(m);
+                  if (min != null) mins.push(min);
+                }
+              }
+              for (const grupo of gruposPorProf.get(String(block.doc)) || []) {
+                for (const t of grupo.turnos) {
+                  const min = minutoSlot(t);
+                  if (min != null) mins.push(min);
+                }
+              }
+              const paso = detectarPaso([...new Set(mins)].sort((a, b) => a - b));
+              if (paso) pasoPorProf.set(String(block.doc), paso);
+            }
             const dayCollapsed = collapsedDays.has(key);
             return (
               <div key={key} className={`day-group${dayCollapsed ? ' is-collapsed' : ''}`}>
@@ -2817,8 +2860,13 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                     </span>
                     <span className="day-header-label">{fmtDayLabel(fecha)}</span>
                   </span>
-                  <span className="day-count">
-                    {totalDia} turno{totalDia !== 1 ? 's' : ''}
+                  <span className="day-counts">
+                    <span className="day-count">
+                      {libresDia} libre{libresDia !== 1 ? 's' : ''}
+                    </span>
+                    <span className="day-count day-count--ocupado">
+                      {bloquesOcupados} ocupado{bloquesOcupados !== 1 ? 's' : ''}
+                    </span>
                   </span>
                 </button>
                 {!dayCollapsed && (
@@ -2852,18 +2900,23 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                               const rango = varios
                                 ? `${fmtTime(primero.fechaHora)}–${fmtTime(ultimo.fechaHora)}`
                                 : fmtTime(primero.fechaHora);
+                              const durMin = duracionOcupadoMin(grupo, pasoPorProf.get(String(doc)));
+                              const durTxt = durMin ? `dur: ${durMin} min` : '';
+                              const detalleOc = [durTxt, varios ? `${grupo.turnos.length} turnos` : '']
+                                .filter(Boolean)
+                                .join(' · ');
                               return (
                                 <button
                                   key={`oc-${doc}-${new Date(primero.fechaHora).getTime()}-${i}`}
                                   type="button"
-                                  className={`slot-card slot-card-compact slot-card--ocupado${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${varios ? ' slot-card--multi' : ''}`}
+                                  className={`slot-card slot-card-compact slot-card--ocupado${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalleOc ? ' slot-card--multi' : ''}`}
                                   onClick={() => {
                                     setOcupadoError('');
                                     setOcupadoConfirmar(null);
                                     setSelectedOcupado(grupo);
                                   }}
                                   title={paciente}
-                                  aria-label={`Turno ocupado ${rango}. ${modalidadTxt}. ${paciente}${varios ? `. ${grupo.turnos.length} turnos` : ''}`}
+                                  aria-label={`Turno ocupado ${rango}. ${modalidadTxt}. ${paciente}${detalleOc ? `. ${detalleOc}` : ''}`}
                                 >
                                   <span className="slot-time-row">
                                     <span className="slot-mod-icon" aria-hidden>
@@ -2875,9 +2928,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                                     </span>
                                     <span className="slot-time">{rango}</span>
                                   </span>
-                                  {varios ? (
-                                    <span className="slot-modulos">{grupo.turnos.length} turnos</span>
-                                  ) : null}
+                                  {detalleOc ? <span className="slot-modulos">{detalleOc}</span> : null}
                                 </button>
                               );
                             }
@@ -2887,14 +2938,14 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                               ? 'Virtual'
                               : [s.edificio, s.sector].filter(Boolean).join(' · ') || 'Presencial';
                             const modulos = s.modulos?.length ? s.modulos : [s];
+                            const durMin = duracionLibreMin(s, pasoPorProf.get(String(doc)));
+                            const durTxt = durMin ? `dur: ${durMin} min` : '';
                             const ocupa =
                               modulos.length > 1
                                 ? `Ocupa ${modulos.length} módulos: ${textoModulos(modulos)}`
                                 : '';
-                            const reglaTxt = s.porRegla
-                              ? `Regla · ${labelDuracion(s.duracionMin || (s.moduloMin || PASO_MIN) * modulos.length)}`
-                              : '';
-                            const detalle = [ocupa, reglaTxt].filter(Boolean).join(' · ');
+                            const reglaTxt = s.porRegla ? 'Regla' : '';
+                            const detalle = [durTxt, ocupa, reglaTxt].filter(Boolean).join(' · ');
                             return (
                               <button
                                 key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}

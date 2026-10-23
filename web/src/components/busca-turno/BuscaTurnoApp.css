@@ -919,6 +919,13 @@
   color: var(--color-primary);
 }
 
+.day-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
 .day-count {
   font-size: 0.6875rem;
   padding: 0.2rem 0.55rem;
@@ -928,6 +935,12 @@
   font-weight: 700;
   text-transform: none;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.day-count--ocupado {
+  background: #ece9ea;
+  color: #6b6568;
 }
 
 .day-prof-list {
@@ -1082,9 +1095,9 @@
   min-height: 2.15rem;
   padding: 0.35rem 0.65rem;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.12rem;
-  text-align: left;
+  text-align: center;
 }
 
 .slot-modulos {
@@ -1093,6 +1106,8 @@
   color: var(--color-text-muted, #8a7a82);
   line-height: 1.25;
   white-space: nowrap;
+  width: 100%;
+  text-align: center;
 }
 
 .slot-card-compact:hover .slot-modulos {
