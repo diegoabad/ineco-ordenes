@@ -210,7 +210,7 @@ export function AppSidebar({
         {showWhatsapp ? (
           <AccordionGroup
             id="whatsapp"
-            label="WhatsApp"
+            label="CRM"
             Icon={IconWhatsapp}
             open={expanded === "whatsapp"}
             active={module === "whatsapp"}

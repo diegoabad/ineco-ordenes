@@ -15,7 +15,7 @@ type Tab = "approved" | "pending" | "dominios";
 
 /** Pantallas que el admin puede marcar/desmarcar. */
 const SELECTABLE_MODULE_OPTIONS: { id: AppModuleId; label: string }[] = [
-  { id: "whatsapp", label: "WhatsApp" },
+  { id: "whatsapp", label: "CRM" },
   { id: "busca-turno", label: "Busca turno" },
   { id: "gestion-profesional", label: "Gestión profesional" },
   { id: "ordenes", label: "Órdenes" },

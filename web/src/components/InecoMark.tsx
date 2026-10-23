@@ -15,11 +15,11 @@ export function InecoMark({
   className = "",
   title = "INECO",
 }: InecoMarkProps) {
-  return (
+  const mark = (
     <svg
-      className={`ineco-mark${animated ? " ineco-mark--spin" : ""}${
-        withBackground ? "" : " ineco-mark--bare"
-      }${className ? ` ${className}` : ""}`}
+      className={`ineco-mark${withBackground ? "" : " ineco-mark--bare"}${
+        className ? ` ${className}` : ""
+      }`}
       width={size}
       height={size}
       viewBox="0 0 64 64"
@@ -44,6 +44,18 @@ export function InecoMark({
         />
       </g>
     </svg>
+  );
+
+  if (!animated) return mark;
+
+  return (
+    <span
+      className="ineco-mark-spin"
+      style={{ width: size, height: size }}
+      aria-hidden={title ? undefined : true}
+    >
+      {mark}
+    </span>
   );
 }
 

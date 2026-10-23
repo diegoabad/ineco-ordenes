@@ -1,10 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { WHATSAPP_SECTIONS, type WhatsappSection } from "../lib/appNav";
 import { IconPlus } from "./Icons";
-import {
-  WhatsAppConversationsPanel,
-  type WaConnectionBanner,
-} from "./WhatsAppConversationsPanel";
+import { WhatsAppConversationsPanel } from "./WhatsAppConversationsPanel";
 import { WhatsAppOperatorsPanel } from "./WhatsAppOperatorsPanel";
 import { WhatsAppQuickRepliesPanel } from "./WhatsAppQuickRepliesPanel";
 import { WhatsAppTagsPanel, type TagsPanelTab } from "./WhatsAppTagsPanel";
@@ -21,22 +18,13 @@ type Props = {
 
 export function WhatsAppModule({ section }: Props) {
   const label =
-    WHATSAPP_SECTIONS.find((item) => item.id === section)?.label ?? "WhatsApp";
-  const [connection, setConnection] = useState<WaConnectionBanner>({
-    connected: false,
-    connecting: false,
-    label: "Desconectado",
-  });
+    WHATSAPP_SECTIONS.find((item) => item.id === section)?.label ?? "CRM";
   const [tagsTab, setTagsTab] = useState<TagsPanelTab>("etiquetas");
   const [configHasData, setConfigHasData] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
-  const onConnectionChange = useCallback((status: WaConnectionBanner) => {
-    setConnection(status);
-  }, []);
   const onTagsTabChange = useCallback((tab: TagsPanelTab) => {
     setTagsTab(tab);
   }, []);
-  const connectRef = useRef<(() => void) | null>(null);
   const createPruebaRef = useRef<(() => void) | null>(null);
   const createReplyRef = useRef<(() => void) | null>(null);
   const createTagRef = useRef<(() => void) | null>(null);
@@ -84,28 +72,7 @@ export function WhatsAppModule({ section }: Props) {
             ) : null}
           </div>
         </div>
-        {section === "conversaciones" ? (
-          <div className="wa-header__status">
-            <span
-              className={`wa-inbox__status-dot${connection.connected ? " is-online" : ""}`}
-            />
-            <span className="busca-turno-header-status__label">{connection.label}</span>
-          </div>
-        ) : null}
-        {section === "conversaciones" ? (
-          <div className="app-header__actions wa-header-actions">
-            {!connection.connected ? (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => connectRef.current?.()}
-                disabled={connection.connecting}
-              >
-                {connection.connecting ? "Conectando…" : "Conectar"}
-              </button>
-            ) : null}
-          </div>
-        ) : section === "prueba" || section === "prueba-bot" ? (
+        {section === "prueba" || section === "prueba-bot" ? (
           <div className="app-header__actions wa-header-actions">
             <button
               type="button"
@@ -185,11 +152,7 @@ export function WhatsAppModule({ section }: Props) {
         ) : null}
       </header>
       {section === "conversaciones" ? (
-        <WhatsAppConversationsPanel
-          key="conversaciones"
-          onConnectionChange={onConnectionChange}
-          connectRef={connectRef}
-        />
+        <WhatsAppConversationsPanel key="conversaciones" />
       ) : section === "prueba" ? (
         <WhatsAppConversationsPanel
           key="prueba"

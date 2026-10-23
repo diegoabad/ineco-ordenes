@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { IconX, IconBuilding, IconMonitor, IconTrash } from '../Icons';
+import { LoadingBlock } from '../InecoMark';
 import { apiPost, getPersona, createTurno, anularTurno, config } from './medexisApi';
 import { fetchBuscaTurnoConfig, saveBuscaTurnoConfig } from './buscaTurnoConfigApi';
 import SearchableSelect from './SearchableSelect';
@@ -778,8 +779,15 @@ function sortProfesionalesAlfabetico(list) {
   );
 }
 
-function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
-  const configView = section === 'config';
+function App({
+  section = 'turnos',
+  onRequestSection,
+  onCatalogStatus,
+  mode = 'full',
+  onUiLockChange,
+}) {
+  const compact = mode === 'compact';
+  const configView = !compact && section === 'config';
   const [profesionalesCatalog, setProfesionalesCatalog] = useState([]);
   const [prestaciones, setPrestaciones] = useState({});
   const [cacheLoaded, setCacheLoaded] = useState(false);
@@ -794,6 +802,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   const [slotsRaw, setSlotsRaw] = useState([]);
   const [dadosRaw, setDadosRaw] = useState([]);
   const [searchReturnedEmpty, setSearchReturnedEmpty] = useState(false);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(true);
   const [searchOffset, setSearchOffset] = useState(0);
   const [collapsedDays, setCollapsedDays] = useState(() => new Set());
   const [selectedPrestadorDocsByPrestacion, setSelectedPrestadorDocsByPrestacion] = useState({});
@@ -1060,6 +1069,9 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setPrestadorFilter('');
   }, [prestacionId]);
 
+  const onUiLockChangeRef = useRef(onUiLockChange);
+  onUiLockChangeRef.current = onUiLockChange;
+
   useEffect(() => {
     const prestadoresPickOpen =
       prestadoresModalOpen && !!prestacionId && profesionalesForPrestacion.length > 0;
@@ -1076,6 +1088,8 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       body.style.overflow = '';
       body.style.overscrollBehavior = '';
     }
+    onUiLockChangeRef.current?.(anyModalOpen);
+    return () => onUiLockChangeRef.current?.(false);
   }, [
     selectedSlotForAssign,
     selectedOcupado,
@@ -1873,6 +1887,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
         toast.error(e?.message || 'Error al buscar turnos');
       } finally {
         setSearching(false);
+        if (compact) setFiltrosAbiertos(false);
       }
     },
     [
@@ -1882,6 +1897,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       clearStatus,
       enabledProfDocs,
       esSedeCargada,
+      compact,
     ]
   );
 
@@ -1980,6 +1996,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
     setOcupadoConfirmar(false);
     setOcupadoError('');
     setSearchReturnedEmpty(false);
+    setFiltrosAbiertos(true);
     setSearchOffset(0);
     setCollapsedDays(new Set());
     setPrestadoresModalOpen(false);
@@ -2225,7 +2242,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
   }, [profesionalesForPrestacion, prestadorFilter]);
 
   return (
-    <div className="busca-turno">
+    <div className={`busca-turno${compact ? ' busca-turno--compact' : ''}`}>
       {configView ? (
         <div className="busca-turno-config fl-table-card">
             {configSaving && (
@@ -2531,6 +2548,29 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       ) : (
       <>
       <div className="search-panel">
+        {compact && (slotsRaw.length > 0 || searchReturnedEmpty) ? (
+          <button
+            type="button"
+            className={`busca-filtros-acordeon${filtrosAbiertos ? ' is-open' : ''}`}
+            aria-expanded={filtrosAbiertos}
+            onClick={() => setFiltrosAbiertos((open) => !open)}
+          >
+            <span className="busca-filtros-acordeon__text">
+              <strong>
+                {prestacionOptions.find((o) => o.value === prestacionId)?.label ||
+                  'Prestación'}
+              </strong>
+              <span>
+                {MODALIDADES.find((m) => m.value === modalidad)?.label || modalidad}
+                {duracionAplicable ? ` · ${labelDuracion(duracionAplicable)}` : ''}
+              </span>
+            </span>
+            <span className="busca-filtros-acordeon__chevron" aria-hidden>
+              {filtrosAbiertos ? '▾' : '▸'}
+            </span>
+          </button>
+        ) : null}
+        {(!compact || filtrosAbiertos || !(slotsRaw.length > 0 || searchReturnedEmpty)) && (
         <div className="search-row">
           <div className="field">
             <label>Prestación</label>
@@ -2542,11 +2582,14 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 cacheLoaded
                   ? prestacionOptions.length
                     ? 'Escribí para buscar...'
-                    : 'No hay prestaciones habilitadas — Config'
+                    : compact
+                      ? 'No hay prestaciones habilitadas'
+                      : 'No hay prestaciones habilitadas — Config'
                   : 'Cargando...'
               }
               disabled={!cacheLoaded}
-              maxHeight={260}
+              maxHeight={compact ? 220 : 260}
+              compact={compact}
             />
           </div>
           <div className="field">
@@ -2582,6 +2625,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
               type="button"
               className="btn primary"
               onClick={() => {
+                if (compact) setFiltrosAbiertos(false);
                 if (prestacionId && profesionalesForPrestacion.length > 0) {
                   setPrestadoresModalOpen(true);
                 } else {
@@ -2595,10 +2639,11 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 !String(prestacionId || '').trim()
               }
             >
-              {searching ? 'Buscando...' : 'Buscar turnos'}
+              {searching ? 'Buscando...' : compact ? 'Buscar' : 'Buscar turnos'}
             </button>
           </div>
         </div>
+        )}
 
         {(slotsRaw.length > 0 || searchReturnedEmpty) && (
           <div className="results-summary-row">
@@ -2703,6 +2748,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 className="btn btn-primary"
                 onClick={() => {
                   setPrestadoresModalOpen(false);
+                  if (compact) setFiltrosAbiertos(false);
                   buscar(0);
                 }}
                 disabled={selectedDocs.length === 0}
@@ -2715,10 +2761,16 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
       )}
 
       <div className="busca-turno-results">
-      {status.visible && (
+      {searching ? (
+        <LoadingBlock
+          label={status.text?.trim() || 'Buscando turnos...'}
+          size={compact ? 34 : 56}
+          className={compact ? 'ineco-loading--busca ineco-loading--busca-compact' : 'ineco-loading--busca'}
+        />
+      ) : status.visible ? (
         <div className={`status-bar visible ${status.error ? 'error' : ''}`}>{status.text}</div>
-      )}
-      {progress != null && !configView && (
+      ) : null}
+      {progress != null && !configView && !searching && (
         <div className="progress-bar-wrap visible">
           <div className="progress-bar" style={{ width: `${progress}%` }} />
         </div>
@@ -2871,15 +2923,26 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                 </button>
                 {!dayCollapsed && (
                   <div className="day-prof-list">
-                    {profBlocks.map(({ doc, nombre, slots: profSlots }) => (
+                    {profBlocks.map(({ doc, nombre, slots: profSlots }) => {
+                      const ocupadosProf = gruposPorProf.get(String(doc)) || [];
+                      const libresProf = profSlots.length;
+                      return (
                       <div key={doc} className="day-prof-block">
                         <div className="day-prof-header">
                           <span className="day-prof-name">{profLabelConDoc(nombre, doc)}</span>
+                          {compact ? (
+                            <span className="day-prof-counts" aria-label={`${libresProf} libres, ${ocupadosProf.length} ocupados`}>
+                              <span className="day-count">{libresProf} libre{libresProf !== 1 ? 's' : ''}</span>
+                              <span className="day-count day-count--ocupado">
+                                {ocupadosProf.length} ocupado{ocupadosProf.length !== 1 ? 's' : ''}
+                              </span>
+                            </span>
+                          ) : null}
                         </div>
                         <div className="slot-grid slot-grid-by-prof">
                           {[
                             ...profSlots.map((s) => ({ tipo: 'libre', item: s, orden: s.fechaHora })),
-                            ...(gruposPorProf.get(String(doc)) || []).map((grupo) => ({
+                            ...ocupadosProf.map((grupo) => ({
                               tipo: 'ocupado',
                               item: grupo,
                               orden: grupo.turnos[0].fechaHora,
@@ -2927,7 +2990,11 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                                       )}
                                     </span>
                                     <span className="slot-time">{rango}</span>
+                                    {compact ? <span className="slot-estado slot-estado--ocupado">Ocupado</span> : null}
                                   </span>
+                                  {compact ? (
+                                    <span className="slot-paciente">{paciente}</span>
+                                  ) : null}
                                   {detalleOc ? <span className="slot-modulos">{detalleOc}</span> : null}
                                 </button>
                               );
@@ -2950,7 +3017,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                               <button
                                 key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}
                                 type="button"
-                                className={`slot-card slot-card-compact${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalle ? ' slot-card--multi' : ''}`}
+                                className={`slot-card slot-card-compact slot-card--libre${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${detalle ? ' slot-card--multi' : ''}`}
                                 onClick={() => openAssignModal(s)}
                                 title={tooltip}
                                 aria-label={`Asignar turno ${fmtTime(s.fechaHora)}. ${tooltip}${detalle ? `. ${detalle}` : ''}`}
@@ -2968,6 +3035,7 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                                     )}
                                   </span>
                                   <span className="slot-time">{fmtTime(s.fechaHora)}</span>
+                                  {compact ? <span className="slot-estado slot-estado--libre">Libre</span> : null}
                                 </span>
                                 {detalle ? <span className="slot-modulos">{detalle}</span> : null}
                               </button>
@@ -2975,7 +3043,8 @@ function App({ section = 'turnos', onRequestSection, onCatalogStatus }) {
                           })}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

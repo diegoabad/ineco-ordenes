@@ -337,7 +337,7 @@ export const PEDIDO_SECCION_LABEL: Record<PedidoSistemaSeccion, string> = {
   presupuestos: "Presupuestos",
   pami: "PAMI",
   "busca-turno": "Busca turno",
-  whatsapp: "WhatsApp",
+  whatsapp: "CRM",
   nueva: "Nueva sección",
 };
 

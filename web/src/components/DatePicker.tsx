@@ -461,7 +461,7 @@ export function DatePicker({
           onKeyDown={onInputKeyDown}
         />
         <div className="fl-date-picker__actions">
-          {puedeLimpiar && (
+          {puedeLimpiar ? (
             <button
               type="button"
               className="fl-date-picker__icon-btn fl-date-picker__clear"
@@ -471,17 +471,18 @@ export function DatePicker({
               ×
               {tooltips ? null : <span className="fl-date-picker__sr">Quitar fecha</span>}
             </button>
+          ) : (
+            <button
+              type="button"
+              className="fl-date-picker__icon-btn"
+              aria-label={tooltips ? "Abrir calendario" : undefined}
+              disabled={disabled}
+              onClick={() => !disabled && setOpen((o) => !o)}
+            >
+              <IconCalendar size={compact ? 13 : 18} />
+              {tooltips ? null : <span className="fl-date-picker__sr">Abrir calendario</span>}
+            </button>
           )}
-          <button
-            type="button"
-            className="fl-date-picker__icon-btn"
-            aria-label={tooltips ? "Abrir calendario" : undefined}
-            disabled={disabled}
-            onClick={() => !disabled && setOpen((o) => !o)}
-          >
-            <IconCalendar size={compact ? 13 : 18} />
-            {tooltips ? null : <span className="fl-date-picker__sr">Abrir calendario</span>}
-          </button>
         </div>
       </div>
 

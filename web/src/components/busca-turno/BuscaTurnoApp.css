@@ -2041,4 +2041,452 @@ button.slot-card.slot-card-compact:focus-visible {
   flex-shrink: 0;
 }
 
+/* --- Compact / sidebar (~290px): todo en columna --- */
+.busca-turno.busca-turno--compact {
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-surface);
+}
+
+.busca-turno--compact .search-panel {
+  padding: 0.5rem 0.65rem 0.45rem;
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.busca-turno--compact .busca-filtros-acordeon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0 0 0.4rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.busca-turno--compact .busca-filtros-acordeon:hover {
+  border-color: var(--color-border-strong);
+  background: #fff;
+}
+
+.busca-turno--compact .busca-filtros-acordeon__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.busca-turno--compact .busca-filtros-acordeon__text strong {
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.busca-turno--compact .busca-filtros-acordeon__text span {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+}
+
+.busca-turno--compact .busca-filtros-acordeon__chevron {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.busca-turno--compact .busca-filtros-acordeon.is-open {
+  margin-bottom: 0.5rem;
+}
+
+.busca-turno--compact .search-row {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.busca-turno--compact .field {
+  width: 100%;
+  gap: 0.2rem;
+}
+
+.busca-turno--compact .field label {
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.busca-turno--compact .field select,
+.busca-turno--compact .searchable-select-input {
+  width: 100%;
+  height: 2rem;
+  min-height: 2rem;
+  font-size: 0.8rem;
+}
+
+.busca-turno--compact .searchable-select-field {
+  font-size: 0.7rem;
+}
+
+.searchable-select-dropdown--compact,
+.searchable-select-dropdown--compact .searchable-select-item {
+  font-size: 0.7rem;
+}
+
+.busca-turno--compact .search-actions {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0.35rem;
+  margin-top: 0.1rem;
+}
+
+.busca-turno--compact .search-actions .btn {
+  width: 100%;
+  justify-content: center;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0 0.65rem;
+  font-size: 0.8rem;
+}
+
+.busca-turno--compact .results-summary-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+}
+
+.busca-turno--compact .results-summary-row .btn-limpiar {
+  width: 100%;
+  margin-left: 0;
+  height: 1.9rem;
+  padding: 0 0.65rem;
+  font-size: 0.75rem;
+}
+
+.busca-turno--compact .results-summary {
+  font-size: 0.78rem;
+  width: 100%;
+}
+
+.busca-turno--compact .busca-turno-results {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.busca-turno--compact .busca-turno-results > .ineco-loading--busca {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  justify-content: center;
+}
+
+.busca-turno--compact #results-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.45rem 0.55rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.busca-turno--compact .day-group,
+.busca-turno--compact .day-block,
+.busca-turno--compact .day-prof-list,
+.busca-turno--compact .day-prof-block,
+.busca-turno--compact .prof-block {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.busca-turno--compact .day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.15rem 0 0.35rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.busca-turno--compact .day-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.busca-turno--compact .day-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.5rem 0.55rem;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  border: 1px solid #e4d2d8;
+  background: linear-gradient(180deg, #fbf6f8 0%, #f5eef1 100%);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.busca-turno--compact .day-header-label {
+  font-size: 0.8rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  text-transform: capitalize;
+}
+
+.busca-turno--compact .day-counts {
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.busca-turno--compact .day-count {
+  font-size: 0.68rem;
+  padding: 0.18rem 0.5rem;
+  background: color-mix(in srgb, #1f8a5b 14%, #fff);
+  color: #176b46;
+  border: 1px solid color-mix(in srgb, #1f8a5b 28%, #fff);
+}
+
+.busca-turno--compact .day-count--ocupado {
+  background: color-mix(in srgb, #8a6b75 12%, #fff);
+  color: #6a555d;
+  border-color: color-mix(in srgb, #8a6b75 26%, #fff);
+}
+
+.busca-turno--compact .day-prof-list {
+  gap: 0.45rem;
+  padding: 0 0.05rem;
+}
+
+.busca-turno--compact .day-prof-block,
+.busca-turno--compact .prof-block {
+  padding: 0.45rem 0.45rem 0.5rem;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+.busca-turno--compact .day-prof-block:nth-child(even),
+.busca-turno--compact .prof-block:nth-child(even) {
+  background: #fcfafb;
+}
+
+.busca-turno--compact .day-prof-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px dashed color-mix(in srgb, var(--color-border) 85%, transparent);
+}
+
+.busca-turno--compact .day-prof-name,
+.busca-turno--compact .prof-name {
+  font-size: 0.78rem;
+  font-weight: 750;
+  margin-bottom: 0;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--color-text);
+}
+
+.busca-turno--compact .day-prof-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.busca-turno--compact .day-prof-counts .day-count {
+  font-size: 0.64rem;
+  padding: 0.12rem 0.4rem;
+}
+
+.busca-turno--compact .slot-grid.slot-grid-by-prof,
+.busca-turno--compact .slot-grid-by-prof {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0.28rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.busca-turno--compact .slot-card-compact,
+.busca-turno--compact button.slot-card.slot-card-compact {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 2.15rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.75rem;
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.15rem;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border-left-width: 3px;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre {
+  background: color-mix(in srgb, #1f8a5b 7%, #fff);
+  border-color: color-mix(in srgb, #1f8a5b 28%, #e2d4d9);
+  border-left-color: #1f8a5b;
+  color: #1a3d2c;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre:hover {
+  background: color-mix(in srgb, #1f8a5b 12%, #fff);
+  border-color: color-mix(in srgb, #1f8a5b 42%, #e2d4d9);
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--ocupado {
+  background: #f3f0f1;
+  border-color: #ddd6d8;
+  border-left-color: #9a8a90;
+  color: #6b6568;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--ocupado:hover {
+  background: #ebe6e8;
+  border-color: #cfc6c9;
+}
+
+.busca-turno--compact .day-prof-block:nth-child(even) .slot-card-compact.slot-card--libre {
+  background: color-mix(in srgb, #1f8a5b 7%, #fff);
+  border-color: color-mix(in srgb, #1f8a5b 28%, #e2d4d9);
+}
+
+.busca-turno--compact .day-prof-block:nth-child(even) .slot-card-compact.slot-card--ocupado {
+  background: #f3f0f1;
+  border-color: #ddd6d8;
+}
+
+.busca-turno--compact .slot-time-row {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.35rem;
+}
+
+.busca-turno--compact .slot-time {
+  font-size: 0.82rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.busca-turno--compact .slot-card--libre .slot-time {
+  color: #145c3a;
+}
+
+.busca-turno--compact .slot-estado {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.35rem;
+  border-radius: 999px;
+  line-height: 1.2;
+}
+
+.busca-turno--compact .slot-estado--libre {
+  background: color-mix(in srgb, #1f8a5b 16%, #fff);
+  color: #176b46;
+}
+
+.busca-turno--compact .slot-estado--ocupado {
+  background: color-mix(in srgb, #8a6b75 16%, #fff);
+  color: #6a555d;
+}
+
+.busca-turno--compact .slot-paciente {
+  display: block;
+  width: 100%;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #5c5559;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.busca-turno--compact .slot-modulos {
+  font-size: 0.66rem;
+  line-height: 1.25;
+  opacity: 0.9;
+}
+
+.busca-turno--compact .load-more-wrap {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.45rem 0.55rem 0.55rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+.busca-turno--compact .btn.load-more-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 2.1rem;
+  padding: 0 0.75rem;
+  font-size: 0.78rem;
+  border-radius: var(--radius-sm);
+}
+
+.busca-turno--compact .empty-state,
+.busca-turno--compact .prestadores-picker-empty {
+  padding: 0.55rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.busca-turno--compact .fl-modal--busca-prestadores {
+  width: min(100vw - 1.5rem, 40rem);
+  max-width: min(100vw - 1.5rem, 40rem);
+  max-height: min(88vh, 36rem);
+}
+
 

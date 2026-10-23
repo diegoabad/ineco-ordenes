@@ -20,6 +20,7 @@ export default function SearchableSelect({
   placeholder = 'Elegí una opción...',
   disabled = false,
   maxHeight = 260,
+  compact = false,
 }) {
   const [open, setOpen] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -184,7 +185,9 @@ export default function SearchableSelect({
       ? createPortal(
           <ul
             ref={listRef}
-            className="searchable-select-dropdown searchable-select-dropdown--portal"
+            className={`searchable-select-dropdown searchable-select-dropdown--portal${
+              compact ? ' searchable-select-dropdown--compact' : ''
+            }`}
             style={{
               position: 'fixed',
               left: menuStyle.left,

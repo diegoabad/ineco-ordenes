@@ -48,10 +48,12 @@ import {
   IconCheck,
   IconCheckSquare,
   IconClock,
+  IconCollapse,
+  IconConversations,
+  IconExpand,
   IconX,
   IconChevronLeft,
   IconChevronRight,
-  IconFilter,
   IconGrip,
   IconLink,
   IconMinus,
@@ -69,6 +71,7 @@ import {
   type WaFollowUpKind,
 } from "./WhatsAppContactFollowUpModal";
 import { WhatsAppContactProfileModal } from "./WhatsAppContactProfileModal";
+import BuscaTurnoApp from "./busca-turno/BuscaTurnoApp";
 
 const CONVERSATIONS_PAGE_SIZE = 40;
 
@@ -457,10 +460,9 @@ export function WhatsAppConversationsPanel({
   const [hasMoreConversations, setHasMoreConversations] = useState(false);
   const [nextConversationsOffset, setNextConversationsOffset] = useState<number | null>(null);
   const [conversations, setConversations] = useState<WaConversation[]>([]);
-  const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<WaInboxFilters>(EMPTY_WA_FILTERS);
-  const [filterDraft, setFilterDraft] = useState<WaInboxFilters>(EMPTY_WA_FILTERS);
-  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+  const [vistaOperadora, setVistaOperadora] = useState(false);
+  const [listaConversacionesVisible, setListaConversacionesVisible] = useState(true);
   const [tagFilterQuery, setTagFilterQuery] = useState("");
   const [tagFilterSuggestOpen, setTagFilterSuggestOpen] = useState(false);
   const tagFilterWrapRef = useRef<HTMLDivElement | null>(null);
@@ -489,6 +491,11 @@ export function WhatsAppConversationsPanel({
   const pinnedDropIndexRef = useRef<number | null>(null);
   const [quickTagQuery, setQuickTagQuery] = useState("");
   const [quickPanelOpen, setQuickPanelOpen] = useState(false);
+  const [leftBuscaOpen, setLeftBuscaOpen] = useState(false);
+  const [leftBuscaPinned, setLeftBuscaPinned] = useState(false);
+  const [leftBuscaUiLocked, setLeftBuscaUiLocked] = useState(false);
+  const [buscaTurnoMounted, setBuscaTurnoMounted] = useState(false);
+  const [rightTagsPinned, setRightTagsPinned] = useState(false);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
   const [tagsModalOpen, setTagsModalOpen] = useState(false);
   const [tagsModalGroupId, setTagsModalGroupId] = useState("");
@@ -562,12 +569,10 @@ export function WhatsAppConversationsPanel({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const listBodyRef = useRef<HTMLDivElement | null>(null);
   const tagsGroupPickerRef = useRef<HTMLDivElement | null>(null);
-  const searchTimer = useRef<number | null>(null);
   const loadingMoreRef = useRef(false);
   const skipThreadLoad = useRef<string | null>(null);
   const creatingPruebaRef = useRef(false);
   const pollState = useRef({
-    search: "",
     selectedId: null as string | null,
     loadedCount: 0,
     filters: EMPTY_WA_FILTERS,
@@ -575,7 +580,7 @@ export function WhatsAppConversationsPanel({
   const pendingTags = useRef<string[] | null>(null);
   const savingTags = useRef(false);
   const lastQuickReplyRef = useRef<QuickReply | null>(null);
-  pollState.current = { search, selectedId, loadedCount: conversations.length, filters };
+  pollState.current = { selectedId, loadedCount: conversations.length, filters };
 
   const activeFilterCount = useMemo(() => countWaFilters(filters), [filters]);
   const filtersQuery = useMemo(() => waFiltersQuery(filters), [filters]);
@@ -588,14 +593,13 @@ export function WhatsAppConversationsPanel({
     return status;
   }, []);
 
-  const loadList = useCallback(async (q?: string, nextFilters?: WaInboxFilters) => {
+  const loadList = useCallback(async (nextFilters?: WaInboxFilters) => {
     const applied = nextFilters ?? filters;
     setLoadingList(true);
     setHasMoreConversations(false);
     setNextConversationsOffset(null);
     try {
       const page = await fetchWaConversations({
-        search: q,
         status: "OPEN",
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: 0,
@@ -624,7 +628,6 @@ export function WhatsAppConversationsPanel({
     setLoadingMore(true);
     try {
       const page = await fetchWaConversations({
-        search: search.trim() || undefined,
         status: "OPEN",
         limit: CONVERSATIONS_PAGE_SIZE,
         offset: nextConversationsOffset,
@@ -645,7 +648,7 @@ export function WhatsAppConversationsPanel({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasMoreConversations, loadingList, nextConversationsOffset, search, filtersQuery, pruebaMode]);
+  }, [hasMoreConversations, loadingList, nextConversationsOffset, filtersQuery, pruebaMode, pruebaMotor]);
 
   const loadThread = useCallback(async (id: string) => {
     setLoadingMessages(true);
@@ -676,6 +679,19 @@ export function WhatsAppConversationsPanel({
       if (pollState.current.selectedId === id) setLoadingMessages(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (pruebaMode || !vistaOperadora) {
+      document.body.classList.remove("wa-vista-operadora");
+      setLeftBuscaOpen(false);
+      setLeftBuscaPinned(false);
+      setLeftBuscaUiLocked(false);
+      return;
+    }
+    setBuscaTurnoMounted(true);
+    document.body.classList.add("wa-vista-operadora");
+    return () => document.body.classList.remove("wa-vista-operadora");
+  }, [pruebaMode, vistaOperadora]);
 
   useEffect(() => {
     let cancelled = false;
@@ -730,12 +746,11 @@ export function WhatsAppConversationsPanel({
       if (!waitingQr) {
         tasks.push(
           fetchWaConversations({
-            search: snap.search.trim() || undefined,
             status: "OPEN",
             limit: Math.max(snap.loadedCount, CONVERSATIONS_PAGE_SIZE),
             offset: 0,
             prueba: pruebaMode,
-        motor: pruebaMode ? pruebaMotor : undefined,
+            motor: pruebaMode ? pruebaMotor : undefined,
             ...waFiltersQuery(snap.filters),
           })
             .then((page) => {
@@ -1086,55 +1101,25 @@ export function WhatsAppConversationsPanel({
     });
   }, [connecting, onConnectionChange, phoneNumber, waStatus]);
 
-  function onSearchChange(value: string) {
-    setSearch(value);
-    if (searchTimer.current) window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(() => {
-      void loadList(value);
-    }, 300);
-  }
-
-  function openFiltersModal() {
-    setFilterDraft(filters);
-    setTagFilterQuery("");
-    setTagFilterSuggestOpen(false);
-    setFiltersModalOpen(true);
-  }
-
-  function applyFilters() {
-    const next = {
-      ...filterDraft,
-      tagIds: [...filterDraft.tagIds],
+  function patchFilters(patch: Partial<WaInboxFilters>) {
+    const next: WaInboxFilters = {
+      ...filters,
+      ...patch,
+      tagIds: patch.tagIds ? [...patch.tagIds] : [...filters.tagIds],
     };
     setFilters(next);
-    setFiltersModalOpen(false);
-    setTagFilterQuery("");
-    setTagFilterSuggestOpen(false);
-    void loadList(search.trim() || undefined, next);
+    void loadList(next);
   }
 
-  function clearFilters() {
-    setFilterDraft(EMPTY_WA_FILTERS);
-    setFilters(EMPTY_WA_FILTERS);
-    setFiltersModalOpen(false);
-    setTagFilterQuery("");
-    setTagFilterSuggestOpen(false);
-    void loadList(search.trim() || undefined, EMPTY_WA_FILTERS);
-  }
-
-  function addDraftTag(tagId: string) {
-    setFilterDraft((prev) =>
-      prev.tagIds.includes(tagId) ? prev : { ...prev, tagIds: [...prev.tagIds, tagId] },
-    );
+  function addFilterTag(tagId: string) {
+    if (filters.tagIds.includes(tagId)) return;
+    patchFilters({ tagIds: [...filters.tagIds, tagId] });
     setTagFilterQuery("");
     setTagFilterSuggestOpen(true);
   }
 
-  function removeDraftTag(tagId: string) {
-    setFilterDraft((prev) => ({
-      ...prev,
-      tagIds: prev.tagIds.filter((id) => id !== tagId),
-    }));
+  function removeFilterTag(tagId: string) {
+    patchFilters({ tagIds: filters.tagIds.filter((id) => id !== tagId) });
   }
 
   const threadHeader = useMemo(() => {
@@ -1390,24 +1375,27 @@ export function WhatsAppConversationsPanel({
 
   const selectedFilterTags = useMemo(
     () =>
-      filterDraft.tagIds
+      filters.tagIds
         .map((id) => tags.find((tag) => tag.id === id))
         .filter((tag): tag is WaTag => Boolean(tag)),
-    [filterDraft.tagIds, tags],
+    [filters.tagIds, tags],
   );
 
   const tagFilterSuggestions = useMemo(() => {
     const q = tagFilterQuery.trim().toLowerCase();
     return tags
-      .filter((tag) => !filterDraft.tagIds.includes(tag.id))
+      .filter((tag) => !filters.tagIds.includes(tag.id))
       .filter((tag) => {
         if (!q) return true;
         const groupName = tagGroupLabel(tag).toLowerCase();
         return tag.name.toLowerCase().includes(q) || groupName.includes(q);
       })
-      .sort((a, b) => a.name.localeCompare(b.name, "es"))
-      .slice(0, 10);
-  }, [tags, filterDraft.tagIds, tagFilterQuery, tagGroups]);
+      .sort((a, b) => {
+        const byGroup = tagGroupLabel(a).localeCompare(tagGroupLabel(b), "es");
+        if (byGroup) return byGroup;
+        return a.name.localeCompare(b.name, "es");
+      });
+  }, [tags, filters.tagIds, tagFilterQuery, tagGroups]);
 
   const tagsModalSelectedGroup = useMemo(
     () => tagGroups.find((group) => group.id === tagsModalGroupId) ?? null,
@@ -2123,12 +2111,11 @@ export function WhatsAppConversationsPanel({
       const [msgs, page] = await Promise.all([
         fetchWaMessages(conversationId),
         fetchWaConversations({
-          search: search.trim() || undefined,
           status: "OPEN",
           limit: Math.max(conversations.length, CONVERSATIONS_PAGE_SIZE),
           offset: 0,
           prueba: pruebaMode,
-        motor: pruebaMode ? pruebaMotor : undefined,
+          motor: pruebaMode ? pruebaMotor : undefined,
           ...filtersQuery,
         }),
       ]);
@@ -2402,47 +2389,501 @@ export function WhatsAppConversationsPanel({
     );
   }
 
-  return (
-    <div className={`wa-inbox${pruebaMode ? " wa-inbox--prueba" : ""}`}>
-      <aside className="wa-inbox__list" aria-label="Conversaciones">
-        <div className="wa-inbox__list-head">
-          <div className="wa-inbox__list-tools">
-            <div className="table-search wa-inbox__search">
-              <span className="table-search__icon" aria-hidden>
-                <IconSearch size={16} />
-              </span>
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="Buscar conversación…"
-                aria-label="Buscar conversación"
-              />
-            </div>
-            {pruebaMode ? null : (
+  function renderQuickTagsPanelBody(opts?: {
+    withSearchRef?: boolean;
+    pinned?: boolean;
+    onTogglePin?: () => void;
+  }) {
+    return (
+      <>
+        <div className="table-search wa-tags-panel__search">
+          <span className="table-search__icon" aria-hidden>
+            <IconSearch size={16} />
+          </span>
+          <input
+            ref={opts?.withSearchRef ? quickTagSearchRef : undefined}
+            type="text"
+            value={quickTagQuery}
+            onChange={(e) => setQuickTagQuery(e.target.value)}
+            placeholder="Buscar etiqueta…"
+            aria-label="Buscar etiqueta"
+            autoComplete="off"
+          />
+          {opts?.onTogglePin ? (
             <button
               type="button"
-              className={`wa-inbox__filter-btn${activeFilterCount > 0 ? " is-active" : ""}`}
+              className={`wa-tags-panel__pin${opts.pinned ? " is-on" : ""}`}
+              aria-label={opts.pinned ? "Desfijar panel" : "Fijar panel"}
+              title={opts.pinned ? "Desfijar panel" : "Fijar panel"}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                opts.onTogglePin?.();
+              }}
+            >
+              <IconPin size={15} filled={Boolean(opts.pinned)} />
+            </button>
+          ) : null}
+          {quickTagQuery ? (
+            <button
+              type="button"
+              className="wa-tags-panel__clear"
+              aria-label="Borrar búsqueda"
+              onClick={() => setQuickTagQuery("")}
+            >
+              <IconX size={16} />
+            </button>
+          ) : null}
+        </div>
+        <div className="wa-tags-panel__scroll">
+          {quickTagQuery.trim() ? (
+            tags.length === 0 ? (
+              <p>Todavía no hay etiquetas.</p>
+            ) : quickTagResults.length === 0 ? (
+              <p>Ninguna etiqueta coincide.</p>
+            ) : (
+              <div className="wa-tags-quick-list">
+                {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+              </div>
+            )
+          ) : (
+            <>
+              <section className="wa-tags-panel__quick">
+                <div className="wa-tags-panel__quick-head">
+                  <h3>Acceso rápido</h3>
+                  {pinnedTags.length >= CLUSTER_MIN ? (
+                    groupingTags ? (
+                      <button
+                        type="button"
+                        className={`wa-tags-panel__group-btn${
+                          groupPick.length >= CLUSTER_MIN ? " is-ready" : " is-on"
+                        }`}
+                        onClick={() => {
+                          if (editingGroups || groupPick.length < CLUSTER_MIN) {
+                            setGroupingTags(false);
+                            setEditingGroups(false);
+                            setGroupPick([]);
+                            return;
+                          }
+                          commitPinnedGroup();
+                        }}
+                      >
+                        {groupPick.length >= CLUSTER_MIN ? "Listo" : "Cancelar"}
+                      </button>
+                    ) : (
+                      <div className="wa-tags-panel__group-actions">
+                        {activeClusters.length ? (
+                          <button
+                            type="button"
+                            className="wa-tags-panel__group-btn"
+                            onClick={() => {
+                              const actual = activeClusters[activeClusters.length - 1];
+                              if (!actual) return;
+                              setGroupColor(actual.color);
+                              setGroupPick([...actual.tagIds]);
+                              setEditingGroups(true);
+                              setGroupingTags(true);
+                            }}
+                          >
+                            Editar
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="wa-tags-panel__group-btn"
+                          disabled={freePinnedCount < CLUSTER_MIN}
+                          title={
+                            freePinnedCount < CLUSTER_MIN
+                              ? "No hay etiquetas libres para agrupar"
+                              : "Agrupar"
+                          }
+                          onClick={() => {
+                            if (freePinnedCount < CLUSTER_MIN) return;
+                            const used = new Set(activeClusters.map((cluster) => cluster.color));
+                            const next =
+                              CLUSTER_COLORS.find((color) => !used.has(color)) ?? CLUSTER_COLORS[0]!;
+                            setGroupColor(next);
+                            setGroupPick([]);
+                            setEditingGroups(false);
+                            setGroupingTags(true);
+                          }}
+                        >
+                          Agrupar
+                        </button>
+                      </div>
+                    )
+                  ) : null}
+                </div>
+                {groupingTags && !editingGroups ? (
+                  <div className="wa-tags-color-picks" role="listbox" aria-label="Color del grupo">
+                    {CLUSTER_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        role="option"
+                        className={`wa-tags-color-pick${groupColor === color ? " is-on" : ""}`}
+                        style={{ background: color }}
+                        aria-label="Elegir color"
+                        aria-selected={groupColor === color}
+                        onClick={() => setGroupColor(color)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {pinnedTags.length === 0 ? (
+                  <p>Pineá etiquetas del buscador para tenerlas acá.</p>
+                ) : (
+                  <div
+                    className={`wa-tags-quick-list${dragPinnedId ? " is-sorting" : ""}`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={handlePinnedDrop}
+                  >
+                    {pinnedBlocks.map((block, blockIndex) => {
+                      if (block.kind === "single") {
+                        const primeroSuelto =
+                          pinnedBlocks.some((item) => item.kind === "cluster") &&
+                          pinnedBlocks.findIndex((item) => item.kind === "single") === blockIndex;
+                        return (
+                          <div key={block.tag.id} className="wa-tags-free-slot">
+                            {primeroSuelto ? <p className="wa-tags-free">Sin grupo</p> : null}
+                            {renderPinnedItem(block.tag, block.index)}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={block.cluster.id} className="wa-tags-group">
+                          {editingGroups ? (
+                            <div className="wa-tags-group__edit">
+                              <button
+                                type="button"
+                                className="wa-tags-group__undo"
+                                onClick={() => dissolvePinnedCluster(block.cluster.id)}
+                              >
+                                Desagrupar
+                              </button>
+                              <div className="wa-tags-color-picks" role="listbox" aria-label="Color del grupo">
+                                {CLUSTER_COLORS.map((color) => (
+                                  <button
+                                    key={color}
+                                    type="button"
+                                    role="option"
+                                    className={`wa-tags-color-pick${block.cluster.color === color ? " is-on" : ""}`}
+                                    style={{ background: color }}
+                                    aria-label="Elegir color"
+                                    aria-selected={block.cluster.color === color}
+                                    onClick={() => recolorPinnedCluster(block.cluster.id, color)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          {block.items.map((item, itemIndex) =>
+                            renderPinnedItem(
+                              item.tag,
+                              item.index,
+                              block.cluster.color,
+                              itemIndex === block.items.length - 1,
+                              groupingTags ? undefined : block.cluster.tagIds,
+                            ),
+                          )}
+                        </div>
+                      );
+                    })}
+                    {dragPinnedId != null &&
+                    pinnedDropIndex === pinnedTags.length &&
+                    pinnedTags.findIndex((item) => item.id === dragPinnedId) !==
+                      pinnedTags.length - 1 ? (
+                      <div className="wa-tags-quick-drop-end" aria-hidden />
+                    ) : null}
+                  </div>
+                )}
+              </section>
+              <section className="wa-tags-panel__fold">
+                <h3>Todas</h3>
+                {tags.length === 0 ? (
+                  <p>Todavía no hay etiquetas.</p>
+                ) : quickTagResults.length === 0 ? (
+                  <p>Ninguna etiqueta coincide.</p>
+                ) : (
+                  <div className="wa-tags-quick-list">
+                    {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {pruebaMode ? null : (
+        <div className="wa-inbox-bar" aria-label="Filtros de conversaciones">
+          <div className="wa-inbox-bar__filters">
+            <div className="form-group wa-inbox-bar__field">
+              <label htmlFor="wa-bar-assignee">Asignado a</label>
+              <select
+                id="wa-bar-assignee"
+                className="ui-select"
+                value={filters.assignee}
+                onChange={(e) => patchFilters({ assignee: e.target.value })}
+              >
+                <option value="">Todos</option>
+                <option value="none">Sin asignar</option>
+                <option value="bot">Bot</option>
+                {operators.map((op) => (
+                  <option key={op.id} value={op.id}>
+                    {op.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group wa-inbox-bar__field wa-inbox-bar__field--date">
+              <label htmlFor="wa-bar-from">Desde</label>
+              <DatePicker
+                id="wa-bar-from"
+                value={filters.dateFrom}
+                clearable
+                formatHint={false}
+                max={
+                  filters.dateTo && filters.dateTo < fechaHoyIso()
+                    ? filters.dateTo
+                    : fechaHoyIso()
+                }
+                onChange={(value) => {
+                  const hoy = fechaHoyIso();
+                  let dateFrom = value;
+                  if (dateFrom && dateFrom > hoy) dateFrom = hoy;
+                  let { dateTo } = filters;
+                  if (dateFrom && dateTo && dateFrom > dateTo) dateTo = dateFrom;
+                  patchFilters({ dateFrom, dateTo });
+                }}
+              />
+            </div>
+            <div className="form-group wa-inbox-bar__field wa-inbox-bar__field--date">
+              <label htmlFor="wa-bar-to">Hasta</label>
+              <DatePicker
+                id="wa-bar-to"
+                value={filters.dateTo}
+                clearable
+                formatHint={false}
+                min={filters.dateFrom || undefined}
+                max={fechaHoyIso()}
+                onChange={(value) => {
+                  const hoy = fechaHoyIso();
+                  let dateTo = value;
+                  if (dateTo && dateTo > hoy) dateTo = hoy;
+                  let { dateFrom } = filters;
+                  if (dateFrom && dateTo && dateFrom > dateTo) dateFrom = dateTo;
+                  patchFilters({ dateFrom, dateTo });
+                }}
+              />
+            </div>
+            <div className="form-group wa-inbox-bar__field wa-inbox-bar__field--tags">
+              <label htmlFor="wa-bar-tags">Filtros</label>
+              <div className="wa-inbox-bar__tags" ref={tagFilterWrapRef}>
+                <div className="table-search wa-inbox-bar__tag-input">
+                  <span className="table-search__icon" aria-hidden>
+                    <IconSearch size={16} />
+                  </span>
+                  {selectedFilterTags.length > 0 ? (
+                    <div
+                      className="wa-inbox-bar__selected"
+                      aria-live="polite"
+                      aria-label="Etiquetas seleccionadas"
+                    >
+                      {selectedFilterTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          className="wa-filters__tag is-active wa-filters__tag--selected"
+                          style={{ "--tag-color": tagColor(tag) } as CSSProperties}
+                          onClick={() => removeFilterTag(tag.id)}
+                          title={`Quitar ${tag.name}`}
+                          aria-label={`Quitar ${tag.name}`}
+                        >
+                          <span className="wa-filters__tag-dot" aria-hidden />
+                          <span className="wa-filters__tag-name">{tag.name}</span>
+                          <span className="wa-filters__tag-remove" aria-hidden>
+                            ×
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <input
+                    id="wa-bar-tags"
+                    type="search"
+                    value={tagFilterQuery}
+                    placeholder={
+                      tags.length === 0
+                        ? "Sin etiquetas"
+                        : selectedFilterTags.length > 0
+                          ? "Agregar…"
+                          : "Buscar etiqueta…"
+                    }
+                    disabled={tags.length === 0}
+                    aria-label="Buscar etiqueta"
+                    aria-expanded={tagFilterSuggestOpen}
+                    aria-controls="wa-bar-tag-suggestions"
+                    onChange={(e) => {
+                      setTagFilterQuery(e.target.value);
+                      setTagFilterSuggestOpen(true);
+                    }}
+                    onFocus={() => setTagFilterSuggestOpen(true)}
+                  />
+                </div>
+                {tagFilterSuggestOpen && tags.length > 0 ? (
+                  <div
+                    id="wa-bar-tag-suggestions"
+                    className="wa-inbox-bar__suggest"
+                    role="listbox"
+                    aria-label="Etiquetas sugeridas"
+                  >
+                    {tagFilterSuggestions.length === 0 ? (
+                      <p className="wa-inbox-bar__suggest-empty">
+                        {tagFilterQuery.trim()
+                          ? "Sin coincidencias"
+                          : "No quedan etiquetas para agregar"}
+                      </p>
+                    ) : (
+                      tagFilterSuggestions.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          className="wa-inbox-bar__suggest-item"
+                          role="option"
+                          onClick={() => addFilterTag(tag.id)}
+                        >
+                          <span
+                            className="wa-filters__tag-dot"
+                            style={{ background: tagColor(tag) }}
+                            aria-hidden
+                          />
+                          <span className="wa-filters__suggest-main">
+                            <span className="wa-filters__suggest-name">{tag.name}</span>
+                            <span className="wa-filters__suggest-group">
+                              {tagGroupLabel(tag)}
+                            </span>
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <div className="wa-inbox-bar__actions">
+            <button
+              type="button"
+              className={`btn btn-secondary btn-sm wa-inbox-bar__vista${
+                listaConversacionesVisible ? "" : " is-on"
+              }`}
               aria-label={
-                activeFilterCount > 0
-                  ? `Filtros (${activeFilterCount} activos)`
-                  : "Filtros"
+                listaConversacionesVisible
+                  ? "Ocultar lista de conversaciones"
+                  : "Mostrar lista de conversaciones"
               }
               title={
-                activeFilterCount > 0
-                  ? `Filtros activos: ${activeFilterCount}`
-                  : "Filtros"
+                listaConversacionesVisible
+                  ? "Ocultar lista de conversaciones"
+                  : "Mostrar lista de conversaciones"
               }
-              onClick={openFiltersModal}
+              onClick={() => setListaConversacionesVisible((on) => !on)}
             >
-              <IconFilter size={14} />
-              {activeFilterCount > 0 ? (
-                <span className="wa-inbox__filter-badge">{activeFilterCount}</span>
-              ) : null}
+              <IconConversations size={16} />
             </button>
-            )}
+            <button
+              type="button"
+              className={`btn btn-secondary btn-sm wa-inbox-bar__vista${vistaOperadora ? " is-on" : ""}`}
+              aria-label={vistaOperadora ? "Vista normal" : "Vista operadora"}
+              title={vistaOperadora ? "Vista normal" : "Vista operadora"}
+              onClick={() => setVistaOperadora((on) => !on)}
+            >
+              {vistaOperadora ? <IconCollapse size={16} /> : <IconExpand size={16} />}
+            </button>
           </div>
         </div>
+      )}
+      <div
+        className={`wa-inbox${pruebaMode ? " wa-inbox--prueba" : ""}${
+          vistaOperadora ? " wa-inbox--operadora" : ""
+        }${listaConversacionesVisible ? "" : " wa-inbox--lista-oculta"}`}
+      >
+      {buscaTurnoMounted && !pruebaMode ? (
+        <div
+          className={
+            leftBuscaPinned
+              ? "wa-busca-dock"
+              : `wa-tags-hover wa-tags-hover--left${leftBuscaOpen ? " is-open" : ""}`
+          }
+          onMouseEnter={leftBuscaPinned ? undefined : () => setLeftBuscaOpen(true)}
+          onMouseLeave={
+            leftBuscaPinned || leftBuscaUiLocked
+              ? undefined
+              : () => setLeftBuscaOpen(false)
+          }
+        >
+          {leftBuscaPinned ? null : (
+            <span className="wa-tags-hover__tab" aria-hidden>
+              <IconChevronRight size={16} />
+            </span>
+          )}
+          <aside
+            className={
+              leftBuscaPinned
+                ? "wa-busca-panel wa-busca-panel--docked"
+                : "wa-tags-pop wa-busca-pop"
+            }
+            aria-label="Buscar turno"
+            aria-hidden={!(leftBuscaPinned || leftBuscaOpen)}
+          >
+            <div
+              className={
+                leftBuscaPinned
+                  ? "wa-busca-panel__inner"
+                  : "wa-busca-panel wa-busca-panel--float"
+              }
+            >
+              <div className="wa-busca-panel__head">
+                <h3>Buscar turno</h3>
+                <button
+                  type="button"
+                  className={`wa-tags-panel__pin${leftBuscaPinned ? " is-on" : ""}`}
+                  aria-label={leftBuscaPinned ? "Desfijar panel" : "Fijar panel"}
+                  title={leftBuscaPinned ? "Desfijar panel" : "Fijar panel"}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setLeftBuscaPinned((on) => {
+                      if (!on) setLeftBuscaOpen(false);
+                      return !on;
+                    });
+                  }}
+                >
+                  <IconPin size={15} filled={leftBuscaPinned} />
+                </button>
+              </div>
+              <div className="wa-busca-panel__body">
+                <BuscaTurnoApp
+                  mode="compact"
+                  onUiLockChange={(locked) => {
+                    setLeftBuscaUiLocked(locked);
+                    if (locked) setLeftBuscaOpen(true);
+                  }}
+                />
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+      <aside className="wa-inbox__list" aria-label="Conversaciones">
         <div
           className="wa-inbox__list-body"
           ref={listBodyRef}
@@ -2460,7 +2901,7 @@ export function WhatsAppConversationsPanel({
               {pruebaMode
                 ? "Creá una prueba para empezar a hablarle al bot."
                 : connected
-                  ? activeFilterCount > 0 || search.trim()
+                  ? activeFilterCount > 0
                     ? "No hay conversaciones con esos filtros."
                     : "No hay conversaciones abiertas."
                   : "Conectá WhatsApp para empezar a recibir chats."}
@@ -3373,6 +3814,17 @@ export function WhatsAppConversationsPanel({
             </>
           )}
         </aside>
+      ) : rightTagsPinned ? (
+        <aside
+          className="wa-tags-panel wa-tags-panel--docked wa-tags-panel--docked-right"
+          aria-label="Etiquetas rápidas"
+        >
+          {renderQuickTagsPanelBody({
+            withSearchRef: true,
+            pinned: true,
+            onTogglePin: () => setRightTagsPinned(false),
+          })}
+        </aside>
       ) : (
         <div
           className={`wa-tags-hover${quickPanelOpen ? " is-open" : ""}`}
@@ -3383,213 +3835,16 @@ export function WhatsAppConversationsPanel({
             <IconChevronLeft size={16} />
           </span>
           <aside className="wa-tags-pop" aria-label="Etiquetas rápidas">
-          <div className="wa-tags-panel wa-tags-panel--float">
-          <div className="table-search wa-tags-panel__search">
-            <span className="table-search__icon" aria-hidden>
-              <IconSearch size={16} />
-            </span>
-            <input
-              ref={quickTagSearchRef}
-              type="text"
-              value={quickTagQuery}
-              onChange={(e) => setQuickTagQuery(e.target.value)}
-              placeholder="Buscar etiqueta…"
-              aria-label="Buscar etiqueta"
-              autoComplete="off"
-            />
-            {quickTagQuery ? (
-              <button
-                type="button"
-                className="wa-tags-panel__clear"
-                aria-label="Borrar búsqueda"
-                onClick={() => setQuickTagQuery("")}
-              >
-                <IconX size={16} />
-              </button>
-            ) : null}
-          </div>
-          <div className="wa-tags-panel__scroll">
-          {quickTagQuery.trim() ? (
-            tags.length === 0 ? (
-              <p>Todavía no hay etiquetas.</p>
-            ) : quickTagResults.length === 0 ? (
-              <p>Ninguna etiqueta coincide.</p>
-            ) : (
-              <div className="wa-tags-quick-list">
-                {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
-              </div>
-            )
-          ) : (
-            <>
-              <section className="wa-tags-panel__quick">
-                <div className="wa-tags-panel__quick-head">
-                  <h3>Acceso rápido</h3>
-                  {pinnedTags.length >= CLUSTER_MIN ? (
-                    groupingTags ? (
-                      <button
-                        type="button"
-                        className={`wa-tags-panel__group-btn${
-                          groupPick.length >= CLUSTER_MIN ? " is-ready" : " is-on"
-                        }`}
-                        onClick={() => {
-                          if (editingGroups || groupPick.length < CLUSTER_MIN) {
-                            setGroupingTags(false);
-                            setEditingGroups(false);
-                            setGroupPick([]);
-                            return;
-                          }
-                          commitPinnedGroup();
-                        }}
-                      >
-                        {groupPick.length >= CLUSTER_MIN ? "Listo" : "Cancelar"}
-                      </button>
-                    ) : (
-                      <div className="wa-tags-panel__group-actions">
-                        {activeClusters.length ? (
-                          <button
-                            type="button"
-                            className="wa-tags-panel__group-btn"
-                            onClick={() => {
-                              const actual = activeClusters[activeClusters.length - 1];
-                              if (!actual) return;
-                              setGroupColor(actual.color);
-                              setGroupPick([...actual.tagIds]);
-                              setEditingGroups(true);
-                              setGroupingTags(true);
-                            }}
-                          >
-                            Editar
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="wa-tags-panel__group-btn"
-                          disabled={freePinnedCount < CLUSTER_MIN}
-                          title={
-                            freePinnedCount < CLUSTER_MIN
-                              ? "No hay etiquetas libres para agrupar"
-                              : "Agrupar"
-                          }
-                          onClick={() => {
-                            if (freePinnedCount < CLUSTER_MIN) return;
-                            const used = new Set(activeClusters.map((cluster) => cluster.color));
-                            const next =
-                              CLUSTER_COLORS.find((color) => !used.has(color)) ?? CLUSTER_COLORS[0]!;
-                            setGroupColor(next);
-                            setGroupPick([]);
-                            setEditingGroups(false);
-                            setGroupingTags(true);
-                          }}
-                        >
-                          Agrupar
-                        </button>
-                      </div>
-                    )
-                  ) : null}
-                </div>
-                {groupingTags && !editingGroups ? (
-                  <div className="wa-tags-color-picks" role="listbox" aria-label="Color del grupo">
-                    {CLUSTER_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        role="option"
-                        className={`wa-tags-color-pick${groupColor === color ? " is-on" : ""}`}
-                        style={{ background: color }}
-                        aria-label="Elegir color"
-                        aria-selected={groupColor === color}
-                        onClick={() => setGroupColor(color)}
-                      />
-                    ))}
-                  </div>
-                ) : null}
-                {pinnedTags.length === 0 ? (
-                  <p>Pineá etiquetas del buscador para tenerlas acá.</p>
-                ) : (
-                  <div
-                    className={`wa-tags-quick-list${dragPinnedId ? " is-sorting" : ""}`}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={handlePinnedDrop}
-                  >
-                    {pinnedBlocks.map((block, blockIndex) => {
-                      if (block.kind === "single") {
-                        const primeroSuelto =
-                          pinnedBlocks.some((item) => item.kind === "cluster") &&
-                          pinnedBlocks.findIndex((item) => item.kind === "single") === blockIndex;
-                        return (
-                          <div key={block.tag.id} className="wa-tags-free-slot">
-                            {primeroSuelto ? <p className="wa-tags-free">Sin grupo</p> : null}
-                            {renderPinnedItem(block.tag, block.index)}
-                          </div>
-                        );
-                      }
-                      return (
-                        <div key={block.cluster.id} className="wa-tags-group">
-                          {editingGroups ? (
-                            <div className="wa-tags-group__edit">
-                              <button
-                                type="button"
-                                className="wa-tags-group__undo"
-                                onClick={() => dissolvePinnedCluster(block.cluster.id)}
-                              >
-                                Desagrupar
-                              </button>
-                              <div className="wa-tags-color-picks" role="listbox" aria-label="Color del grupo">
-                                {CLUSTER_COLORS.map((color) => (
-                                  <button
-                                    key={color}
-                                    type="button"
-                                    role="option"
-                                    className={`wa-tags-color-pick${block.cluster.color === color ? " is-on" : ""}`}
-                                    style={{ background: color }}
-                                    aria-label="Elegir color"
-                                    aria-selected={block.cluster.color === color}
-                                    onClick={() => recolorPinnedCluster(block.cluster.id, color)}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                          {block.items.map((item, itemIndex) =>
-                            renderPinnedItem(
-                              item.tag,
-                              item.index,
-                              block.cluster.color,
-                              itemIndex === block.items.length - 1,
-                              groupingTags ? undefined : block.cluster.tagIds,
-                            ),
-                          )}
-                        </div>
-                      );
-                    })}
-                    {dragPinnedId != null &&
-                    pinnedDropIndex === pinnedTags.length &&
-                    pinnedTags.findIndex((item) => item.id === dragPinnedId) !==
-                      pinnedTags.length - 1 ? (
-                      <div className="wa-tags-quick-drop-end" aria-hidden />
-                    ) : null}
-                  </div>
-                )}
-              </section>
-              <section className="wa-tags-panel__fold">
-                <h3>Todas</h3>
-                {tags.length === 0 ? (
-                  <p>Todavía no hay etiquetas.</p>
-                ) : quickTagResults.length === 0 ? (
-                  <p>Ninguna etiqueta coincide.</p>
-                ) : (
-                  <div className="wa-tags-quick-list">
-                    {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
-          </div>
-          </div>
+            <div className="wa-tags-panel wa-tags-panel--float">
+              {renderQuickTagsPanelBody({
+                withSearchRef: quickPanelOpen || !vistaOperadora || !leftBuscaOpen,
+                pinned: false,
+                onTogglePin: () => {
+                  setRightTagsPinned(true);
+                  setQuickPanelOpen(false);
+                },
+              })}
+            </div>
           </aside>
         </div>
       )}
@@ -3836,200 +4091,6 @@ export function WhatsAppConversationsPanel({
       </Modal>
 
       <Modal
-        open={filtersModalOpen}
-        title="Filtros de conversaciones"
-        className="fl-modal--wa-filters"
-        onClose={() => setFiltersModalOpen(false)}
-        footer={
-          <>
-            <button type="button" className="btn btn-ghost" onClick={clearFilters}>
-              Limpiar
-            </button>
-            <button type="button" className="btn btn-primary" onClick={applyFilters}>
-              Aplicar
-            </button>
-          </>
-        }
-      >
-        <div className="wa-filters">
-          <section className="wa-filters__section">
-            <h3 className="wa-filters__title">Fecha del último mensaje</h3>
-            <div className="wa-filters__dates">
-              <div className="form-group">
-                <label htmlFor="wa-filter-from">Desde</label>
-                <DatePicker
-                  id="wa-filter-from"
-                  value={filterDraft.dateFrom}
-                  formatHint={false}
-                  max={
-                    filterDraft.dateTo && filterDraft.dateTo < fechaHoyIso()
-                      ? filterDraft.dateTo
-                      : fechaHoyIso()
-                  }
-                  onChange={(value) =>
-                    setFilterDraft((prev) => {
-                      const hoy = fechaHoyIso();
-                      let dateFrom = value;
-                      if (dateFrom && dateFrom > hoy) dateFrom = hoy;
-                      let { dateTo } = prev;
-                      if (dateFrom && dateTo && dateFrom > dateTo) {
-                        dateTo = dateFrom;
-                      }
-                      return { ...prev, dateFrom, dateTo };
-                    })
-                  }
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="wa-filter-to">Hasta</label>
-                <DatePicker
-                  id="wa-filter-to"
-                  value={filterDraft.dateTo}
-                  formatHint={false}
-                  min={filterDraft.dateFrom || undefined}
-                  max={fechaHoyIso()}
-                  onChange={(value) =>
-                    setFilterDraft((prev) => {
-                      const hoy = fechaHoyIso();
-                      let dateTo = value;
-                      if (dateTo && dateTo > hoy) dateTo = hoy;
-                      let { dateFrom } = prev;
-                      if (dateFrom && dateTo && dateFrom > dateTo) {
-                        dateFrom = dateTo;
-                      }
-                      return { ...prev, dateFrom, dateTo };
-                    })
-                  }
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="wa-filters__section">
-            <h3 className="wa-filters__title">Asignado a</h3>
-            <select
-              className="ui-select"
-              value={filterDraft.assignee}
-              onChange={(e) =>
-                setFilterDraft((prev) => ({ ...prev, assignee: e.target.value }))
-              }
-              aria-label="Filtrar por asignación"
-            >
-              <option value="">Todos</option>
-              <option value="none">Sin asignar</option>
-              <option value="bot">Bot</option>
-              {operators.map((op) => (
-                <option key={op.id} value={op.id}>
-                  {op.nombre}
-                </option>
-              ))}
-            </select>
-          </section>
-
-          <section className="wa-filters__section wa-filters__section--tags">
-            <div className="wa-filters__tags-head">
-              <h3 className="wa-filters__title">Etiquetas</h3>
-              {filterDraft.tagIds.length > 0 ? (
-                <span className="wa-filters__tags-count">
-                  {filterDraft.tagIds.length} seleccionada
-                  {filterDraft.tagIds.length === 1 ? "" : "s"}
-                </span>
-              ) : null}
-            </div>
-            {tags.length === 0 ? (
-              <p className="wa-filters__hint">No hay etiquetas cargadas.</p>
-            ) : (
-              <div className="wa-filters__tag-search" ref={tagFilterWrapRef}>
-                <div className="wa-filters__tag-row">
-                  <div className="wa-filters__tag-input-wrap">
-                    <div className="table-search wa-filters__tag-input">
-                      <span className="table-search__icon" aria-hidden>
-                        <IconSearch size={16} />
-                      </span>
-                      <input
-                        type="search"
-                        value={tagFilterQuery}
-                        placeholder="Buscar etiqueta…"
-                        aria-label="Buscar etiqueta"
-                        aria-expanded={tagFilterSuggestOpen}
-                        aria-controls="wa-filter-tag-suggestions"
-                        onChange={(e) => {
-                          setTagFilterQuery(e.target.value);
-                          setTagFilterSuggestOpen(true);
-                        }}
-                        onFocus={() => setTagFilterSuggestOpen(true)}
-                      />
-                    </div>
-                    {tagFilterSuggestOpen ? (
-                      <div
-                        id="wa-filter-tag-suggestions"
-                        className="wa-filters__suggest"
-                        role="listbox"
-                        aria-label="Etiquetas sugeridas"
-                      >
-                        {tagFilterSuggestions.length === 0 ? (
-                          <p className="wa-filters__suggest-empty">
-                            {tagFilterQuery.trim()
-                              ? "Sin coincidencias"
-                              : "No quedan etiquetas para agregar"}
-                          </p>
-                        ) : (
-                          tagFilterSuggestions.map((tag) => (
-                            <button
-                              key={tag.id}
-                              type="button"
-                              className="wa-filters__suggest-item"
-                              role="option"
-                              onClick={() => addDraftTag(tag.id)}
-                            >
-                              <span
-                                className="wa-filters__tag-dot"
-                                style={{ background: tagColor(tag) }}
-                                aria-hidden
-                              />
-                              <span className="wa-filters__suggest-main">
-                                <span className="wa-filters__suggest-name">{tag.name}</span>
-                                <span className="wa-filters__suggest-group">
-                                  {tagGroupLabel(tag)}
-                                </span>
-                              </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div
-                    className="wa-filters__selected"
-                    aria-live="polite"
-                    aria-label="Etiquetas seleccionadas"
-                  >
-                    {selectedFilterTags.map((tag) => (
-                      <button
-                        key={tag.id}
-                        type="button"
-                        className="wa-filters__tag is-active wa-filters__tag--selected"
-                        style={{ "--tag-color": tagColor(tag) } as CSSProperties}
-                        onClick={() => removeDraftTag(tag.id)}
-                        title={`Quitar ${tag.name}`}
-                        aria-label={`Quitar ${tag.name}`}
-                      >
-                        <span className="wa-filters__tag-dot" aria-hidden />
-                        <span className="wa-filters__tag-name">{tag.name}</span>
-                        <span className="wa-filters__tag-remove" aria-hidden>
-                          ×
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
-      </Modal>
-
-      <Modal
         open={qrModalOpen && !connected}
         title="Vincular WhatsApp"
         onClose={() => setQrModalOpen(false)}
@@ -4266,6 +4327,7 @@ export function WhatsAppConversationsPanel({
             ))}
         </div>
       </Modal>
-    </div>
+      </div>
+    </>
   );
 }

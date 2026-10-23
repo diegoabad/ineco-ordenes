@@ -95,9 +95,13 @@
   opacity: 0.45;
 }
 
+.fl-date-picker__clear {
+  color: var(--text-muted);
+}
+
 .fl-date-picker__clear:hover:not(:disabled) {
-  color: var(--primary);
-  background: var(--primary-muted);
+  color: var(--text);
+  background: var(--bg-subtle);
 }
 
 .fl-date-picker__popover {
