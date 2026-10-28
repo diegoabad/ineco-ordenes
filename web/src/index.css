@@ -10072,6 +10072,18 @@ body.wa-vista-operadora .wa-inbox {
   white-space: nowrap;
 }
 
+.wa-inbox__prueba-pill {
+  flex-shrink: 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #2f6fed 18%, #fff);
+  color: #1d4ed8;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .wa-inbox__item-time {
   flex-shrink: 0;
   font-size: 0.7rem;
@@ -11827,6 +11839,13 @@ textarea.wa-prueba-nota {
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
+}
+
+.wa-bubble__busca-turno {
+  margin-top: 0.55rem;
+  align-self: stretch;
+  width: 100%;
+  justify-content: center;
 }
 
 .wa-dato-menu {

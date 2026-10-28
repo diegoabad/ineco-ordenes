@@ -77,6 +77,9 @@ export type WaPruebaAclaracion = {
 export type MenuPaso =
   | "sede"
   | "algoMas"
+  | "pacienteTipo"
+  | "primeraVezDatos"
+  | "otrasConsultas"
   | "menu"
   | "turnos"
   | "info"
@@ -87,10 +90,15 @@ export type MenuPaso =
   | "apellido"
   | "sexo"
   | "email"
+  | "fechaNacimiento"
+  | "pedidoDatos"
   | "profesional"
   | "tratamiento"
+  | "cobertura"
+  | "afiliado"
   | "horarios"
   | "elegirTurno"
+  | "motivoCancelacion"
   | "confirmar";
 
 export type MenuModo =
@@ -114,15 +122,33 @@ export type MenuEstado = {
   apellido: string;
   sexo: "" | "masculino" | "femenino";
   email: string;
+  telefono: string;
+  fechaNacimiento: string;
+  cobertura: string;
+  nAfiliado: string;
+  motivoConsulta: string;
+  edad: string;
   esPaciente: "" | "si" | "no";
   profesional: string;
   tratamiento: string;
+  /** Nombre del profesional en BuscaTurno (match interno para el equipo). */
+  profesionalCatalogo: string;
+  /** Prestación en BuscaTurno (match interno para el equipo). */
+  tratamientoCatalogo: string;
+  /** Doc Medexis del profesional matcheado (para Busca Turno). */
+  profesionalDoc: string;
+  /** Código de prestación matcheada (para Busca Turno). */
+  prestacionCodigo: string;
+  /** Modalidad pedida: presencial, virtual o indistinto. */
+  modalidad: "" | "presencial" | "virtual" | "indistinto";
   pendiente: string;
   opciones: string[];
   horarios: string;
   hastaDia: number;
   busqueda: string;
   anularLuego: string;
+  /** Ya mostramos el resumen de datos del pedido de turno. */
+  pedidoIntro: boolean;
   pila: { paso: MenuPaso; opciones: string[] }[];
 };
 

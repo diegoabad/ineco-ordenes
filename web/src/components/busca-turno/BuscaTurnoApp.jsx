@@ -788,12 +788,100 @@ function sortProfesionalesAlfabetico(list) {
   );
 }
 
+function normSeed(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .trim();
+}
+
+function tokensSeed(texto) {
+  return normSeed(texto)
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
+}
+
+function scoreSeedTexto(consulta, candidato) {
+  const pedidos = tokensSeed(consulta);
+  const propios = tokensSeed(candidato);
+  if (!pedidos.length || !propios.length) return 0;
+  let puntos = 0;
+  let hits = 0;
+  for (const token of pedidos) {
+    const exacto = propios.includes(token);
+    const cerca = propios.some(
+      (p) => p === token || (token.length >= 4 && (p.startsWith(token) || token.startsWith(p)))
+    );
+    if (!exacto && !cerca) continue;
+    hits += 1;
+    puntos += exacto ? token.length * 2 : token.length;
+  }
+  const c = normSeed(consulta);
+  const n = normSeed(candidato);
+  if (c && n && (n === c || n.includes(c) || c.includes(n))) puntos += Math.min(c.length, 12);
+  if (!hits && puntos < 8) return 0;
+  return puntos;
+}
+
+function modalidadDeNombrePrest(nombre) {
+  const t = normSeed(nombre);
+  if (/\bonline\b|\bvirtual\b|\bvideoconsulta\b|\bvideo\s*consulta\b|\btelemedicina\b/.test(t)) {
+    return 'virtual';
+  }
+  return 'presencial';
+}
+
+/** Entre trámites del dr (o catálogo), elige prestación por motivo + modalidad. */
+function matchPrestacionDesdePedido(prestacionesMap, { motivo, modalidad, profesionalDoc }) {
+  const texto = String(motivo || '').trim();
+  if (!texto) return null;
+  const todas = Object.entries(prestacionesMap || {}).filter(([, item]) => item && item.enabled !== false);
+  let candidatos = profesionalDoc
+    ? todas.filter(([, item]) =>
+        (item.profesionales || []).some((p) => String(p.doc) === String(profesionalDoc))
+      )
+    : todas;
+  if (!candidatos.length) return null;
+
+  const mod = modalidad === 'presencial' || modalidad === 'virtual' ? modalidad : '';
+  if (mod) {
+    const filtrados = candidatos.filter(
+      ([, item]) => modalidadDeNombrePrest(item.nombre || '') === mod
+    );
+    if (filtrados.length) candidatos = filtrados;
+  }
+
+  const ranking = candidatos
+    .map(([codigo, prestacion]) => {
+      const nombre = prestacion.nombre || '';
+      let puntos = Math.max(scoreSeedTexto(texto, nombre), scoreSeedTexto(texto, codigo));
+      if (mod && modalidadDeNombrePrest(nombre) === mod) puntos += 6;
+      if (mod === 'presencial' && modalidadDeNombrePrest(nombre) === 'virtual') puntos -= 30;
+      if (mod === 'virtual' && modalidadDeNombrePrest(nombre) === 'presencial') puntos -= 20;
+      return { codigo, prestacion, puntos };
+    })
+    .filter((row) => row.puntos >= 4)
+    .sort((a, b) => b.puntos - a.puntos);
+  if (!ranking.length) return null;
+  const mejor = ranking[0];
+  if (mod === 'presencial' && modalidadDeNombrePrest(mejor.prestacion.nombre || '') === 'virtual') {
+    return null;
+  }
+  const segundo = ranking[1];
+  if (segundo && segundo.puntos >= mejor.puntos * 0.9 && segundo.puntos >= mejor.puntos - 2) {
+    return null;
+  }
+  return mejor.codigo;
+}
+
 function App({
   section = 'turnos',
   onRequestSection,
   onCatalogStatus,
   mode = 'full',
   onUiLockChange,
+  pedidoSeed = null,
 }) {
   const compact = mode === 'compact';
   const configView = !compact && section === 'config';
@@ -807,6 +895,7 @@ function App({
   const [prestacionId, setPrestacionId] = useState('');
   const [modalidad, setModalidad] = useState('TODOS');
   const [duracionMin, setDuracionMin] = useState(30);
+  const lastPedidoSeedKey = useRef('');
   const [searching, setSearching] = useState(false);
   const [slotsRaw, setSlotsRaw] = useState([]);
   const [dadosRaw, setDadosRaw] = useState([]);
@@ -854,6 +943,79 @@ function App({
       cacheLabel,
     });
   }, [cacheDot, cacheLabel, onCatalogStatus]);
+
+  // Prefill desde pedido de turno del CRM WhatsApp.
+  useEffect(() => {
+    if (!pedidoSeed?.key || !cacheLoaded) return;
+    if (lastPedidoSeedKey.current === pedidoSeed.key) return;
+    lastPedidoSeedKey.current = pedidoSeed.key;
+
+    if (pedidoSeed.modalidad === 'virtual') setModalidad('VIRTUAL');
+    else if (pedidoSeed.modalidad === 'presencial') setModalidad('PRESENCIAL');
+    else if (pedidoSeed.modalidad === 'indistinto') setModalidad('TODOS');
+
+    let docProf = String(pedidoSeed.profesionalDoc || '').trim();
+    if (!docProf && pedidoSeed.profesionalNombre) {
+      const buscado = normSeed(pedidoSeed.profesionalNombre);
+      const hit = (profesionalesCatalog || []).find(
+        (p) =>
+          p.enabled !== false &&
+          (normSeed(p.nombre) === buscado ||
+            normSeed(p.nombre).includes(buscado) ||
+            buscado.includes(normSeed(p.nombre).split(/\s+/)[0] || ''))
+      );
+      if (hit) docProf = String(hit.doc || '').trim();
+    }
+
+    // 1) Código que trajo el bot, si existe en el catálogo.
+    // 2) Si no: trámites del dr + motivo + modalidad (como el match del bot).
+    let codigo = String(pedidoSeed.prestacionCodigo || '').trim();
+    if (codigo && !prestaciones[codigo]) codigo = '';
+    if (!codigo) {
+      const motivo =
+        String(pedidoSeed.tratamiento || '').trim() ||
+        String(pedidoSeed.prestacionNombre || '').trim();
+      codigo =
+        matchPrestacionDesdePedido(prestaciones, {
+          motivo,
+          modalidad: pedidoSeed.modalidad || '',
+          profesionalDoc: docProf || undefined,
+        }) || '';
+    }
+
+    if (codigo && prestaciones[codigo]) {
+      setPrestacionId(codigo);
+      setFiltrosAbiertos(true);
+    } else {
+      setPrestacionId('');
+      setFiltrosAbiertos(true);
+    }
+
+    if (docProf && codigo) {
+      setSelectedPrestadorDocsByPrestacion((prev) => ({
+        ...prev,
+        [codigo]: [docProf],
+      }));
+    }
+
+    const nombrePrest = codigo
+      ? prestaciones[codigo]?.nombre || pedidoSeed.prestacionNombre || codigo
+      : '';
+    const partes = [];
+    if (pedidoSeed.profesionalNombre || docProf) {
+      partes.push(pedidoSeed.profesionalNombre || `Doc ${docProf}`);
+    }
+    if (nombrePrest) partes.push(nombrePrest);
+    if (partes.length) {
+      toast.info(
+        codigo
+          ? `Pedido cargado: ${partes.join(' · ')}`
+          : `Pedido cargado (${partes.join(' · ')}). Elegí la prestación.`,
+      );
+    } else if (!codigo) {
+      toast.info('Pedido cargado. Elegí la prestación en Busca Turno.');
+    }
+  }, [pedidoSeed, cacheLoaded, prestaciones, profesionalesCatalog]);
 
   const esSedeCargada = useCallback(
     (sede) => sedesCarga.includes(String(sede ?? '').trim()),

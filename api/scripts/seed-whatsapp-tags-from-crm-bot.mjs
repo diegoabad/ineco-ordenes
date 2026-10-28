@@ -78,14 +78,12 @@ const TAGS_BY_GROUP = {
     "Fundación INECO",
   ],
   coberturas: [
-    "OSDE",
+    "IOMA",
     "Swiss Medical",
-    "Galeno",
-    "Medicus",
-    "Omint",
-    "PAMI",
-    "Con cobertura",
-    "Sin cobertura",
+    "OSPIS",
+    "Prevención",
+    "Particular",
+    "OS no soportada",
   ],
   tratamientos: [
     "TDAH",
@@ -140,7 +138,7 @@ const TAGS_BY_GROUP = {
 };
 
 /** Nombres duplicados que no se conservan (se fusionan con la canónica). */
-const DROP_ALIAS_NAMES = new Set(["particular"]);
+const DROP_ALIAS_NAMES = new Set(["sin cobertura", "sin convenio", "con cobertura"]);
 
 function normName(value) {
   return String(value ?? "")

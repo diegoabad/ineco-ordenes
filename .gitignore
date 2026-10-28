@@ -19,6 +19,7 @@ api/uploads/envios/*
 !api/uploads/envios/.gitkeep
 api/data/whatsapp-session/
 api/data/whatsapp-media/
+api/data/whatsapp-pruebas-local.json
 api/.env
 api/firebase-service-account.json
 

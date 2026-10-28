@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { listLocalSyntheticTags } from "./prueba-local-store.js";
 
 export type WaTagGroup = {
   id: string;
@@ -73,7 +74,16 @@ function sortByName<T extends { name: string }>(items: T[]): T[] {
 }
 
 async function readCatalog(): Promise<WaTagCatalog> {
-  const snap = await getDoc(TAGS_DOC);
+  let snap;
+  try {
+    snap = await getDoc(TAGS_DOC);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/RESOURCE_EXHAUSTED|Quota exceeded|resource-exhausted/i.test(msg)) {
+      return { groups: [], items: [] };
+    }
+    throw error;
+  }
   const data = snap.exists() ? snap.data() : {};
   const rawGroups = Array.isArray(data?.groups) ? data.groups : [];
   const rawItems = Array.isArray(data?.items) ? data.items : [];
@@ -126,7 +136,73 @@ async function writeCatalog(catalog: WaTagCatalog): Promise<void> {
 }
 
 export async function listWhatsappTagCatalog(): Promise<WaTagCatalog> {
-  return readCatalog();
+  const catalog = await readCatalog();
+  const sinteticos = listLocalSyntheticTags();
+  if (!sinteticos.length) return catalog;
+  const conocidos = new Set(catalog.items.map((item) => item.id));
+  const extra: WaTag[] = sinteticos
+    .filter((item) => !conocidos.has(item.id))
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      groupId: "",
+      createdAt: "",
+      updatedAt: "",
+    }));
+  if (!extra.length) return catalog;
+  return { ...catalog, items: sortByName([...catalog.items, ...extra]) };
+}
+
+const MENU_TAG_GROUP = "Bot menú";
+const MENU_TAG_COLOR = "#2f6fed";
+
+/** Asegura que existan etiquetas por nombre (grupo «Bot menú»). Devuelve el catálogo actualizado. */
+export async function ensureWhatsappTagsByName(nombres: string[]): Promise<WaTagCatalog> {
+  const pedidos = [...new Set(nombres.map((n) => n.trim()).filter(Boolean))];
+  if (!pedidos.length) return readCatalog();
+
+  let catalog = await readCatalog();
+  const now = new Date().toISOString();
+  let cambio = false;
+
+  let grupo = catalog.groups.find((g) => g.name.toLowerCase() === MENU_TAG_GROUP.toLowerCase());
+  if (!grupo) {
+    grupo = {
+      id: randomUUID(),
+      name: MENU_TAG_GROUP,
+      color: MENU_TAG_COLOR,
+      createdAt: now,
+      updatedAt: now,
+    };
+    catalog = { ...catalog, groups: [...catalog.groups, grupo] };
+    cambio = true;
+  }
+
+  const items = [...catalog.items];
+  for (const nombre of pedidos) {
+    const existe = items.some((item) => item.name.toLowerCase() === nombre.toLowerCase());
+    if (existe) continue;
+    items.push({
+      id: randomUUID(),
+      name: nombre,
+      groupId: grupo.id,
+      createdAt: now,
+      updatedAt: now,
+    });
+    cambio = true;
+  }
+
+  if (cambio) {
+    catalog = { ...catalog, items: sortByName(items) };
+    try {
+      await writeCatalog(catalog);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!/RESOURCE_EXHAUSTED|Quota exceeded|resource-exhausted/i.test(msg)) throw error;
+      // Sin cuota: devolver el catálogo en memoria de esta request (no persiste).
+    }
+  }
+  return catalog;
 }
 
 export async function listWhatsappTags(): Promise<WaTag[]> {

@@ -1243,7 +1243,10 @@ async function cancelarTurno(
   return `Turno cancelado: ${profesional.nombre}, ${cuandoFila}.`;
 }
 
-function textoFilas(lista: Record<string, unknown>[]): string {
+function textoFilas(
+  lista: Record<string, unknown>[],
+  config?: BuscaTurnoConfig | null,
+): string {
   const ahora = Date.now();
   return lista
     .slice(0, 12)
@@ -1251,12 +1254,170 @@ function textoFilas(lista: Record<string, unknown>[]): string {
       const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
       const cuando = new Date(crudo);
       const momento = !Number.isNaN(cuando.getTime()) && cuando.getTime() < ahora ? "anterior" : "futuro";
-      const profesional = String(row.profesionalNombre || row.PrestadorNombre || row.PrestadorApellido || "");
-      const prestacion = String(row.prestacionNombre || row.PrestacionNombre || row.TurnoPrestacion || "");
+      const profesional = nombreProfesionalTurno(row);
+      const prestacion = nombrePrestacionTurno(row, config);
       const conQuien = profesional ? ` con ${profesional}` : "";
-      return `${momento}: ${crudo || "sin fecha"}${conQuien} ${prestacion}`.trim();
+      const conQue = prestacion ? ` ${prestacion}` : "";
+      return `${momento}: ${crudo || "sin fecha"}${conQuien}${conQue}`.trim();
     })
     .join("\n");
+}
+
+function nombreProfesionalTurno(row: Record<string, unknown>): string {
+  const armado = String(row.profesionalNombre || "").trim();
+  if (armado) return armado;
+  const apellido = String(row.PrestadorApellido || row.prestadorApellido || "").trim();
+  const nombre = String(row.PrestadorNombre || row.prestadorNombre || "").trim();
+  return [apellido, nombre].filter(Boolean).join(", ") || nombre || apellido;
+}
+
+function codigoPrestacionTurno(row: Record<string, unknown>): string {
+  // Campos que Medexis usa explícitamente como código.
+  for (const valor of [
+    row.PrestacionCodigo,
+    row.prestacionCodigo,
+    row.TurnoPrestacionCodigo,
+    row.turnoPrestacionCodigo,
+    row.CodigoPrestacion,
+    row.codigoPrestacion,
+  ]) {
+    const texto = String(valor ?? "").trim();
+    if (texto) return texto;
+  }
+  // Al reservar se envía el código en TurnoPrestacion.
+  for (const valor of [row.TurnoPrestacion, row.turnoPrestacion]) {
+    const texto = String(valor ?? "").trim();
+    if (texto && /^\d{2,}$/.test(texto)) return texto;
+  }
+  return "";
+}
+
+function nombrePrestacionTurno(
+  row: Record<string, unknown>,
+  config?: BuscaTurnoConfig | null,
+): string {
+  const directa = String(
+    row.prestacionNombre ||
+      row.PrestacionNombre ||
+      row.PrestacionDescripcion ||
+      row.prestacionDescripcion ||
+      row.ServicioNombre ||
+      row.servicioNombre ||
+      "",
+  ).trim();
+  if (directa && !/^\d{2,}$/.test(directa)) return directa;
+  const codigo = codigoPrestacionTurno(row) || (/^\d{2,}$/.test(directa) ? directa : "");
+  if (codigo && config?.prestaciones) {
+    const sinCeros = codigo.replace(/^0+/, "") || codigo;
+    const propia =
+      config.prestaciones[codigo] ||
+      (sinCeros !== codigo ? config.prestaciones[sinCeros] : undefined);
+    if (propia?.nombre?.trim()) return propia.nombre.trim();
+    const hit = Object.entries(config.prestaciones).find(([k]) => {
+      const clave = String(k);
+      return clave === codigo || (clave.replace(/^0+/, "") || clave) === sinCeros;
+    });
+    if (hit?.[1]?.nombre?.trim()) return hit[1].nombre.trim();
+  }
+  // Si TurnoPrestacion trae un nombre (no código), usarlo.
+  const turnoPrestacion = String(row.TurnoPrestacion || row.turnoPrestacion || row.Prestacion || "").trim();
+  if (turnoPrestacion && !/^\d{2,}$/.test(turnoPrestacion)) return turnoPrestacion;
+  if (directa) return directa;
+  return codigo ? `Código ${codigo}` : "";
+}
+
+/** Solo turnos futuros (hoy → 6 meses), en formato `futuro:` para que el menú pueda numerarlos. */
+function textoFilasParaElegir(
+  lista: Record<string, unknown>[],
+  config?: BuscaTurnoConfig | null,
+): string {
+  const inicioHoy = new Date(`${fechaBa(0)}T00:00:00-03:00`).getTime();
+  return lista
+    .map((row) => {
+      const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
+      const cuando = new Date(crudo);
+      if (Number.isNaN(cuando.getTime()) || cuando.getTime() < inicioHoy) return null;
+      const profesional = nombreProfesionalTurno(row);
+      const prestacion = nombrePrestacionTurno(row, config);
+      const partes = [
+        `futuro: ${crudo}`,
+        profesional ? `profesional ${profesional}` : "",
+        prestacion ? `prestacion ${prestacion}` : "",
+      ].filter(Boolean);
+      return {
+        ts: cuando.getTime(),
+        linea: partes.join(" | "),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((a, b) => a.ts - b.ts)
+    .slice(0, 40)
+    .map((item) => item.linea)
+    .join("\n");
+}
+
+/** Próximos turnos desde hoy, ordenados y agrupados por día/hora. */
+function textoProximosAgrupados(
+  lista: Record<string, unknown>[],
+  config?: BuscaTurnoConfig | null,
+): string {
+  const inicioHoy = new Date(`${fechaBa(0)}T00:00:00-03:00`).getTime();
+  const filas = lista
+    .map((row) => {
+      const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
+      const cuando = new Date(crudo);
+      if (Number.isNaN(cuando.getTime()) || cuando.getTime() < inicioHoy) return null;
+      return {
+        cuando,
+        crudo,
+        profesional: nombreProfesionalTurno(row),
+        prestacion: nombrePrestacionTurno(row, config),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((a, b) => a.cuando.getTime() - b.cuando.getTime())
+    .slice(0, 60);
+
+  if (!filas.length) {
+    return "No tenés turnos próximos en los próximos 6 meses.";
+  }
+
+  const bloques: string[] = ["Estos son tus próximos turnos:"];
+  let diaActual = "";
+  for (const fila of filas) {
+    const claveDia = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+    }).format(fila.cuando);
+    if (claveDia !== diaActual) {
+      diaActual = claveDia;
+      const weekday = new Intl.DateTimeFormat("es-AR", {
+        weekday: "long",
+        timeZone: "America/Argentina/Buenos_Aires",
+      }).format(fila.cuando);
+      const dia = new Intl.DateTimeFormat("es-AR", {
+        day: "numeric",
+        timeZone: "America/Argentina/Buenos_Aires",
+      }).format(fila.cuando);
+      const mes = new Intl.DateTimeFormat("es-AR", {
+        month: "long",
+        timeZone: "America/Argentina/Buenos_Aires",
+      }).format(fila.cuando);
+      bloques.push(
+        "",
+        `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dia} de ${mes}`,
+      );
+    }
+    const hora = new Intl.DateTimeFormat("es-AR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "America/Argentina/Buenos_Aires",
+    }).format(fila.cuando);
+    bloques.push(`• ${hora}`);
+    if (fila.profesional) bloques.push(`  Profesional: ${fila.profesional}`);
+    bloques.push(`  Prestación: ${fila.prestacion || "sin dato"}`);
+  }
+  return bloques.join("\n");
 }
 
 async function turnosDelPaciente(
@@ -1266,10 +1427,12 @@ async function turnosDelPaciente(
 ): Promise<string> {
   const dni = dniDicho(consulta, ctx.dni || "");
   if (!dni) return "Falta el DNI del paciente para buscar sus turnos.";
+  const soloProximos = /\bproximos?\b/.test(norm(consulta));
+  const paraElegir = /\belegir\b/.test(norm(consulta));
   const data = await medexisPost("api/Turno", {
     query: {
       PersonaDocumento: dni,
-      FechaDesde: fechaBa(-180),
+      FechaDesde: soloProximos || paraElegir ? fechaBa(0) : fechaBa(-180),
       FechaHasta: fechaBa(180),
     },
   });
@@ -1277,7 +1440,19 @@ async function turnosDelPaciente(
     return detalle(data) || "Medexis no devolvió los turnos del paciente.";
   }
   const lista = filasTurno(data);
-  if (lista.length) return textoFilas(lista);
+  if (lista.length) {
+    if (soloProximos) return textoProximosAgrupados(lista, config);
+    if (paraElegir) {
+      const texto = textoFilasParaElegir(lista, config);
+      return texto || "No tenés turnos próximos para cancelar en los próximos 6 meses.";
+    }
+    return textoFilas(lista, config);
+  }
+  if (soloProximos || paraElegir) {
+    return soloProximos
+      ? "No tenés turnos próximos en los próximos 6 meses."
+      : "No tenés turnos próximos para cancelar en los próximos 6 meses.";
+  }
   const cuando = horaPedida(consulta);
   const par = config ? parDeConsulta(config, consulta) : "sin config";
   if (cuando && typeof par !== "string") {
@@ -1288,7 +1463,7 @@ async function turnosDelPaciente(
       const documento = String(row.PersonaDocumento || row.personaDocumento || "").replace(/\D/g, "");
       return !documento || documento === dni;
     });
-    if (propias.length) return textoFilas(propias);
+    if (propias.length) return textoFilas(propias, config);
   }
   return `No hay turnos anteriores ni futuros para el DNI ${dni}.`;
 }

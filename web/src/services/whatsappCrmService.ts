@@ -433,12 +433,17 @@ export async function fetchWaLlmUsage(conversationId: string): Promise<WaLlmUsag
   return Array.isArray(res.items) ? res.items : [];
 }
 
-export async function createWaPrueba(motor: "ia" | "menu" = "ia"): Promise<WaConversation> {
-  const res = await apiFetch<{ ok: boolean; data: WaConversation }>("/api/whatsapp-crm/pruebas", {
-    method: "POST",
-    body: JSON.stringify({ motor }),
-  });
-  return res.data;
+export async function createWaPrueba(
+  motor: "ia" | "menu" = "ia",
+): Promise<WaConversation & { __local?: boolean }> {
+  const res = await apiFetch<{ ok: boolean; data: WaConversation; local?: boolean }>(
+    "/api/whatsapp-crm/pruebas",
+    {
+      method: "POST",
+      body: JSON.stringify({ motor }),
+    },
+  );
+  return { ...res.data, __local: res.local === true || String(res.data?.id ?? "").startsWith("local-") };
 }
 
 export async function sendWaPruebaMessage(

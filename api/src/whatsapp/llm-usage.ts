@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { arrayUnion, doc, getDoc, updateDoc } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { isLocalPruebaId, isQuotaError } from "./prueba-local-store.js";
 
 const CONVERSATIONS = "whatsapp_conversations";
 
@@ -77,9 +78,15 @@ export async function recordLlmUsage(input: {
     error: String(input.error ?? "").slice(0, 500),
     creadoEn: new Date().toISOString(),
   };
-  await updateDoc(doc(firestore, CONVERSATIONS, input.conversacionId), {
-    llmUsage: arrayUnion(record),
-  });
+  // Pruebas en memoria / sin cuota: no bloqueamos el flujo por anotar tokens.
+  if (isLocalPruebaId(input.conversacionId)) return record;
+  try {
+    await updateDoc(doc(firestore, CONVERSATIONS, input.conversacionId), {
+      llmUsage: arrayUnion(record),
+    });
+  } catch (error) {
+    if (!isQuotaError(error)) throw error;
+  }
   return record;
 }
 

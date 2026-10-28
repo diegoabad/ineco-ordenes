@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -15,6 +16,20 @@ import {
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
 import { documentoDePersona } from "./estado-dialogo.js";
+import {
+  clearAllLocalPruebas,
+  createLocalMessage,
+  createLocalPruebaConversation,
+  getLocalContact,
+  getLocalConversation,
+  isLocalPruebaId,
+  isQuotaError,
+  listLocalMessages,
+  listLocalPruebas,
+  patchLocalContact,
+  setLocalConversationPatch,
+  setLocalMenu,
+} from "./prueba-local-store.js";
 import type {
   MenuEstado,
   MenuPaso,
@@ -100,6 +115,9 @@ function menuPasoDe(raw: unknown): MenuPaso | null {
   const validos: MenuPaso[] = [
     "sede",
     "algoMas",
+    "pacienteTipo",
+    "primeraVezDatos",
+    "otrasConsultas",
     "menu",
     "turnos",
     "info",
@@ -110,10 +128,15 @@ function menuPasoDe(raw: unknown): MenuPaso | null {
     "apellido",
     "sexo",
     "email",
+    "fechaNacimiento",
+    "pedidoDatos",
     "profesional",
     "tratamiento",
+    "cobertura",
+    "afiliado",
     "horarios",
     "elegirTurno",
+    "motivoCancelacion",
     "confirmar",
   ];
   return validos.includes(paso as MenuPaso) ? (paso as MenuPaso) : null;
@@ -140,6 +163,10 @@ function normalizarMenuEstado(raw: unknown, pasoRaw: unknown): MenuEstado | null
   ];
   const modo = modos.includes(String(row.modo)) ? (row.modo as MenuEstado["modo"]) : "";
   const esPaciente = row.esPaciente === "si" || row.esPaciente === "no" ? row.esPaciente : "";
+  const modalidad =
+    row.modalidad === "presencial" || row.modalidad === "virtual" || row.modalidad === "indistinto"
+      ? row.modalidad
+      : "";
   const pila = Array.isArray(row.pila)
     ? row.pila.flatMap((item) => {
         if (!item || typeof item !== "object") return [];
@@ -164,9 +191,20 @@ function normalizarMenuEstado(raw: unknown, pasoRaw: unknown): MenuEstado | null
     apellido: String(row.apellido ?? "").trim().slice(0, 80),
     sexo,
     email: String(row.email ?? "").trim().slice(0, 120),
+    telefono: String(row.telefono ?? "").trim().slice(0, 40),
+    fechaNacimiento: String(row.fechaNacimiento ?? "").trim().slice(0, 20),
+    cobertura: String(row.cobertura ?? "").trim().slice(0, 120),
+    nAfiliado: String(row.nAfiliado ?? "").trim().slice(0, 60),
+    motivoConsulta: String(row.motivoConsulta ?? "").trim().slice(0, 400),
+    edad: String(row.edad ?? "").trim().slice(0, 10),
     esPaciente,
     profesional: String(row.profesional ?? "").trim().slice(0, 120),
     tratamiento: String(row.tratamiento ?? "").trim().slice(0, 160),
+    profesionalCatalogo: String(row.profesionalCatalogo ?? "").trim().slice(0, 120),
+    tratamientoCatalogo: String(row.tratamientoCatalogo ?? "").trim().slice(0, 160),
+    profesionalDoc: String(row.profesionalDoc ?? "").trim().slice(0, 40),
+    prestacionCodigo: String(row.prestacionCodigo ?? "").trim().slice(0, 40),
+    modalidad,
     pendiente: String(row.pendiente ?? "").trim().slice(0, 500),
     opciones: Array.isArray(row.opciones)
       ? row.opciones.map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, 20)
@@ -175,6 +213,7 @@ function normalizarMenuEstado(raw: unknown, pasoRaw: unknown): MenuEstado | null
     hastaDia: Number(row.hastaDia ?? 0) || 0,
     busqueda: String(row.busqueda ?? "").slice(0, 80),
     anularLuego: String(row.anularLuego ?? "").slice(0, 400),
+    pedidoIntro: row.pedidoIntro === true,
     pila,
   };
 }
@@ -306,6 +345,8 @@ export async function findContactByPhone(phoneNumber: string): Promise<WaContact
 }
 
 export async function getContact(id: string): Promise<WaContact | null> {
+  const local = getLocalContact(id);
+  if (local) return local;
   const snap = await getDoc(doc(firestore, CONTACTS, id));
   if (!snap.exists()) return null;
   return normalizeContact(snap.id, snap.data() as Record<string, unknown>);
@@ -330,6 +371,7 @@ export async function updateContact(
 ): Promise<WaContact | null> {
   const existing = await getContact(id);
   if (!existing) return null;
+  const esLocal = Boolean(getLocalContact(id));
   const firstName = input.firstName.trim();
   const lastName = input.lastName.trim();
   if (!firstName) {
@@ -399,7 +441,7 @@ export async function updateContact(
       : existing.esPaciente;
   const displayName = [firstName, lastName].filter(Boolean).join(" ").trim();
   const now = nowIso();
-  await updateDoc(doc(firestore, CONTACTS, id), {
+  const nextContact: Partial<WaContact> = {
     firstName,
     lastName: lastName || null,
     displayName,
@@ -410,11 +452,17 @@ export async function updateContact(
     relacionFamiliar,
     contactoNombre,
     contactoApellido,
-    terceroNombre: null,
     dni,
     sexo,
     esPaciente,
     updatedAt: now,
+  };
+  if (esLocal) {
+    return patchLocalContact(id, nextContact) ?? existing;
+  }
+  await updateDoc(doc(firestore, CONTACTS, id), {
+    ...nextContact,
+    terceroNombre: null,
   });
   return {
     ...existing,
@@ -576,7 +624,7 @@ function numeroFicticio(n: number): string {
   return String(n).padStart(8, "0");
 }
 
-export async function createPruebaConversation(
+async function createPruebaConversationFirebase(
   creador?: {
     id?: string | null;
     nombre?: string | null;
@@ -648,7 +696,8 @@ export async function createPruebaConversation(
     status: "OPEN",
     unreadCount: 0,
     lastMessagePreview: null,
-    lastMessageAt: null,
+    // Para que la prueba nueva quede arriba en la lista (sin lastMessageAt va al final).
+    lastMessageAt: now,
     assigneeKind: "bot",
     assigneeUserId: null,
     assigneeName: "Bot",
@@ -685,6 +734,101 @@ export async function createPruebaConversation(
   batch.set(doc(firestore, CONVERSATIONS, id), conversation);
   await batch.commit();
   return { ...conversation, contact };
+}
+
+export async function createPruebaConversation(
+  creador?: {
+    id?: string | null;
+    nombre?: string | null;
+  },
+  motor: "ia" | "menu" = "ia",
+): Promise<WaConversation> {
+  const forzarLocal =
+    process.env.PRUEBA_SIN_FIREBASE === "1" || process.env.PRUEBA_SIN_FIREBASE === "true";
+  // Bot de opciones: siempre local+disco. Si va a Firebase y falla el listado por cuota,
+  // al entrar/salir de Conversaciones o Prueba bot la charla “desaparece”.
+  if (forzarLocal || motor === "menu") {
+    return createLocalPruebaConversation(creador, motor);
+  }
+  try {
+    return await createPruebaConversationFirebase(creador, motor);
+  } catch (error) {
+    if (!isQuotaError(error)) throw error;
+    console.warn("[whatsapp] Firestore sin cuota: creando prueba en memoria");
+    return createLocalPruebaConversation(creador, motor);
+  }
+}
+
+/** Borra todas las conversaciones de prueba (+ mensajes y contactos) y reinicia el seq. */
+export async function deleteAllPruebaConversations(): Promise<{
+  locales: number;
+  firestore: number;
+  mensajes: number;
+  contactos: number;
+}> {
+  const locales = clearAllLocalPruebas();
+  let firestoreCount = 0;
+  let mensajes = 0;
+  let contactos = 0;
+
+  try {
+    const snap = await getDocs(collection(firestore, CONVERSATIONS));
+    const pruebas = snap.docs.filter((d) => (d.data() as { prueba?: unknown }).prueba === true);
+    const contactIds = new Set<string>();
+
+    for (const d of pruebas) {
+      const data = d.data() as { contactId?: unknown };
+      const contactId = String(data.contactId ?? "").trim();
+      if (contactId) contactIds.add(contactId);
+
+      // Mensajes de esa conversación.
+      try {
+        const mq = query(
+          collection(firestore, MESSAGES),
+          where("conversationId", "==", d.id),
+        );
+        const ms = await getDocs(mq);
+        for (let i = 0; i < ms.docs.length; i += 400) {
+          const batch = writeBatch(firestore);
+          for (const m of ms.docs.slice(i, i + 400)) {
+            batch.delete(m.ref);
+            mensajes += 1;
+          }
+          await batch.commit();
+        }
+      } catch (error) {
+        if (!isQuotaError(error)) throw error;
+      }
+
+      await deleteDoc(d.ref);
+      firestoreCount += 1;
+    }
+
+    for (const contactId of contactIds) {
+      try {
+        await deleteDoc(doc(firestore, CONTACTS, contactId));
+        contactos += 1;
+      } catch (error) {
+        if (!isQuotaError(error)) throw error;
+      }
+    }
+
+    // Seq de números ficticios de cero.
+    try {
+      await setDoc(
+        doc(firestore, "ordenes_config", "whatsapp_prueba_seq"),
+        { next: 0, updatedAt: nowIso() },
+        { merge: true },
+      );
+    } catch (error) {
+      if (!isQuotaError(error)) throw error;
+    }
+  } catch (error) {
+    if (!isQuotaError(error)) throw error;
+    console.warn("[whatsapp] Firestore sin cuota al borrar pruebas; solo se limpió memoria");
+  }
+
+  return { locales, firestore: firestoreCount, mensajes, contactos };
 }
 
 export async function listConversacionesMetricas(
@@ -730,6 +874,8 @@ export async function listConversacionesMetricas(
 }
 
 export async function getConversation(id: string): Promise<WaConversation | null> {
+  const local = getLocalConversation(id);
+  if (local) return local;
   const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
   if (!snap.exists()) return null;
   const conversation = normalizeConversation(snap.id, snap.data() as Record<string, unknown>);
@@ -747,8 +893,13 @@ export type ConversationListResult = {
 async function withContacts(items: WaConversation[]): Promise<WaConversation[]> {
   return Promise.all(
     items.map(async (c) => {
-      const contact = await getContact(c.contactId);
-      return { ...c, contact: contact ?? undefined };
+      try {
+        const contact = await getContact(c.contactId);
+        return { ...c, contact: contact ?? c.contact ?? undefined };
+      } catch {
+        // Sin cuota / error de lectura: no tumbar todo el listado.
+        return { ...c, contact: c.contact ?? undefined };
+      }
     }),
   );
 }
@@ -768,18 +919,38 @@ export async function listConversations(opts?: {
   const status = opts?.status?.trim() || "OPEN";
   const pageSize = Math.min(Math.max(Number(opts?.limit ?? 40) || 40, 1), 100);
   const offset = Math.max(Number(opts?.offset ?? 0) || 0, 0);
-  const q = query(collection(firestore, CONVERSATIONS), where("status", "==", status));
-  const snap = await getDocs(q);
-  let items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
   const onlyPrueba = opts?.prueba === true;
-  items = items.filter((item) => item.prueba === onlyPrueba);
+  const motor = onlyPrueba ? (opts?.pruebaMotor === "menu" ? "menu" : "ia") : undefined;
+  // Prueba bot (menú): también en Conversaciones (vista operadora).
+  const locales = (
+    onlyPrueba ? listLocalPruebas(motor) : listLocalPruebas("menu")
+  ).filter((item) => !status || item.status === status);
+
+  let items: WaConversation[] = [];
+  try {
+    const q = query(collection(firestore, CONVERSATIONS), where("status", "==", status));
+    const snap = await getDocs(q);
+    items = snap.docs.map((d) => normalizeConversation(d.id, d.data() as Record<string, unknown>));
+  } catch (error) {
+    if (!isQuotaError(error)) throw error;
+    console.warn("[whatsapp] Firestore sin cuota: listando con pruebas en memoria");
+    items = [];
+  }
   if (onlyPrueba) {
-    const motor = opts?.pruebaMotor === "menu" ? "menu" : "ia";
+    items = items.filter((item) => item.prueba === true);
     items = items.filter((item) => (item.pruebaMotor === "menu" ? "menu" : "ia") === motor);
+  } else {
+    // CRM: chats reales + pruebas del bot de opciones (no las de IA).
+    items = items.filter((item) => !item.prueba || item.pruebaMotor === "menu");
+  }
+  // Mezclar locales (arriba si son más nuevas).
+  if (locales.length) {
+    const ids = new Set(items.map((item) => item.id));
+    items = [...locales.filter((item) => !ids.has(item.id)), ...items];
   }
   items.sort((a, b) => {
-    const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
-    const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+    const ta = Date.parse(a.lastMessageAt || a.updatedAt || a.createdAt || "") || 0;
+    const tb = Date.parse(b.lastMessageAt || b.updatedAt || b.createdAt || "") || 0;
     return tb - ta;
   });
 
@@ -861,6 +1032,9 @@ export async function markConversationRead(id: string): Promise<WaConversation |
   const current = await getConversation(id);
   if (!current) return null;
   const now = nowIso();
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, { unreadCount: 0, updatedAt: now });
+  }
   await updateDoc(doc(firestore, CONVERSATIONS, id), {
     unreadCount: 0,
     updatedAt: now,
@@ -872,6 +1046,13 @@ export async function setConversationAssignee(
   id: string,
   input: { kind: "none" | "bot" | "user"; userId?: string | null; name?: string | null },
 ): Promise<WaConversation | null> {
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, {
+      assigneeKind: input.kind,
+      assigneeUserId: input.kind === "user" ? input.userId ?? null : null,
+      assigneeName: input.kind === "none" ? null : input.name ?? null,
+    });
+  }
   const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
   if (!snap.exists()) return null;
   const now = nowIso();
@@ -1020,6 +1201,9 @@ export async function fillEmptyContactFields(
   const patch = datosVaciosParaContacto(existing, input);
   if (Object.keys(patch).length === 0) return existing;
   patch.updatedAt = nowIso();
+  if (getLocalContact(id)) {
+    return patchLocalContact(id, patch as Partial<WaContact>);
+  }
   await updateDoc(doc(firestore, CONTACTS, id), patch as { [key: string]: string | boolean | null });
   return getContact(id);
 }
@@ -1121,6 +1305,14 @@ export async function setPruebaNota(
           .join("\n\n")
           .slice(0, 4000)
       : null;
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, {
+      pruebaResultado: resultado,
+      pruebaNota,
+      pruebaAclaraciones: resultado === "incorrecta" ? notas : [],
+      pruebaNotaEn: now,
+    });
+  }
   await updateDoc(doc(firestore, CONVERSATIONS, id), {
     pruebaResultado: resultado,
     pruebaNota,
@@ -1148,16 +1340,23 @@ export async function setConversationTags(
   id: string,
   tagIds: string[],
 ): Promise<WaConversation | null> {
+  const unique = [...new Set(tagIds.map((item) => item.trim()).filter(Boolean))];
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, { tagIds: unique });
+  }
   const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
   if (!snap.exists()) return null;
   const now = nowIso();
-  const unique = [...new Set(tagIds.map((item) => item.trim()).filter(Boolean))];
   const patch = { tagIds: unique, updatedAt: now };
   await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
   return normalizeConversation(id, { ...snap.data(), ...patch });
 }
 
 export async function setConversationMenu(id: string, estado: MenuEstado): Promise<void> {
+  if (isLocalPruebaId(id)) {
+    setLocalMenu(id, estado);
+    return;
+  }
   const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
   if (!snap.exists()) return;
   await updateDoc(doc(firestore, CONVERSATIONS, id), {
@@ -1189,6 +1388,9 @@ export async function listRecentMessagesByConversation(
   conversationId: string,
   max = 40,
 ): Promise<WaMessage[]> {
+  if (isLocalPruebaId(conversationId)) {
+    return listLocalMessages(conversationId, max);
+  }
   const q = query(
     collection(firestore, MESSAGES),
     where("conversationId", "==", conversationId),
@@ -1210,6 +1412,9 @@ export async function listMessagesByConversation(
   conversationId: string,
   max = 100,
 ): Promise<WaMessage[]> {
+  if (isLocalPruebaId(conversationId)) {
+    return listLocalMessages(conversationId, max);
+  }
   const q = query(
     collection(firestore, MESSAGES),
     where("conversationId", "==", conversationId),
@@ -1246,6 +1451,11 @@ export async function createMessage(input: {
   mediaPath?: string | null;
   createdAt?: string;
 }): Promise<WaMessage> {
+  if (isLocalPruebaId(input.conversationId)) {
+    const local = createLocalMessage(input);
+    if (!local) throw new Error("Prueba local no encontrada");
+    return local;
+  }
   if (input.externalMessageId) {
     const existing = await findMessageByExternalId(input.externalMessageId);
     if (existing) return existing;

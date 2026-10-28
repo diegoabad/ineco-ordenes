@@ -104,7 +104,7 @@ export const TEXTO_TURNO_SIN_ASIGNAR =
   "Por este canal no puedo asignarte el turno ahora: lo va a dar una persona del equipo lo antes posible. Mientras tanto te voy a pedir unos datos para que sea más rápido.";
 
 export const TEXTO_TURNO_DATOS_LISTOS =
-  "Listo, con estos datos alguien del equipo te va a asignar el turno lo antes posible.";
+  "Listo, con estos datos alguien del equipo te va a asignar el turno lo antes posible.\n\nMuchas gracias por comunicarte.";
 
 export async function saveWhatsappBotConfig(input: {
   data?: Record<string, unknown>;

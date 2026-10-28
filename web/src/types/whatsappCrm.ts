@@ -43,6 +43,8 @@ export type WaConversation = {
   unreadCount: number;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
   assigneeKind?: "none" | "bot" | "user";
   assigneeUserId?: string | null;
   assigneeName?: string | null;
@@ -60,6 +62,26 @@ export type WaConversation = {
   datoPedido?: string | null;
   prueba?: boolean;
   pruebaMotor?: "ia" | "menu";
+  /** Estado del bot menú (pedido de turno, matches Busca Turno, etc.). */
+  menuEstado?: {
+    dni?: string;
+    nombre?: string;
+    apellido?: string;
+    email?: string;
+    telefono?: string;
+    profesional?: string;
+    tratamiento?: string;
+    profesionalCatalogo?: string;
+    tratamientoCatalogo?: string;
+    profesionalDoc?: string;
+    prestacionCodigo?: string;
+    modalidad?: "" | "presencial" | "virtual" | "indistinto";
+    cobertura?: string;
+    nAfiliado?: string;
+    fechaNacimiento?: string;
+    edad?: string;
+    sexo?: "" | "masculino" | "femenino";
+  } | null;
   pruebaResultado?: "correcta" | "incorrecta" | null;
   pruebaNota?: string | null;
   pruebaNotaEn?: string | null;

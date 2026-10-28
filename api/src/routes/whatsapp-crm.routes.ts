@@ -35,7 +35,12 @@ import {
   createPruebaConversation,
   sendPruebaInbound,
 } from "../whatsapp/runtime.js";
-import { listConversacionesMetricas, setPruebaNota, updateContact } from "../whatsapp/firestore-store.js";
+import {
+  deleteAllPruebaConversations,
+  listConversacionesMetricas,
+  setPruebaNota,
+  updateContact,
+} from "../whatsapp/firestore-store.js";
 import { listLlmUsageByConversation } from "../whatsapp/llm-usage.js";
 import { getAccesosRapidos, saveAccesosRapidos } from "../whatsapp/accesos-rapidos.js";
 import { getMetricaTablero, saveMetricaTablero } from "../whatsapp/metricas-tablero.js";
@@ -82,11 +87,21 @@ const uploadMedia = multer({
 
 function sendError(res: import("express").Response, error: unknown, fallback = "Error WhatsApp"): void {
   const raw = error instanceof Error ? error.message : fallback;
-  const message = raw.includes("Missing or insufficient permissions")
-    ? "Firestore rechazó WhatsApp: faltan las reglas de whatsapp_contacts, whatsapp_conversations y whatsapp_messages."
-    : raw;
-  const status =
-    message.includes("no está conectado") || message.includes("no encontrada")
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+  const quota =
+    /RESOURCE_EXHAUSTED|Quota exceeded|resource-exhausted/i.test(raw) ||
+    /resource-exhausted/i.test(code);
+  const message = quota
+    ? "Firestore sin cuota por ahora (límite diario). Esperá un rato o subí el plan; mientras tanto no se pueden crear pruebas ni guardar chats."
+    : raw.includes("Missing or insufficient permissions")
+      ? "Firestore rechazó WhatsApp: faltan las reglas de whatsapp_contacts, whatsapp_conversations y whatsapp_messages."
+      : raw;
+  const status = quota
+    ? 503
+    : message.includes("no está conectado") || message.includes("no encontrada")
       ? 400
       : raw.includes("Missing or insufficient permissions")
         ? 403
@@ -547,16 +562,26 @@ router.post("/pruebas", async (req: AuthedRequest, res) => {
       },
       motor,
     );
+    const local = String(data.id).startsWith("local-");
     if (motor === "menu") {
       const { abrirBotMenu } = await import("../whatsapp/bot-menu.js");
       await abrirBotMenu(data.id);
       const refreshed = await getConversation(data.id);
-      res.status(201).json({ ok: true, data: refreshed ?? data });
+      res.status(201).json({ ok: true, data: refreshed ?? data, local });
       return;
     }
-    res.status(201).json({ ok: true, data });
+    res.status(201).json({ ok: true, data, local });
   } catch (error) {
     sendError(res, error, "No se pudo crear la prueba");
+  }
+});
+
+router.delete("/pruebas", async (_req, res) => {
+  try {
+    const data = await deleteAllPruebaConversations();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudieron borrar las pruebas");
   }
 });
 

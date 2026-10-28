@@ -241,20 +241,36 @@ function etiquetasNombradas(
   const coberturaGroup = groups.find((group) => sinTildes(group.name) === "coberturas");
   const coberturasPropias = items.filter((item) => {
     const nombre = sinTildes(item.name);
-    return item.groupId === coberturaGroup?.id && nombre !== "con cobertura" && nombre !== "sin convenio";
+    return (
+      item.groupId === coberturaGroup?.id &&
+      nombre !== "con cobertura" &&
+      nombre !== "sin convenio" &&
+      nombre !== "sin cobertura" &&
+      nombre !== "no soportada" &&
+      nombre !== "os no soportada" &&
+      nombre !== "particular"
+    );
   });
   const nombroConvenio = coberturasPropias.some((item) => mencionaFrase(t, sinTildes(item.name)));
   const coberturaAjena =
-    /\b(ioma|osecac|medife|sancor|federada|accord|osseg|osplad|ospat|ospjn|osprera|osuthgra|ospep|ospaca|osdepyg|amffaa|prevencion salud|hospital italiano|hospital aleman|william hope|dasuten)\b/.test(
+    /\b(osde|galeno|medicus|omint|pami|osecac|medife|sancor|federada|accord|osseg|osplad|ospat|ospjn|osprera|osuthgra|ospep|ospaca|osdepyg|amffaa|hospital italiano|hospital aleman|william hope|dasuten)\b/.test(
       t,
     ) ||
     (/\b(?:obra social|prepaga)\s+([a-z0-9]{3,})\b/.test(t) &&
       !coberturasPropias.some((item) =>
         mencionaFrase(t, sinTildes((t.match(/\b(?:obra social|prepaga)\s+([a-z0-9]{3,})\b/) ?? ["", ""])[1] ?? "")),
       ));
-  if (!nombroConvenio && coberturaAjena && items.some((item) => sinTildes(item.name) === "sin convenio")) {
-    const ajena = items.find((item) => sinTildes(item.name) === "sin convenio");
-    if (ajena && !out.includes(ajena.name)) out.push(ajena.name);
+  const tagAjena = items.find((item) => {
+    const n = sinTildes(item.name);
+    return (
+      n === "os no soportada" ||
+      n === "no soportada" ||
+      n === "sin convenio" ||
+      n === "sin cobertura"
+    );
+  });
+  if (!nombroConvenio && coberturaAjena && tagAjena && !out.includes(tagAjena.name)) {
+    out.push(tagAjena.name);
   }
   const nombroSede = items.some((item) => item.groupId === sedeGroup?.id && out.includes(item.name));
   if (
@@ -1462,7 +1478,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "peligroActual solo si hay peligro en este momento: ideas de muerte o de hacerse daño, síntomas de ACV, dolor de cabeza súbito e intenso, convulsión que no cede, pérdida de conocimiento, confusión grave, dolor de pecho o falta de aire intensa, violencia o riesgo para otros.",
       "dudaSinPeligro=true solo si no hay peligro actual y hace falta una persona: malestar intenso sin un pedido concreto, frases ambiguas sobre la vida o la muerte sin una intención explícita, antecedente de intento o de autolesión, o la crisis de un tercero en curso. false si nombra una condición como motivo o pregunta por un servicio o un precio.",
       "etiquetas: nombres exactos del catálogo, solo las concretas. No inventes etiquetas ni diagnósticos. No uses Pedido de info: es demasiado genérica. Pedido de turno sí, cuando pide sacar, consultar, cancelar o reprogramar un turno.",
-      "Si el mensaje nombra una sede, un programa, una cobertura o un profesional del catálogo, esa etiqueta va sí o sí. Si no nombra sede, la sucursal es CABA: este canal es el de la sede central. ADOS sin aclarar adultos o infanto: las dos. Si dice insomnio, poné Programa de Sueño. Si nombra una obra social o prepaga que no está en el catálogo, poné Sin convenio. Una edad nueva reemplaza la banda anterior: no dejes Infanto, Adolescente y Adulto juntas.",
+      "Si el mensaje nombra una sede, un programa, una cobertura o un profesional del catálogo, esa etiqueta va sí o sí. Si no nombra sede, la sucursal es CABA: este canal es el de la sede central. ADOS sin aclarar adultos o infanto: las dos. Si dice insomnio, poné Programa de Sueño. Si nombra una obra social o prepaga que no está en el catálogo, poné OS no soportada. Una edad nueva reemplaza la banda anterior: no dejes Infanto, Adolescente y Adulto juntas.",
       "Si nombra una sede, un programa, una evaluación, una cobertura o un profesional que está en las etiquetas, poné esa. Si pregunta por todas las sedes y todavía no elige una, no etiquetes una sede.",
       "Paciente solo si dice que ya es paciente de INECO. No paciente si dice que no lo es. Primera vez si dice que es la primera vez. Decir el nombre no es ser paciente. Que le hayan cancelado un turno, o que pida uno, tampoco. No pongas Paciente junto con No paciente ni con Primera vez.",
       "Si nombra una obra social, prepaga o certificado que está en las etiquetas, poné esa etiqueta sí o sí, con el nombre exacto del catálogo. No pongas una cobertura que no nombró.",

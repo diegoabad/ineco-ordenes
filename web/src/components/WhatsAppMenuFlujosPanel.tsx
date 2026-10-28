@@ -20,13 +20,14 @@ const PASOS: Paso[] = [
   {
     id: "inicio",
     titulo: "Inicio",
-    mensaje: "Saludo (config del Bot) + pregunta de sucursal.",
+    mensaje:
+      "Saludo (config del Bot) + aviso de urgencias + pregunta de sucursal.\n\nEste canal no atiende urgencias. Si las tiene, comuníquese con su médico o servicio de emergencias.",
     opciones: [
       {
         clave: "1…N",
         titulo: "Elegir sucursal",
         accion: "Guardar sede y etiquetar",
-        siguiente: "Si es CABA → Menú principal. Si no → Algo más (con datos de esa sede).",
+        siguiente: "Si es CABA → Tipo de paciente. Si no → Algo más (con datos de esa sede).",
       },
     ],
     nota: "Sedes fijas: CABA, Ramos Mejía, Quilmes, Temperley, Moreno, Pilar, Junín, Rosario, Comodoro Rivadavia, San Juan.",
@@ -40,9 +41,8 @@ const PASOS: Paso[] = [
       {
         clave: "CABA",
         titulo: "Sede CABA",
-        accion: "Abrir menú principal",
-        respuesta: "Desde acá puedo ayudarte con:…",
-        siguiente: "Menú principal",
+        accion: "Etiquetar CABA → preguntar tipo de paciente",
+        siguiente: "Tipo de paciente",
       },
       {
         clave: "Otra",
@@ -60,42 +60,67 @@ const PASOS: Paso[] = [
     ],
   },
   {
+    id: "pacienteTipo",
+    titulo: "Tipo de paciente",
+    mensaje: "1. Ya soy paciente\n2. Primera vez en INECO\n3. Otras consultas\n\n0. Volver atrás",
+    opciones: [
+      {
+        clave: "1",
+        titulo: "Ya soy paciente",
+        accion: "Pedir DNI → identificar en Medexis → saludar con nombre",
+        siguiente: "Menú servicios",
+      },
+      {
+        clave: "2",
+        titulo: "Primera vez en INECO",
+        accion:
+          "Etiquetar No paciente → pedir en un mensaje edad, motivo, cobertura, nombre/apellido/mail/celular → IA ubica → Adulto/Infanto (+18) → deriva a asesor (fin del bot)",
+        siguiente: "Asesor humano",
+      },
+      {
+        clave: "3",
+        titulo: "Otras consultas",
+        accion:
+          "Pedir breve consulta (admin, coberturas, reclamos…) → etiqueta Temas varios → deriva a asesor (fin del bot)",
+        siguiente: "Bandeja Temas varios",
+      },
+    ],
+    nota: "Crear en Etiquetas si falta: Temas varios.",
+  },
+  {
     id: "menu",
-    titulo: "Menú principal",
-    mensaje: "Desde acá puedo ayudarte con:\n\n1. Turnos\n2. Información\n3. Tratamientos\n4. Quejas\n\n0. Volver atrás",
+    titulo: "Menú servicios",
+    mensaje:
+      "¿Con qué te puedo ayudar? (tras identificar) / ¿Necesitás ayuda con algo más? (si vuelve)\n\n1. Turnos\n2. Informar pago\n3. Solicitar recetas\n\n0. Volver atrás (terminar conversación)",
     opciones: [
       {
         clave: "1",
         titulo: "Turnos",
-        accion: "Entrar a menú de turnos",
+        accion: "Etiquetar turnos → menú turnos",
         siguiente: "Menú turnos",
       },
       {
         clave: "2",
-        titulo: "Información",
-        accion: "Entrar a menú de información",
-        siguiente: "Menú información",
+        titulo: "Informar pago",
+        accion: "Etiquetar pagos + texto de pagos@ineco.ar",
+        respuesta: "Instrucciones de mail + volver al menú",
+        siguiente: "Menú servicios",
       },
       {
         clave: "3",
-        titulo: "Tratamientos",
-        accion: "Atajo a información → tratamientos",
-        siguiente: "Menú información (opción 4)",
-      },
-      {
-        clave: "4",
-        titulo: "Quejas",
-        accion: "Etiquetar Queja + derivar a equipo",
-        respuesta: "Se la dejo al equipo.",
-        siguiente: "Fin / menú",
+        titulo: "Solicitar recetas",
+        accion: "Etiquetar recetas + texto de la app INECO",
+        respuesta: "Link app + volver al menú",
+        siguiente: "Menú servicios",
       },
       {
         clave: "0",
-        titulo: "Volver atrás",
-        accion: "Volver a sucursales",
-        siguiente: "Sucursal",
+        titulo: "Volver atrás (terminar conversación)",
+        accion: "Cerrar charla con mensaje de despedida",
+        siguiente: "Fin",
       },
     ],
+    nota: "Crear en Etiquetas: turnos, pagos, recetas, pedir-turno, cancelar-turno, proximos-turnos.",
   },
   {
     id: "algoMas",
@@ -123,40 +148,37 @@ const PASOS: Paso[] = [
     id: "turnos",
     titulo: "Menú turnos",
     mensaje:
-      "¿Qué necesitás con los turnos?\n\n1. Sacar un turno\n2. Ver mis turnos\n3. Cancelar un turno\n4. Cambiar un turno\n\n0. Volver atrás",
+      "¿Te puedo ayudar en algo más con los turnos?\n\n1. Próximos turnos\n2. Cancelar turnos\n3. Pedir turno\n\n0. Volver atrás",
     opciones: [
       {
         clave: "1",
-        titulo: "Sacar",
-        accion: "Etiquetar Pedido de turno + CABA → pedir DNI (o ficha si no da turnos)",
-        siguiente: "Camino turnos (DNI → datos → profesional…)",
+        titulo: "Próximos turnos",
+        accion:
+          "Etiquetar turnos + proximos-turnos → listado en un mensaje → en otro el menú de turnos",
+        siguiente: "Listado (msg 1) + menú turnos (msg 2)",
       },
       {
         clave: "2",
-        titulo: "Ver mis turnos",
-        accion: "Pedir DNI → Medexis turnos.delPaciente",
-        siguiente: "Camino turnos",
+        titulo: "Cancelar turnos",
+        accion:
+          "Listar próximos 6 meses numerados → elegir → «Perfecto, el turno será cancelado» → motivo (costo, horario, etc.) → guardar pedido (sin anular en Medexis)",
+        siguiente: "Menú turnos",
       },
       {
         clave: "3",
-        titulo: "Cancelar",
-        accion: "Pedir DNI → listar → confirmar anulación",
-        siguiente: "Camino turnos",
-      },
-      {
-        clave: "4",
-        titulo: "Cambiar",
-        accion: "Pedir DNI → anular y buscar nuevo",
-        siguiente: "Camino turnos",
+        titulo: "Pedir turno",
+        accion:
+          "Un mensaje pidiendo todo lo que falte junto → el paciente responde en un solo mensaje → IA ubica cada dato → si falta algo se pide de nuevo → resumen y deriva",
+        siguiente: "Camino turnos / pedido",
       },
       {
         clave: "0",
         titulo: "Volver atrás",
-        accion: "Volver al menú principal",
-        siguiente: "Menú principal",
+        accion: "Volver al menú servicios",
+        siguiente: "Menú servicios",
       },
     ],
-    nota: "Si «dar turnos» está apagado en Bot, sacar/cambiar toma datos y deriva al equipo.",
+    nota: "Si «dar turnos» está apagado en Bot, pedir turno toma datos y deriva al equipo. Tags: turnos, proximos-turnos, cancelar-turno, pedir-turno.",
   },
   {
     id: "caminoTurnos",
@@ -172,22 +194,25 @@ const PASOS: Paso[] = [
       },
       {
         clave: "datos",
-        titulo: "Nombre, apellido, sexo, email",
-        accion: "Completar ficha del paciente",
-        siguiente: "profesional (si sacar/cambiar y puede dar turnos)",
+        titulo: "Pedido de turno (datos)",
+        accion:
+          "Mostrar lo ya conocido + pedir faltantes en un solo mensaje (mail, fecha nac., profesional, prestación o motivo, cobertura, afiliado…). La IA parsea y matchea profesional/prestación con BuscaTurno",
+        siguiente: "Resumen en chat (con match de catálogo) + derivado a equipo",
       },
       {
         clave: "profesional",
         titulo: "Profesional",
-        accion: "Nombre libre o «indistinto» → lista",
-        respuesta: "¿Tenés algún médico en particular…?",
-        siguiente: "confirmar (si ambiguo) → tratamiento",
+        accion:
+          "Texto libre del paciente; por detrás se matchea con el listado de BuscaTurno para el equipo",
+        respuesta: "¿Con qué profesional…?",
+        siguiente: "prestación o motivo",
       },
       {
         clave: "tratamiento",
-        titulo: "Tratamiento",
-        accion: "Elegir de lista → turnos.libres",
-        siguiente: "horarios",
+        titulo: "Prestación o motivo",
+        accion:
+          "Texto libre; la IA / match intenta ubicar la prestación del catálogo BuscaTurno",
+        siguiente: "cierre pedido, o horarios si reserva",
       },
       {
         clave: "horarios",

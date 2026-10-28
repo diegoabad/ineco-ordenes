@@ -31,8 +31,12 @@ const catalogo: WaTagCatalog = {
     tag("t-moreno", "Moreno", "g-sedes"),
     tag("t-pilar", "Pilar", "g-sedes"),
     tag("t-rosario", "Rosario", "g-sedes"),
-    tag("t-osde", "OSDE", "g-cob"),
-    tag("t-sin", "Sin convenio", "g-cob"),
+    tag("t-ioma", "IOMA", "g-cob"),
+    tag("t-swiss", "Swiss Medical", "g-cob"),
+    tag("t-ospis", "OSPIS", "g-cob"),
+    tag("t-prev", "Prevención", "g-cob"),
+    tag("t-part", "Particular", "g-cob"),
+    tag("t-sin", "OS no soportada", "g-cob"),
     tag("t-pac", "Paciente", "g-otros"),
     tag("t-nopac", "No paciente", "g-otros"),
     tag("t-turno", "Pedido de turno", "g-otros"),
@@ -370,25 +374,34 @@ async function main(): Promise<void> {
     esperar("etiqueta Moreno", nombres(s.conversation.tagIds).includes("Moreno"), nombres(s.conversation.tagIds));
   });
 
-  await caso(["P19"], "Cobertura OSDE", async () => {
+  await caso(["P19"], "Cobertura IOMA", async () => {
     const s = await sesion("P19");
     await irACaba(s);
     await s.decir("2");
     await s.decir("2");
     await s.decir("1");
-    esperar("etiqueta OSDE", nombres(s.conversation.tagIds).includes("OSDE"), nombres(s.conversation.tagIds));
-    esperar("mail coberturas", /coberturas@ineco\.org\.ar|OSDE|Anoté OSDE/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 180));
+    esperar("etiqueta IOMA", nombres(s.conversation.tagIds).includes("IOMA"), nombres(s.conversation.tagIds));
+    esperar("anotó IOMA", /IOMA|Anoté IOMA/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 180));
   });
 
-  await caso(["P29"], "Otra obra social → Sin convenio", async () => {
+  await caso(["P29"], "Otra obra social → OS no soportada", async () => {
     const s = await sesion("P29");
     await irACaba(s);
     await s.decir("2");
     await s.decir("2");
+    // Lista: IOMA, OSPIS, Particular, Prevención, Swiss Medical + Otra / OS no soportada
     await s.decir("44");
-    esperar("44 no etiqueta", !nombres(s.conversation.tagIds).includes("Sin convenio") && /no es válida/i.test(ultimo(s.messages)), nombres(s.conversation.tagIds));
-    await s.decir("3");
-    esperar("Sin convenio", nombres(s.conversation.tagIds).includes("Sin convenio"), nombres(s.conversation.tagIds));
+    esperar(
+      "44 no etiqueta",
+      !nombres(s.conversation.tagIds).includes("OS no soportada") && /no es válida/i.test(ultimo(s.messages)),
+      nombres(s.conversation.tagIds),
+    );
+    await s.decir("6");
+    esperar(
+      "OS no soportada",
+      nombres(s.conversation.tagIds).includes("OS no soportada"),
+      nombres(s.conversation.tagIds),
+    );
   });
 
   await caso(["P28"], "No paciente + pedido de turno", async () => {

@@ -17,10 +17,20 @@ async function boot(): Promise<void> {
   await ensurePamiUploadsDir();
   await ensurePedidosUploadsDir();
 
-  try {
-    await reconcileUploadsOnStartup();
-  } catch (error) {
-    console.error("[uploads-reconcile] Falló el reconcile al arrancar", error);
+  // En local/tsx watch esto dispara muchas lecturas a Firestore y puede agotar la cuota.
+  // Activar con UPLOADS_RECONCILE=1 (o en producción por defecto).
+  const doReconcile =
+    process.env.UPLOADS_RECONCILE === "1" ||
+    process.env.UPLOADS_RECONCILE === "true" ||
+    (process.env.NODE_ENV === "production" && process.env.UPLOADS_RECONCILE !== "0");
+  if (doReconcile) {
+    try {
+      await reconcileUploadsOnStartup();
+    } catch (error) {
+      console.error("[uploads-reconcile] Falló el reconcile al arrancar", error);
+    }
+  } else {
+    console.log("[uploads-reconcile] omitido (poné UPLOADS_RECONCILE=1 para forzarlo)");
   }
 
   try {

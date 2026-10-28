@@ -213,6 +213,39 @@ function formatPreviewTime(iso: string | null | undefined): string {
   }
 }
 
+/** Extrae campos del globo "Datos del pedido de turno:" por si menuEstado ya no alcanza. */
+function parsePedidoTurnoBubble(text: string): {
+  profesional?: string;
+  prestacion?: string;
+  tratamiento?: string;
+  modalidad?: "" | "presencial" | "virtual" | "indistinto";
+} {
+  const campo = (etiqueta: string) => {
+    const re = new RegExp(`^[•\\-]?\\s*${etiqueta}:\\s*(.+)$`, "im");
+    return text.match(re)?.[1]?.trim() || "";
+  };
+  const profesional = campo("Profesional");
+  const prestRaw = campo("Prestaci[oó]n\\s*/\\s*motivo");
+  let prestacion = prestRaw;
+  let tratamiento = prestRaw;
+  const dijo = prestRaw.match(/^(.*?)\s*\(dijo:\s*(.+?)\)\s*$/i);
+  if (dijo) {
+    prestacion = dijo[1]!.trim();
+    tratamiento = dijo[2]!.trim();
+  }
+  const modRaw = campo("Modalidad").toLowerCase();
+  let modalidad: "" | "presencial" | "virtual" | "indistinto" = "";
+  if (/presencial/.test(modRaw)) modalidad = "presencial";
+  else if (/virtual/.test(modRaw)) modalidad = "virtual";
+  else if (/indistinto/.test(modRaw)) modalidad = "indistinto";
+  return {
+    profesional: profesional || undefined,
+    prestacion: prestacion || undefined,
+    tratamiento: tratamiento || undefined,
+    modalidad,
+  };
+}
+
 function MessageTicks({ status }: { status: string }) {
   if (status === "FAILED") {
     return (
@@ -495,6 +528,15 @@ export function WhatsAppConversationsPanel({
   const [leftBuscaPinned, setLeftBuscaPinned] = useState(false);
   const [leftBuscaUiLocked, setLeftBuscaUiLocked] = useState(false);
   const [buscaTurnoMounted, setBuscaTurnoMounted] = useState(false);
+  const [buscaPedidoSeed, setBuscaPedidoSeed] = useState<{
+    key: string;
+    prestacionCodigo?: string;
+    prestacionNombre?: string;
+    tratamiento?: string;
+    profesionalDoc?: string;
+    profesionalNombre?: string;
+    modalidad?: "" | "presencial" | "virtual" | "indistinto";
+  } | null>(null);
   const [rightTagsPinned, setRightTagsPinned] = useState(false);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
   const [tagsModalOpen, setTagsModalOpen] = useState(false);
@@ -612,7 +654,7 @@ export function WhatsAppConversationsPanel({
       setNextConversationsOffset(page.nextOffset);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudieron cargar las conversaciones");
-      setConversations([]);
+      // No vaciar la lista: al entrar/salir un fallo puntual borraba la prueba visible.
       setHasMoreConversations(false);
       setNextConversationsOffset(null);
     } finally {
@@ -686,6 +728,8 @@ export function WhatsAppConversationsPanel({
       setLeftBuscaOpen(false);
       setLeftBuscaPinned(false);
       setLeftBuscaUiLocked(false);
+      setQuickPanelOpen(false);
+      setRightTagsPinned(false);
       return;
     }
     setBuscaTurnoMounted(true);
@@ -760,11 +804,27 @@ export function WhatsAppConversationsPanel({
                 const known = new Set(merged.map((item) => item.id));
                 const fresh = page.items.filter((item) => !known.has(item.id));
                 return [...fresh, ...merged].sort((a, b) => {
-                  const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
-                  const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+                  const ta = Date.parse(a.lastMessageAt || a.updatedAt || a.createdAt || "") || 0;
+                  const tb = Date.parse(b.lastMessageAt || b.updatedAt || b.createdAt || "") || 0;
                   return tb - ta;
                 });
               });
+              if (snap.selectedId) {
+                const freshSel = page.items.find((item) => item.id === snap.selectedId);
+                if (freshSel) {
+                  setSelected((prev) =>
+                    prev && prev.id === freshSel.id
+                      ? {
+                          ...prev,
+                          ...freshSel,
+                          contact: freshSel.contact ?? prev.contact,
+                          menuEstado: freshSel.menuEstado ?? prev.menuEstado,
+                          tagIds: freshSel.tagIds ?? prev.tagIds,
+                        }
+                      : prev,
+                  );
+                }
+              }
               setHasMoreConversations(page.hasMore);
               setNextConversationsOffset(page.nextOffset);
             })
@@ -783,9 +843,17 @@ export function WhatsAppConversationsPanel({
       void Promise.all(tasks).finally(() => {
         busy = false;
       });
-    }, pruebaMode ? 2000 : waitingQr ? 3000 : 20000);
+    }, pruebaMode
+      ? pruebaMotor === "menu"
+        ? 1000
+        : 2000
+      : waitingQr
+        ? 3000
+        : selected?.prueba
+          ? 2000
+          : 20000);
     return () => window.clearInterval(id);
-  }, [ready, refreshStatus, qrModalOpen, waStatus, pruebaMode]);
+  }, [ready, refreshStatus, qrModalOpen, waStatus, pruebaMode, pruebaMotor, selected?.prueba]);
 
   useEffect(() => {
     abrirRef.current = selectedId;
@@ -895,6 +963,11 @@ export function WhatsAppConversationsPanel({
 
   useEffect(() => {
     if (!pruebaMode) return;
+    // Bot de menú (sin IA): espera corta (1s), no los 40s de la IA.
+    if (pruebaMotor === "menu") {
+      esperaMsRef.current = 1000;
+      return;
+    }
     let cancelled = false;
     void Promise.all([fetchWhatsappBotConfig(), fetchWhatsappMotorConfig()])
       .then(([bot, motor]) => {
@@ -913,7 +986,7 @@ export function WhatsAppConversationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [pruebaMode]);
+  }, [pruebaMode, pruebaMotor]);
 
   useEffect(() => {
     if (!pruebaMode) return;
@@ -1015,6 +1088,16 @@ export function WhatsAppConversationsPanel({
     typingAtRef.current = null;
     esperaDesdeRef.current = null;
 
+    // Bot menú: mostrar todos los globos al toque (sin ritmo de ~1–3s entre mensajes).
+    if (pruebaMotor === "menu") {
+      ultimoBotRef.current = Date.now();
+      setOcultos([]);
+      colaRef.current = [];
+      pumpingRef.current = false;
+      setBotTyping(false);
+      return;
+    }
+
     const reciente = ultimoBotRef.current > 0 && Date.now() - ultimoBotRef.current < 4000;
     // Si ya hay cola en curso, sumar todos los nuevos; si no, el primero se muestra ya.
     const encolar =
@@ -1064,7 +1147,7 @@ export function WhatsAppConversationsPanel({
       }, 1100);
       typingTimersRef.current.push(timer);
     }
-  }, [messages, pruebaMode, selectedId, loadingMessages]);
+  }, [messages, pruebaMode, pruebaMotor, selectedId, loadingMessages]);
 
   useEffect(() => {
     if (!qrModalOpen || waStatus !== "CONNECTED") return;
@@ -1908,19 +1991,38 @@ export function WhatsAppConversationsPanel({
     if (creatingPruebaRef.current) return;
     creatingPruebaRef.current = true;
     setCreatingPrueba(true);
-    setSelectedId(null);
-    setSelected(null);
-    setMessages([]);
     setDraft("");
     setAttachment(null);
     try {
-      const created = await createWaPrueba(pruebaMotor);
+      const createdRaw = await createWaPrueba(pruebaMotor);
+      const created: WaConversation = {
+        ...createdRaw,
+        lastMessageAt:
+          createdRaw.lastMessageAt ||
+          createdRaw.updatedAt ||
+          createdRaw.createdAt ||
+          null,
+      };
       const msgs = pruebaMotor === "menu" ? await fetchWaMessages(created.id) : [];
       skipThreadLoad.current = created.id;
-      setConversations((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
-      setSelected(created);
+      abrirRef.current = created.id;
+      vioCargaRef.current = true;
+      setConversations((prev) =>
+        [created, ...prev.filter((item) => item.id !== created.id)].sort((a, b) => {
+          const ta = Date.parse(a.lastMessageAt || a.updatedAt || a.createdAt || "") || 0;
+          const tb = Date.parse(b.lastMessageAt || b.updatedAt || b.createdAt || "") || 0;
+          return tb - ta;
+        }),
+      );
       setMessages(msgs);
+      setSelected(created);
       setSelectedId(created.id);
+      if (createdRaw.__local) {
+        toast.info("Prueba en memoria (Firestore sin cuota). Se borra al reiniciar la API.");
+      }
+      requestAnimationFrame(() => {
+        listBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo crear la prueba");
     } finally {
@@ -2025,14 +2127,14 @@ export function WhatsAppConversationsPanel({
     colaRef.current = [];
     pumpingRef.current = false;
     setOcultos([]);
-    const espera = esperaMsRef.current;
+    const espera = pruebaMotor === "menu" ? 1000 : esperaMsRef.current;
     const ahora = Date.now();
     esperaDesdeRef.current = ahora;
     avisoFalloRef.current = false;
-    // Solo mostrar "escribiendo" cerca del final de la espera del bot, no apenas se manda.
-    typingAtRef.current = ahora + Math.max(0, espera - 10_000);
+    // Menú: typing al toque (máx. 1s). IA: cerca del final de la espera de agrupado.
+    typingAtRef.current = pruebaMotor === "menu" ? ahora : ahora + Math.max(0, espera - 10_000);
     waitingReplyRef.current = true;
-    setBotTyping(espera <= 10_000);
+    setBotTyping(pruebaMotor === "menu" || espera <= 10_000);
   }
 
   async function handleSend(e: FormEvent) {
@@ -2086,7 +2188,23 @@ export function WhatsAppConversationsPanel({
             result.messages,
           ),
         );
-        if (result.conversation) setSelected(result.conversation);
+        if (result.conversation) {
+          setSelected(result.conversation);
+          setConversations((prev) =>
+            prev.map((item) =>
+              item.id === result.conversation!.id
+                ? { ...item, ...result.conversation, contact: result.conversation!.contact ?? item.contact }
+                : item,
+            ),
+          );
+          // El bot menú puede crear etiquetas nuevas (turnos, pagos…): refrescar catálogo.
+          void fetchWaTagCatalog()
+            .then((catalog) => {
+              setTagGroups(catalog.groups);
+              setTags(catalog.items);
+            })
+            .catch(() => undefined);
+        }
       } catch (error) {
         waitingReplyRef.current = false;
         typingAtRef.current = null;
@@ -2136,8 +2254,8 @@ export function WhatsAppConversationsPanel({
         const known = new Set(merged.map((item) => item.id));
         const fresh = page.items.filter((item) => !known.has(item.id));
         return [...fresh, ...merged].sort((a, b) => {
-          const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
-          const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+          const ta = Date.parse(a.lastMessageAt || a.updatedAt || a.createdAt || "") || 0;
+          const tb = Date.parse(b.lastMessageAt || b.updatedAt || b.createdAt || "") || 0;
           return tb - ta;
         });
       });
@@ -2873,6 +2991,7 @@ export function WhatsAppConversationsPanel({
               <div className="wa-busca-panel__body">
                 <BuscaTurnoApp
                   mode="compact"
+                  pedidoSeed={buscaPedidoSeed}
                   onUiLockChange={(locked) => {
                     setLeftBuscaUiLocked(locked);
                     if (locked) setLeftBuscaOpen(true);
@@ -2930,6 +3049,11 @@ export function WhatsAppConversationsPanel({
                       <strong className="wa-inbox__item-name" data-tooltip={label}>
                         {label}
                       </strong>
+                      {!pruebaMode && c.prueba ? (
+                        <span className="wa-inbox__prueba-pill" title="Prueba bot (paciente)">
+                          Prueba
+                        </span>
+                      ) : null}
                       <span className="wa-inbox__item-time">
                         {formatPreviewTime(c.lastMessageAt)}
                       </span>
@@ -2987,7 +3111,25 @@ export function WhatsAppConversationsPanel({
                     disabled={!selected?.contactId}
                     aria-label="Ver ficha del contacto"
                     title="Ver ficha del contacto"
-                    onClick={() => setProfileOpen(true)}
+                    onClick={() => {
+                      setProfileOpen(true);
+                      // Refrescar ficha (cobertura, dni, etc.) por si el bot la actualizó.
+                      if (selectedId) {
+                        void fetchWaConversation(selectedId)
+                          .then((fresh) => {
+                            setSelected((prev) =>
+                              prev && prev.id === fresh.id
+                                ? {
+                                    ...prev,
+                                    ...fresh,
+                                    contact: fresh.contact ?? prev.contact,
+                                  }
+                                : prev,
+                            );
+                          })
+                          .catch(() => undefined);
+                      }
+                    }}
                   >
                     <IconUsers size={18} />
                   </button>
@@ -3254,6 +3396,119 @@ export function WhatsAppConversationsPanel({
                         <p className="wa-bubble__text">
                           {m.type === "TEXT" ? messageBody(m) : m.text}
                         </p>
+                      ) : null}
+                      {outbound &&
+                      !m.isDeleted &&
+                      /^Datos del pedido de turno:/i.test(String(m.text ?? "").trim()) ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm wa-bubble__busca-turno"
+                          onClick={() => {
+                            void (async () => {
+                              let estado = selected?.menuEstado;
+                              if (selectedId) {
+                                try {
+                                  const fresh = await fetchWaConversation(selectedId);
+                                  estado = fresh.menuEstado ?? estado;
+                                  setSelected((prev) =>
+                                    prev && prev.id === fresh.id
+                                      ? {
+                                          ...prev,
+                                          ...fresh,
+                                          contact: fresh.contact ?? prev.contact,
+                                        }
+                                      : prev,
+                                  );
+                                } catch {
+                                  /* usamos el estado en memoria */
+                                }
+                              }
+                              const delGlobo = parsePedidoTurnoBubble(String(m.text ?? ""));
+                              setBuscaTurnoMounted(true);
+                              setLeftBuscaPinned(true);
+                              setLeftBuscaOpen(true);
+                              setVistaOperadora(true);
+                              setBuscaPedidoSeed({
+                                key: `${selectedId ?? ""}-${m.id}-${Date.now()}`,
+                                prestacionCodigo: estado?.prestacionCodigo?.trim() || undefined,
+                                prestacionNombre:
+                                  estado?.tratamientoCatalogo?.trim() ||
+                                  delGlobo.prestacion ||
+                                  undefined,
+                                tratamiento:
+                                  estado?.tratamiento?.trim() ||
+                                  delGlobo.tratamiento ||
+                                  delGlobo.prestacion ||
+                                  undefined,
+                                profesionalDoc: estado?.profesionalDoc?.trim() || undefined,
+                                profesionalNombre:
+                                  estado?.profesionalCatalogo?.trim() ||
+                                  estado?.profesional?.trim() ||
+                                  delGlobo.profesional ||
+                                  undefined,
+                                modalidad: estado?.modalidad || delGlobo.modalidad || "",
+                              });
+                            })();
+                          }}
+                        >
+                          Pasar a Busca Turno
+                        </button>
+                      ) : null}
+                      {outbound &&
+                      !m.isDeleted &&
+                      (/^Pedido de cancelación registrado/i.test(String(m.text ?? "").trim()) ||
+                        /^Perfecto, el turno será cancelado:/i.test(String(m.text ?? "").trim())) ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm wa-bubble__busca-turno"
+                          onClick={() => {
+                            void (async () => {
+                              let estado = selected?.menuEstado;
+                              if (selectedId) {
+                                try {
+                                  const fresh = await fetchWaConversation(selectedId);
+                                  estado = fresh.menuEstado ?? estado;
+                                  setSelected((prev) =>
+                                    prev && prev.id === fresh.id
+                                      ? {
+                                          ...prev,
+                                          ...fresh,
+                                          contact: fresh.contact ?? prev.contact,
+                                        }
+                                      : prev,
+                                  );
+                                } catch {
+                                  /* ignore */
+                                }
+                              }
+                              const dni =
+                                estado?.dni?.trim() ||
+                                String(m.text ?? "").match(/DNI:\s*([^\n]+)/i)?.[1]?.trim() ||
+                                "";
+                              const prof =
+                                String(m.text ?? "").match(/Prof\.:\s*([^\n]+)/i)?.[1]?.trim() ||
+                                estado?.profesionalCatalogo?.trim() ||
+                                estado?.profesional?.trim() ||
+                                "";
+                              setBuscaTurnoMounted(true);
+                              setLeftBuscaPinned(true);
+                              setLeftBuscaOpen(true);
+                              setVistaOperadora(true);
+                              setBuscaPedidoSeed({
+                                key: `cancel-${selectedId ?? ""}-${m.id}-${Date.now()}`,
+                                profesionalNombre: prof || undefined,
+                                modalidad: "",
+                              });
+                              toast.info(
+                                dni
+                                  ? `Cancelar turno — DNI ${dni}. Buscá el turno en la agenda y cancelalo.`
+                                  : "Cancelar turno — buscá el turno en la agenda y cancelalo.",
+                              );
+                            })();
+                          }}
+                        >
+                          Cancelar turno
+                        </button>
                       ) : null}
                       <span className="wa-bubble__meta">
                         {formatPreviewTime(m.createdAt)}
@@ -3814,7 +4069,7 @@ export function WhatsAppConversationsPanel({
             </>
           )}
         </aside>
-      ) : rightTagsPinned ? (
+      ) : !vistaOperadora ? null : rightTagsPinned ? (
         <aside
           className="wa-tags-panel wa-tags-panel--docked wa-tags-panel--docked-right"
           aria-label="Etiquetas rápidas"
@@ -3837,7 +4092,7 @@ export function WhatsAppConversationsPanel({
           <aside className="wa-tags-pop" aria-label="Etiquetas rápidas">
             <div className="wa-tags-panel wa-tags-panel--float">
               {renderQuickTagsPanelBody({
-                withSearchRef: quickPanelOpen || !vistaOperadora || !leftBuscaOpen,
+                withSearchRef: quickPanelOpen || !leftBuscaOpen,
                 pinned: false,
                 onTogglePin: () => {
                   setRightTagsPinned(true);
