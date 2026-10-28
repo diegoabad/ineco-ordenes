@@ -65,6 +65,7 @@ import {
   IconUsers,
 } from "./Icons";
 import { LoadingBlock } from "./InecoMark";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import {
   WhatsAppContactFollowUpModal,
@@ -72,6 +73,8 @@ import {
 } from "./WhatsAppContactFollowUpModal";
 import { WhatsAppContactProfileModal } from "./WhatsAppContactProfileModal";
 import BuscaTurnoApp from "./busca-turno/BuscaTurnoApp";
+import { fetchBuscaTurnoConfig } from "./busca-turno/buscaTurnoConfigApi";
+import { anularTurno, apiPost, getTurnos } from "./busca-turno/medexisApi";
 
 const CONVERSATIONS_PAGE_SIZE = 40;
 
@@ -211,6 +214,229 @@ function formatPreviewTime(iso: string | null | undefined): string {
   } catch {
     return "";
   }
+}
+
+type CancelTurnoPendiente = {
+  dni: string;
+  profesional: string;
+  prestacion: string;
+  /** `YYYY-MM-DD HH:mm` */
+  fechaHora: string;
+  resumen: string;
+};
+
+function normWa(texto: string): string {
+  return String(texto || "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Extrae DNI / prof / fecha del globo de cancelación para anular en Medexis. */
+function parseCancelacionBubble(text: string, dniEstado = ""): CancelTurnoPendiente | null {
+  const campo = (etiqueta: string) => {
+    const re = new RegExp(`^[•\\-]?\\s*${etiqueta}:\\s*(.+)$`, "im");
+    return text.match(re)?.[1]?.trim() || "";
+  };
+  const dni = (campo("DNI") || dniEstado).replace(/\D/g, "");
+  const profesional = campo("Prof\\.") || campo("Profesional");
+  const prestacion = campo("Prest\\.") || campo("Prestaci[oó]n");
+  let fechaHora = campo("FechaISO").replace("T", " ").slice(0, 16);
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(fechaHora)) {
+    const legible = text.match(
+      /(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)?\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/i,
+    );
+    if (legible) {
+      const dia = legible[1]!.padStart(2, "0");
+      const mes = legible[2]!.padStart(2, "0");
+      let anio = legible[3]!;
+      if (anio.length === 2) anio = `20${anio}`;
+      const hh = legible[4]!.padStart(2, "0");
+      const mm = legible[5]!;
+      fechaHora = `${anio}-${mes}-${dia} ${hh}:${mm}`;
+    } else {
+      fechaHora = "";
+    }
+  }
+  if (!dni || !profesional || !fechaHora) return null;
+  const resumen = [
+    `DNI ${dni}`,
+    profesional,
+    prestacion || null,
+    fechaHora,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return { dni, profesional, prestacion, fechaHora, resumen };
+}
+
+function filasTurnoMedexis(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) {
+    return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  if (!data || typeof data !== "object") return [];
+  const row = data as Record<string, unknown>;
+  if (row.Resultado === "ERROR" || row.Respuesta === "ERROR") return [];
+  const lista = row.Turnos ?? row.turnos;
+  if (Array.isArray(lista)) {
+    return lista.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  if (row.TurnoFechaHora || row.turnoFechaHora) return [row];
+  return [];
+}
+
+/** `YYYY-MM-DD HH:mm` en hora Argentina. */
+function fechaHoraBaDeCrudo(crudo: string): string {
+  const d = new Date(crudo);
+  if (!Number.isNaN(d.getTime())) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d);
+    const g = (tipo: string) => parts.find((p) => p.type === tipo)?.value || "";
+    return `${g("year")}-${g("month")}-${g("day")} ${g("hour")}:${g("minute")}`;
+  }
+  const iso = crudo.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]} ${iso[4]}:${iso[5]}`;
+  return "";
+}
+
+function scoreNombreProf(buscado: string, candidato: string): number {
+  const a = normWa(buscado);
+  const b = normWa(candidato);
+  if (!a || !b) return 0;
+  if (a === b) return 100;
+  if (b.includes(a) || a.includes(b)) return 80;
+  const ta = a.split(/\s+/).filter((t) => t.length >= 3);
+  const tb = new Set(b.split(/\s+/).filter((t) => t.length >= 3));
+  let hits = 0;
+  for (const t of ta) if (tb.has(t)) hits += 1;
+  return hits * 20;
+}
+
+async function anularTurnoDesdePedido(pedido: CancelTurnoPendiente): Promise<string> {
+  const fecha = pedido.fechaHora.slice(0, 10);
+  const objetivo = pedido.fechaHora.slice(0, 16);
+
+  // 1) Por paciente (como el bot al listar turnos): más fiable que solo por profesional.
+  let rows: Record<string, unknown>[] = [];
+  try {
+    const porPersona = await apiPost("/Turno", {
+      PersonaDocumento: pedido.dni,
+      FechaDesde: fecha,
+      FechaHasta: fecha,
+    });
+    rows = filasTurnoMedexis(porPersona);
+  } catch {
+    rows = [];
+  }
+  // Algunas respuestas Medexis ignoran el mismo día en Desde=Hasta: ampliar +1.
+  if (!rows.length) {
+    try {
+      const maniana = new Date(`${fecha}T12:00:00-03:00`);
+      maniana.setDate(maniana.getDate() + 1);
+      const y = maniana.getFullYear();
+      const m = String(maniana.getMonth() + 1).padStart(2, "0");
+      const d = String(maniana.getDate()).padStart(2, "0");
+      const porPersona = await apiPost("/Turno", {
+        PersonaDocumento: pedido.dni,
+        FechaDesde: fecha,
+        FechaHasta: `${y}-${m}-${d}`,
+      });
+      rows = filasTurnoMedexis(porPersona);
+    } catch {
+      /* fallback profesional */
+    }
+  }
+
+  // 2) Fallback: agenda del profesional ese día.
+  if (!rows.length) {
+    const cfg = await fetchBuscaTurnoConfig();
+    const lista = (cfg?.profesionales || []) as { enabled?: boolean; nombre?: string; doc?: string; sede?: string }[];
+    const hit = lista
+      .filter((p) => p.enabled !== false)
+      .map((p) => ({ p, pts: scoreNombreProf(pedido.profesional, p.nombre || "") }))
+      .filter((r) => r.pts >= 40)
+      .sort((a, b) => b.pts - a.pts)[0]?.p;
+    if (hit?.doc) {
+      try {
+        const { data } = await getTurnos(fecha, hit.doc);
+        rows = filasTurnoMedexis(data).filter((row) => {
+          const doc = String(row.PersonaDocumento || row.personaDocumento || "").replace(/\D/g, "");
+          return !doc || doc === pedido.dni;
+        });
+      } catch {
+        /* sigue al intento directo */
+      }
+    }
+  }
+
+  const delDia = rows.filter((row) => {
+    const doc = String(row.PersonaDocumento || row.personaDocumento || "").replace(/\D/g, "");
+    if (doc && doc !== pedido.dni) return false;
+    const crudo = String(row.TurnoFechaHora || row.turnoFechaHora || row.Fecha || "");
+    const cuando = fechaHoraBaDeCrudo(crudo);
+    return cuando === objetivo || cuando.startsWith(objetivo);
+  });
+
+  // Si la hora no calza exacta pero hay un solo turno del paciente ese día con ese prof, usarlo.
+  let fila = delDia[0];
+  if (!fila && rows.length) {
+    const porProf = rows.filter((row) => {
+      const doc = String(row.PersonaDocumento || row.personaDocumento || "").replace(/\D/g, "");
+      if (doc && doc !== pedido.dni) return false;
+      const apellido = String(row.PrestadorApellido || row.prestadorApellido || "").trim();
+      const nombre = String(row.PrestadorNombre || row.prestadorNombre || "").trim();
+      const armado = String(row.profesionalNombre || "").trim() || [apellido, nombre].filter(Boolean).join(" ");
+      return scoreNombreProf(pedido.profesional, armado) >= 40;
+    });
+    if (porProf.length === 1) fila = porProf[0];
+    else if (delDia.length === 1) fila = delDia[0];
+  }
+
+  if (fila) {
+    const turnoFh = String(fila.TurnoFechaHora || fila.turnoFechaHora || `${pedido.fechaHora}:00`);
+    const sede = String(fila.Sede || fila.sede || "INECO");
+    const prestador = String(fila.PrestadorDocumento || fila.prestadorDocumento || "");
+    if (!prestador) {
+      throw new Error("Medexis devolvió el turno sin documento del profesional.");
+    }
+    await anularTurno({
+      prestadorDocumento: prestador,
+      personaDocumento: pedido.dni,
+      turnoFechaHora: turnoFh,
+      sede,
+    });
+    return `Turno anulado: ${pedido.profesional}, ${turnoFh}.`;
+  }
+
+  // 3) Último intento: anular con la FechaISO del pedido + doc del catálogo.
+  const cfg = await fetchBuscaTurnoConfig();
+  const lista = (cfg?.profesionales || []) as { enabled?: boolean; nombre?: string; doc?: string; sede?: string }[];
+  const hit = lista
+    .filter((p) => p.enabled !== false)
+    .map((p) => ({ p, pts: scoreNombreProf(pedido.profesional, p.nombre || "") }))
+    .filter((r) => r.pts >= 40)
+    .sort((a, b) => b.pts - a.pts)[0]?.p;
+  if (!hit?.doc) {
+    throw new Error(
+      `No encontré el turno de ${pedido.profesional} el ${pedido.fechaHora} para DNI ${pedido.dni}.`,
+    );
+  }
+  const turnoFh = `${pedido.fechaHora}:00`;
+  await anularTurno({
+    prestadorDocumento: hit.doc,
+    personaDocumento: pedido.dni,
+    turnoFechaHora: turnoFh,
+    sede: hit.sede || "INECO",
+  });
+  return `Turno anulado: ${pedido.profesional}, ${turnoFh}.`;
 }
 
 /** Extrae campos del globo "Datos del pedido de turno:" por si menuEstado ya no alcanza. */
@@ -537,6 +763,11 @@ export function WhatsAppConversationsPanel({
     profesionalNombre?: string;
     modalidad?: "" | "presencial" | "virtual" | "indistinto";
   } | null>(null);
+  const [buscaSoloLibres, setBuscaSoloLibres] = useState(true);
+  const [cancelTurnoPendiente, setCancelTurnoPendiente] = useState<CancelTurnoPendiente | null>(
+    null,
+  );
+  const [cancelTurnoBusy, setCancelTurnoBusy] = useState(false);
   const [rightTagsPinned, setRightTagsPinned] = useState(false);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
   const [tagsModalOpen, setTagsModalOpen] = useState(false);
@@ -2971,6 +3202,25 @@ export function WhatsAppConversationsPanel({
             >
               <div className="wa-busca-panel__head">
                 <h3>Buscar turno</h3>
+                <label
+                  className={`wa-busca-solo-libres${buscaSoloLibres ? " is-on" : ""}`}
+                  title={
+                    buscaSoloLibres
+                      ? "Solo turnos libres. Desactivá para ver también ocupados."
+                      : "Libres y ocupados. Activá para ver solo libres."
+                  }
+                >
+                  <span className="wa-busca-solo-libres__label">Solo libres</span>
+                  <input
+                    type="checkbox"
+                    checked={buscaSoloLibres}
+                    onChange={(e) => setBuscaSoloLibres(e.target.checked)}
+                    aria-label="Solo libres"
+                  />
+                  <span className="wa-busca-solo-libres__track" aria-hidden>
+                    <span className="wa-busca-solo-libres__thumb" />
+                  </span>
+                </label>
                 <button
                   type="button"
                   className={`wa-tags-panel__pin${leftBuscaPinned ? " is-on" : ""}`}
@@ -2992,6 +3242,8 @@ export function WhatsAppConversationsPanel({
                 <BuscaTurnoApp
                   mode="compact"
                   pedidoSeed={buscaPedidoSeed}
+                  soloLibres={buscaSoloLibres}
+                  onSoloLibresChange={setBuscaSoloLibres}
                   onUiLockChange={(locked) => {
                     setLeftBuscaUiLocked(locked);
                     if (locked) setLeftBuscaOpen(true);
@@ -3461,6 +3713,7 @@ export function WhatsAppConversationsPanel({
                         <button
                           type="button"
                           className="btn btn-primary btn-sm wa-bubble__busca-turno"
+                          disabled={cancelTurnoBusy}
                           onClick={() => {
                             void (async () => {
                               let estado = selected?.menuEstado;
@@ -3481,29 +3734,17 @@ export function WhatsAppConversationsPanel({
                                   /* ignore */
                                 }
                               }
-                              const dni =
-                                estado?.dni?.trim() ||
-                                String(m.text ?? "").match(/DNI:\s*([^\n]+)/i)?.[1]?.trim() ||
-                                "";
-                              const prof =
-                                String(m.text ?? "").match(/Prof\.:\s*([^\n]+)/i)?.[1]?.trim() ||
-                                estado?.profesionalCatalogo?.trim() ||
-                                estado?.profesional?.trim() ||
-                                "";
-                              setBuscaTurnoMounted(true);
-                              setLeftBuscaPinned(true);
-                              setLeftBuscaOpen(true);
-                              setVistaOperadora(true);
-                              setBuscaPedidoSeed({
-                                key: `cancel-${selectedId ?? ""}-${m.id}-${Date.now()}`,
-                                profesionalNombre: prof || undefined,
-                                modalidad: "",
-                              });
-                              toast.info(
-                                dni
-                                  ? `Cancelar turno — DNI ${dni}. Buscá el turno en la agenda y cancelalo.`
-                                  : "Cancelar turno — buscá el turno en la agenda y cancelalo.",
+                              const pedido = parseCancelacionBubble(
+                                String(m.text ?? ""),
+                                estado?.dni?.trim() || "",
                               );
+                              if (!pedido) {
+                                toast.error(
+                                  "Faltan DNI, profesional o fecha/hora en el pedido para anularlo automático.",
+                                );
+                                return;
+                              }
+                              setCancelTurnoPendiente(pedido);
                             })();
                           }}
                         >
@@ -4582,6 +4823,36 @@ export function WhatsAppConversationsPanel({
             ))}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={cancelTurnoPendiente !== null}
+        title="Confirmar anulación"
+        message={
+          cancelTurnoPendiente
+            ? `¿Anular este turno en Medexis? ${cancelTurnoPendiente.resumen}`
+            : ""
+        }
+        confirmLabel={cancelTurnoBusy ? "Anulando…" : "Sí, anular"}
+        cancelLabel="Volver"
+        onCancel={() => {
+          if (!cancelTurnoBusy) setCancelTurnoPendiente(null);
+        }}
+        onConfirm={() => {
+          if (!cancelTurnoPendiente || cancelTurnoBusy) return;
+          void (async () => {
+            setCancelTurnoBusy(true);
+            try {
+              const ok = await anularTurnoDesdePedido(cancelTurnoPendiente);
+              toast.success(ok);
+              setCancelTurnoPendiente(null);
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "No se pudo anular el turno");
+            } finally {
+              setCancelTurnoBusy(false);
+            }
+          })();
+        }}
+      />
       </div>
     </>
   );

@@ -802,6 +802,17 @@ function tokensSeed(texto) {
     .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
 }
 
+/** psiquiatrica ↔ psiquiatria (mismo tronco, sufijo corto distinto). */
+function tokensParecidosSeed(a, b) {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
+  const minLen = Math.min(a.length, b.length);
+  if (minLen < 6) return false;
+  let common = 0;
+  while (common < minLen && a[common] === b[common]) common += 1;
+  return common >= 6 && common >= minLen - 2;
+}
+
 function scoreSeedTexto(consulta, candidato) {
   const pedidos = tokensSeed(consulta);
   const propios = tokensSeed(candidato);
@@ -810,16 +821,25 @@ function scoreSeedTexto(consulta, candidato) {
   let hits = 0;
   for (const token of pedidos) {
     const exacto = propios.includes(token);
-    const cerca = propios.some(
-      (p) => p === token || (token.length >= 4 && (p.startsWith(token) || token.startsWith(p)))
-    );
+    const cerca = propios.some((p) => tokensParecidosSeed(token, p));
     if (!exacto && !cerca) continue;
     hits += 1;
-    puntos += exacto ? token.length * 2 : token.length;
+    puntos += exacto ? token.length * 2 : Math.max(6, Math.min(token.length, 10));
   }
   const c = normSeed(consulta);
   const n = normSeed(candidato);
   if (c && n && (n === c || n.includes(c) || c.includes(n))) puntos += Math.min(c.length, 12);
+  if (/^consulta\b/.test(c) && /^consulta\b/.test(n)) puntos += 4;
+  if (/\bprimera\b/.test(n) && !/\bprimera\b/.test(c)) puntos -= 4;
+  // «- INECO» = presencial canónico.
+  if (/\bineco\b/.test(n) && !/\bonline\b|\bvirtual\b|\bdomicilio\b/.test(n)) puntos += 8;
+  if (/\bdomicilio\b/.test(n) && !/\bdomicilio\b/.test(c)) puntos -= 8;
+  if (/\b30\b|\b45\b|\b60\b/.test(n) && !/\b30\b|\b45\b|\b60\b|\bmedia hora\b|\bhora\b/.test(c)) {
+    puntos -= 6;
+  }
+  if (/\bprogramas?\b|\bgrupos?\b|\binterconsulta\b/.test(n) && !/\bprograma\b|\bgrupo\b|\binterconsulta\b/.test(c)) {
+    puntos -= 5;
+  }
   if (!hits && puntos < 8) return 0;
   return puntos;
 }
@@ -828,6 +848,10 @@ function modalidadDeNombrePrest(nombre) {
   const t = normSeed(nombre);
   if (/\bonline\b|\bvirtual\b|\bvideoconsulta\b|\bvideo\s*consulta\b|\btelemedicina\b/.test(t)) {
     return 'virtual';
+  }
+  // «… - INECO» / sede Ineco = presencial en catálogo.
+  if (/\bineco\b/.test(t) || /\bdomicilio\b|\bconsultorio\b|\bpresencial\b/.test(t)) {
+    return 'presencial';
   }
   return 'presencial';
 }
@@ -870,6 +894,16 @@ function matchPrestacionDesdePedido(prestacionesMap, { motivo, modalidad, profes
   }
   const segundo = ranking[1];
   if (segundo && segundo.puntos >= mejor.puntos * 0.9 && segundo.puntos >= mejor.puntos - 2) {
+    if (segundo.puntos === mejor.puntos) {
+      const tronco = (nombre) =>
+        normSeed(nombre)
+          .replace(/\bineco\b|\bonline\b|\bvirtual\b|\bdomicilio\b|\b\d+\b/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      if (tronco(mejor.prestacion.nombre || '') === tronco(segundo.prestacion.nombre || '')) {
+        return mejor.codigo;
+      }
+    }
     return null;
   }
   return mejor.codigo;
@@ -882,6 +916,8 @@ function App({
   mode = 'full',
   onUiLockChange,
   pedidoSeed = null,
+  soloLibres: soloLibresProp,
+  onSoloLibresChange,
 }) {
   const compact = mode === 'compact';
   const configView = !compact && section === 'config';
@@ -895,7 +931,20 @@ function App({
   const [prestacionId, setPrestacionId] = useState('');
   const [modalidad, setModalidad] = useState('TODOS');
   const [duracionMin, setDuracionMin] = useState(30);
+  /** true = solo huecos libres; false = libres + ocupados. */
+  const [soloLibresLocal, setSoloLibresLocal] = useState(true);
+  const soloLibresControlled = typeof soloLibresProp === 'boolean';
+  const soloLibres = soloLibresControlled ? soloLibresProp : soloLibresLocal;
+  const setSoloLibres = (next) => {
+    const value = typeof next === 'function' ? next(soloLibres) : next;
+    if (!soloLibresControlled) setSoloLibresLocal(value);
+    onSoloLibresChange?.(value);
+  };
   const lastPedidoSeedKey = useRef('');
+  /** Profesional matcheado del pedido WA: al elegir prestación a mano, priorizarlo. */
+  const preferredProfDocRef = useRef('');
+  /** Tras Pasar a Busca Turno: buscar solo y ampliar si no hay huecos. */
+  const pendingAutoBuscarKeyRef = useRef('');
   const [searching, setSearching] = useState(false);
   const [slotsRaw, setSlotsRaw] = useState([]);
   const [dadosRaw, setDadosRaw] = useState([]);
@@ -983,6 +1032,9 @@ function App({
         }) || '';
     }
 
+    preferredProfDocRef.current = docProf || '';
+    pendingAutoBuscarKeyRef.current = '';
+
     if (codigo && prestaciones[codigo]) {
       setPrestacionId(codigo);
       setFiltrosAbiertos(true);
@@ -992,10 +1044,14 @@ function App({
     }
 
     if (docProf && codigo) {
+      const ofrece = (prestaciones[codigo]?.profesionales || []).some(
+        (p) => String(p.doc) === String(docProf)
+      );
       setSelectedPrestadorDocsByPrestacion((prev) => ({
         ...prev,
-        [codigo]: [docProf],
+        [codigo]: ofrece ? [docProf] : prev[codigo],
       }));
+      if (ofrece) pendingAutoBuscarKeyRef.current = String(pedidoSeed.key);
     }
 
     const nombrePrest = codigo
@@ -1218,8 +1274,13 @@ function App({
     );
     if (profs.length === 0) return;
     const allDocs = profs.map((p) => p.doc);
+    const preferred = String(preferredProfDocRef.current || '').trim();
+    const preferredHit =
+      preferred && profs.some((p) => String(p.doc) === preferred) ? preferred : '';
     setSelectedPrestadorDocsByPrestacion((prev) => {
       if (prev[prestacionId] !== undefined) return prev;
+      // Pedido WA: si el dr matcheado ofrece esta prestación, dejarlo solo a él.
+      if (preferredHit) return { ...prev, [prestacionId]: [preferredHit] };
       return { ...prev, [prestacionId]: [...allDocs] };
     });
   }, [prestacionId, prestaciones, enabledProfDocs]);
@@ -1873,11 +1934,11 @@ function App({
     async (startOffset = 0, append = false) => {
       if (!prestacionId) {
         setStatus({ text: 'Elegí una prestación', error: true, visible: true });
-        return;
+        return 0;
       }
       if (prestaciones[prestacionId]?.enabled === false) {
         setStatus({ text: 'Esta prestación está deshabilitada en Config', error: true, visible: true });
-        return;
+        return 0;
       }
 
       let profesionales = (prestaciones[prestacionId]?.profesionales || []).slice();
@@ -1896,7 +1957,7 @@ function App({
           error: true,
           visible: true,
         });
-        return;
+        return 0;
       }
 
       if (startOffset === 0 && !append) setSearchOffset(0);
@@ -1957,7 +2018,10 @@ function App({
       }
 
       setStatus({
-        text: 'Buscando turnos...',
+        text:
+          startOffset > 0
+            ? `Buscando turnos (desde el día ${startOffset + 1})...`
+            : 'Buscando turnos...',
         error: false,
         visible: true,
       });
@@ -2039,7 +2103,7 @@ function App({
           setStatus({ text: 'No hay más turnos en ese rango.', error: false, visible: true });
         }
         setSearchOffset(startOffset + DAYS_PER_BLOCK);
-        return;
+        return 0;
       }
 
       setSlotsRaw((prev) =>
@@ -2049,6 +2113,7 @@ function App({
       setSearchReturnedEmpty(false);
       setSearchOffset(startOffset + DAYS_PER_BLOCK);
       clearStatus();
+      return allSlots.length;
       } catch (e) {
         setStatus({
           text: e?.message || 'Error al buscar turnos',
@@ -2056,6 +2121,7 @@ function App({
           visible: true,
         });
         toast.error(e?.message || 'Error al buscar turnos');
+        return 0;
       } finally {
         setSearching(false);
         if (compact) setFiltrosAbiertos(false);
@@ -2071,6 +2137,33 @@ function App({
       compact,
     ]
   );
+
+  // Pedido WA completo (prestación + profesional): buscar y ampliar hasta encontrar huecos.
+  useEffect(() => {
+    const key = pendingAutoBuscarKeyRef.current;
+    if (!key || !pedidoSeed?.key || key !== pedidoSeed.key) return;
+    if (!prestacionId || !prestaciones[prestacionId]) return;
+    const preferred = String(preferredProfDocRef.current || '').trim();
+    const selected = selectedPrestadorDocsByPrestacion[prestacionId];
+    if (preferred) {
+      if (!selected?.some((d) => String(d) === preferred)) return;
+    }
+    pendingAutoBuscarKeyRef.current = '';
+    void (async () => {
+      const DAYS = 21;
+      const MAX_BLOQUES = 4; // ~84 días
+      for (let i = 0; i < MAX_BLOQUES; i++) {
+        const n = await buscar(i * DAYS, false);
+        if (n > 0) {
+          if (i > 0) {
+            toast.info(`Encontré turnos ampliando desde el día ${i * DAYS + 1}.`);
+          }
+          return;
+        }
+      }
+      toast.info('No encontré turnos libres en los próximos ~84 días.');
+    })();
+  }, [pedidoSeed, prestacionId, prestaciones, selectedPrestadorDocsByPrestacion, buscar]);
 
   const closeOcupadoModal = useCallback(() => {
     setSelectedOcupado(null);
@@ -2793,6 +2886,27 @@ function App({
             </div>
           ) : null}
           <div className="search-actions">
+            {!compact ? (
+              <label
+                className={`busca-switch-solo-libres${soloLibres ? ' is-on' : ''}`}
+                title={
+                  soloLibres
+                    ? 'Solo turnos libres. Desactivá para ver también ocupados.'
+                    : 'Libres y ocupados. Activá para ver solo libres.'
+                }
+              >
+                <span className="busca-switch-solo-libres__label">Solo libres</span>
+                <input
+                  type="checkbox"
+                  checked={soloLibres}
+                  onChange={(e) => setSoloLibres(e.target.checked)}
+                  aria-label="Solo libres"
+                />
+                <span className="busca-switch-solo-libres__track" aria-hidden>
+                  <span className="busca-switch-solo-libres__thumb" />
+                </span>
+              </label>
+            ) : null}
             <button
               type="button"
               className="btn primary"
@@ -3057,14 +3171,16 @@ function App({
               if (modalidad === 'PRESENCIAL') return !isSlotVirtual(edificio);
               return true;
             };
-            const ocupadosDelDia = dadosRaw.filter((d) => {
-              const cuando = d.fechaHora instanceof Date ? d.fechaHora : new Date(d.fechaHora);
-              if (fmtDateKey(cuando) !== key) return false;
-              if (!byProf.has(String(d.profesionalDoc))) return false;
-              if (!entraModalidad(d.edificio)) return false;
-              const min = minutoSlot(d);
-              return min == null || !minutosLibres.has(`${d.profesionalDoc}|${min}`);
-            });
+            const ocupadosDelDia = soloLibres
+              ? []
+              : dadosRaw.filter((d) => {
+                  const cuando = d.fechaHora instanceof Date ? d.fechaHora : new Date(d.fechaHora);
+                  if (fmtDateKey(cuando) !== key) return false;
+                  if (!byProf.has(String(d.profesionalDoc))) return false;
+                  if (!entraModalidad(d.edificio)) return false;
+                  const min = minutoSlot(d);
+                  return min == null || !minutosLibres.has(`${d.profesionalDoc}|${min}`);
+                });
             const gruposPorProf = new Map();
             for (const d of ocupadosDelDia) {
               const id = String(d.profesionalDoc);
@@ -3122,9 +3238,11 @@ function App({
                     <span className="day-count">
                       {libresDia} libre{libresDia !== 1 ? 's' : ''}
                     </span>
-                    <span className="day-count day-count--ocupado">
-                      {bloquesOcupados} ocupado{bloquesOcupados !== 1 ? 's' : ''}
-                    </span>
+                    {!soloLibres ? (
+                      <span className="day-count day-count--ocupado">
+                        {bloquesOcupados} ocupado{bloquesOcupados !== 1 ? 's' : ''}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
                 {!dayCollapsed && (
@@ -3139,11 +3257,20 @@ function App({
                             {compact ? titleCase(nombre || '') : profLabelConDoc(nombre, doc)}
                           </span>
                           {compact ? (
-                            <span className="day-prof-counts" aria-label={`${libresProf} libres, ${ocupadosProf.length} ocupados`}>
+                            <span
+                              className="day-prof-counts"
+                              aria-label={
+                                soloLibres
+                                  ? `${libresProf} libres`
+                                  : `${libresProf} libres, ${ocupadosProf.length} ocupados`
+                              }
+                            >
                               <span className="day-count">{libresProf} libre{libresProf !== 1 ? 's' : ''}</span>
-                              <span className="day-count day-count--ocupado">
-                                {ocupadosProf.length} ocupado{ocupadosProf.length !== 1 ? 's' : ''}
-                              </span>
+                              {!soloLibres ? (
+                                <span className="day-count day-count--ocupado">
+                                  {ocupadosProf.length} ocupado{ocupadosProf.length !== 1 ? 's' : ''}
+                                </span>
+                              ) : null}
                             </span>
                           ) : null}
                         </div>

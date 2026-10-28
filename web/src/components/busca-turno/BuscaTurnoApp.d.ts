@@ -26,6 +26,9 @@ type Props = {
   onUiLockChange?: (locked: boolean) => void;
   /** Prefill desde pedido de turno del bot WhatsApp. */
   pedidoSeed?: PedidoSeed | null;
+  /** Si true, oculta turnos ocupados en la grilla. */
+  soloLibres?: boolean;
+  onSoloLibresChange?: (soloLibres: boolean) => void;
 };
 
 declare function BuscaTurnoApp(props: Props): JSX.Element;

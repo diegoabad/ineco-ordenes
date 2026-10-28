@@ -1040,6 +1040,18 @@ function tokensMatch(texto: string): string[] {
     .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
 }
 
+/** psiquiatrica ↔ psiquiatria, neurologica ↔ neurologia, etc. */
+function tokensParecidos(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return true;
+  const minLen = Math.min(a.length, b.length);
+  if (minLen < 6) return false;
+  let common = 0;
+  while (common < minLen && a[common] === b[common]) common += 1;
+  // Sufijo corto distinto (ica/ia, ica/ico…): mismo tronco.
+  return common >= 6 && common >= minLen - 2;
+}
+
 function scoreMatchTexto(consulta: string, candidato: string): number {
   const pedidos = tokensMatch(consulta);
   const propios = tokensMatch(candidato);
@@ -1048,16 +1060,26 @@ function scoreMatchTexto(consulta: string, candidato: string): number {
   let hits = 0;
   for (const token of pedidos) {
     const exacto = propios.includes(token);
-    const cerca = propios.some(
-      (p) => p === token || (token.length >= 4 && (p.startsWith(token) || token.startsWith(p))),
-    );
+    const cerca = propios.some((p) => tokensParecidos(token, p));
     if (!exacto && !cerca) continue;
     hits += 1;
-    puntos += exacto ? token.length * 2 : token.length;
+    puntos += exacto ? token.length * 2 : Math.max(6, Math.min(token.length, 10));
   }
   const c = sinTildes(consulta).trim();
   const n = sinTildes(candidato).trim();
   if (c && n && (n === c || n.includes(c) || c.includes(n))) puntos += Math.min(c.length, 12);
+  // «consulta psiquiatrica» → preferir CONSULTA … y no «PRIMERA CONSULTA …».
+  if (/^consulta\b/.test(c) && /^consulta\b/.test(n)) puntos += 4;
+  if (/\bprimera\b/.test(n) && !/\bprimera\b/.test(c)) puntos -= 4;
+  // «- INECO» = presencial canónico; domicilio / 30' / programas solo si lo pidieron.
+  if (/\bineco\b/.test(n) && !/\bonline\b|\bvirtual\b|\bdomicilio\b/.test(n)) puntos += 8;
+  if (/\bdomicilio\b/.test(n) && !/\bdomicilio\b/.test(c)) puntos -= 8;
+  if (/\b30\b|\b45\b|\b60\b/.test(n) && !/\b30\b|\b45\b|\b60\b|\bmedia hora\b|\bhora\b/.test(c)) {
+    puntos -= 6;
+  }
+  if (/\bprogramas?\b|\bgrupos?\b|\binterconsulta\b/.test(n) && !/\bprograma\b|\bgrupo\b|\binterconsulta\b/.test(c)) {
+    puntos -= 5;
+  }
   if (!hits && puntos < 8) return 0;
   return puntos;
 }
@@ -1101,8 +1123,13 @@ function etarioDePrestacionNombre(nombre: string): "" | "infanto" | "adulto" {
 
 function modalidadDePrestacionNombre(nombre: string): "virtual" | "presencial" {
   const t = sinTildes(nombre);
+  // Online / virtual gana si está en el nombre.
   if (/\bonline\b|\bvirtual\b|\bvideoconsulta\b|\bvideo\s*consulta\b|\btelemedicina\b/.test(t)) {
     return "virtual";
+  }
+  // «… - INECO» / sede Ineco = presencial en catálogo.
+  if (/\bineco\b/.test(t) || /\bdomicilio\b|\bconsultorio\b|\bpresencial\b/.test(t)) {
+    return "presencial";
   }
   return "presencial";
 }
@@ -1191,7 +1218,19 @@ function mejorPrestacionCatalogo(
     return null;
   }
   const segundo = ranking[1];
+  // Empate real (mismo puntaje): si comparten el tronco del motivo, quedarse con el mejor
+  // (ya desempatado por INECO / domicilio / duración). Solo anular si son familias distintas.
   if (segundo && segundo.puntos >= mejor.puntos * 0.9 && segundo.puntos >= mejor.puntos - 2) {
+    if (segundo.puntos === mejor.puntos) {
+      const tronco = (nombre: string) =>
+        sinTildes(nombre)
+          .replace(/\bineco\b|\bonline\b|\bvirtual\b|\bdomicilio\b|\b\d+\b/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      if (tronco(nombreMejor) === tronco(segundo.prestacion.nombre || "")) {
+        return { codigo: mejor.codigo, prestacion: mejor.prestacion };
+      }
+    }
     return null;
   }
   return { codigo: mejor.codigo, prestacion: mejor.prestacion };
@@ -2149,6 +2188,13 @@ async function listarParaElegir(conversation: WaConversation, estado: MenuEstado
   await preguntar(conversation, `${titulo}:\n\n${listado}\n\n0. Volver atrás`);
 }
 
+/** Fecha/hora ISO corta desde `futuro: 2026-10-28T17:30:00…` para que la secretaria anule en un clic. */
+function fechaIsoDeFuturo(linea: string): string {
+  const m = linea.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!m) return "";
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
+
 async function pedirMotivoCancelacion(
   conversation: WaConversation,
   estado: MenuEstado,
@@ -2156,10 +2202,18 @@ async function pedirMotivoCancelacion(
   estado.paso = "motivoCancelacion";
   await guardar(conversation.id, estado);
   const elegido = etiquetaFuturo(estado.pendiente);
+  const iso = fechaIsoDeFuturo(estado.pendiente);
   await decir(
     conversation.id,
     conversation.contactId,
-    `Perfecto, el turno será cancelado:\n${elegido}`,
+    [
+      "Perfecto, el turno será cancelado:",
+      elegido,
+      estado.dni ? `DNI: ${estado.dni}` : "",
+      iso ? `FechaISO: ${iso}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
   await preguntar(conversation, listaMotivosCancelacion());
 }
@@ -2170,6 +2224,7 @@ async function registrarPedidoCancelacion(
   motivo: string,
 ): Promise<void> {
   const turno = etiquetaFuturo(estado.pendiente);
+  const iso = fechaIsoDeFuturo(estado.pendiente);
   const quien = [estado.nombre, estado.apellido].filter(Boolean).join(" ") || "Paciente";
   // Queda en el hilo del chat para el equipo; no se anula en Medexis todavía.
   await decir(
@@ -2181,8 +2236,11 @@ async function registrarPedidoCancelacion(
       `DNI: ${estado.dni || "—"}`,
       `Turno:`,
       turno,
+      iso ? `FechaISO: ${iso}` : "",
       `Motivo: ${motivo}`,
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
   await etiquetarNombres(conversation, ["turnos", "cancelar-turno"]);
   await volverTurnos(
