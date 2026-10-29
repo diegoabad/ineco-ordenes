@@ -1,3 +1,4 @@
+import { nombreDiaSemana, nombreMes, partesBuenosAires } from "../lib/fechaEs.js";
 import {
   accionPermitida,
   accionPorEleccion,
@@ -599,16 +600,8 @@ function textoFicha(ficha: Ficha): string {
 }
 
 function buenosAiresNow(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(now);
+  const p = partesBuenosAires(now);
+  return `${nombreDiaSemana(p.anio, p.mes, p.dia)} ${p.dia} de ${nombreMes(p.mes)} de ${p.anio}, ${p.hora}:${p.minuto}`;
 }
 
 function horaBuenosAires(now: Date): number {

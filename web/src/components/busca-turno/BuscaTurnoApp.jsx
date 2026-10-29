@@ -931,6 +931,8 @@ function scoreSeedTexto(consulta, candidato) {
   if (c && n && (n === c || n.includes(c) || c.includes(n))) puntos += Math.min(c.length, 12);
   if (/^consulta\b/.test(c) && /^consulta\b/.test(n)) puntos += 4;
   if (/\bprimera\b/.test(n) && !/\bprimera\b/.test(c)) puntos -= 4;
+  if (/\binfant/.test(n) && !/\binfant/.test(c)) puntos -= 20;
+  if (/\bonline\b|\bvirtual\b/.test(n) && !/\bonline\b|\bvirtual\b/.test(c)) puntos -= 16;
   // «- INECO» = presencial canónico.
   if (/\bineco\b/.test(n) && !/\bonline\b|\bvirtual\b|\bdomicilio\b/.test(n)) puntos += 8;
   if (/\bdomicilio\b/.test(n) && !/\bdomicilio\b/.test(c)) puntos -= 8;
@@ -1009,6 +1011,18 @@ function matchPrestacionDesdePedido(prestacionesMap, { motivo, modalidad, profes
   return mejor.codigo;
 }
 
+function slotEsHabitual(fechaHora, preferencia) {
+  const franjas = preferencia?.franjas;
+  if (!Array.isArray(franjas) || !franjas.length) return false;
+  const cuando = fechaHora instanceof Date ? fechaHora : new Date(fechaHora);
+  if (Number.isNaN(cuando.getTime())) return false;
+  const minuto = cuando.getHours() * 60 + cuando.getMinutes();
+  return franjas.some(
+    (franja) =>
+      franja.dia === cuando.getDay() && minuto >= Number(franja.desde) && minuto <= Number(franja.hasta),
+  );
+}
+
 function App({
   section = 'turnos',
   onRequestSection,
@@ -1058,6 +1072,7 @@ function App({
   const [searching, setSearching] = useState(false);
   const [slotsRaw, setSlotsRaw] = useState([]);
   const [dadosRaw, setDadosRaw] = useState([]);
+  const [preferenciaTurno, setPreferenciaTurno] = useState(null);
   const [searchReturnedEmpty, setSearchReturnedEmpty] = useState(false);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(true);
   const [searchOffset, setSearchOffset] = useState(0);
@@ -1112,6 +1127,7 @@ function App({
         pacienteSeedRef.current = null;
         preferredProfDocRef.current = '';
         pendingAutoBuscarKeyRef.current = '';
+        setPreferenciaTurno(null);
       }
       return;
     }
@@ -1166,24 +1182,41 @@ function App({
 
     preferredProfDocRef.current = docProf || '';
     pendingAutoBuscarKeyRef.current = '';
+    setPreferenciaTurno(pedidoSeed.preferencia?.texto ? pedidoSeed.preferencia : null);
 
     if (codigo && prestaciones[codigo]) {
+      const deLaPrestacion = (prestaciones[codigo].profesionales || []).filter(
+        (p) => String(p?.doc || '').trim()
+      );
+      let elegido = docProf && deLaPrestacion.some((p) => String(p.doc) === String(docProf)) ? docProf : '';
+      if (!elegido && pedidoSeed.profesionalNombre) {
+        const buscado = normSeed(pedidoSeed.profesionalNombre);
+        const hit = deLaPrestacion.find((p) => {
+          const nombre = normSeed(p.nombre || '');
+          return nombre && (nombre === buscado || nombre.includes(buscado) || buscado.includes(nombre));
+        });
+        if (hit) elegido = String(hit.doc || '').trim();
+      }
       setPrestacionId(codigo);
-      setFiltrosAbiertos(true);
+      setFiltrosAbiertos(false);
+      preferredProfDocRef.current = elegido;
+      if (elegido) {
+        setSelectedPrestadorDocsByPrestacion((prev) => ({
+          ...prev,
+          [codigo]: [elegido],
+        }));
+      } else {
+        setSelectedPrestadorDocsByPrestacion((prev) => {
+          if (prev[codigo] === undefined) return prev;
+          const next = { ...prev };
+          delete next[codigo];
+          return next;
+        });
+      }
+      pendingAutoBuscarKeyRef.current = String(pedidoSeed.key);
     } else {
       setPrestacionId('');
       setFiltrosAbiertos(true);
-    }
-
-    if (docProf && codigo) {
-      const ofrece = (prestaciones[codigo]?.profesionales || []).some(
-        (p) => String(p.doc) === String(docProf)
-      );
-      setSelectedPrestadorDocsByPrestacion((prev) => ({
-        ...prev,
-        [codigo]: ofrece ? [docProf] : prev[codigo],
-      }));
-      if (ofrece) pendingAutoBuscarKeyRef.current = String(pedidoSeed.key);
     }
 
     const nombrePrest = codigo
@@ -2472,6 +2505,7 @@ function App({
     setSlotsElegidos(new Map());
     preferredProfDocRef.current = '';
     pendingAutoBuscarKeyRef.current = '';
+    setPreferenciaTurno(null);
     pacienteSeedRef.current = null;
     lastPedidoSeedKey.current = '';
     onPedidoSeedClear?.();
@@ -3649,6 +3683,11 @@ function App({
                               );
                             }
                             const s = celda.item;
+                            const profPreferido = String(preferredProfDocRef.current || '').trim();
+                            const habitual =
+                              Boolean(profPreferido) &&
+                              String(doc) === profPreferido &&
+                              slotEsHabitual(s.fechaHora, preferenciaTurno);
                             const virtual = isSlotVirtual(s.edificio);
                             const sedeTxt = virtual
                               ? ''
@@ -3712,6 +3751,7 @@ function App({
                                   </span>
                                   <span className="slot-time">{rangoLibre}</span>
                                   {durMin ? <span className="slot-meta">{durMin} min</span> : null}
+                                  {habitual ? <span className="slot-pref-chip">Preferido</span> : null}
                                 </button>
                               );
                             }
@@ -3733,6 +3773,7 @@ function App({
                                     )}
                                   </span>
                                   <span className="slot-time">{fmtTime(s.fechaHora)}</span>
+                                  {habitual ? <span className="slot-pref-chip">Preferido</span> : null}
                                 </span>
                                 {detalle ? <span className="slot-modulos">{detalle}</span> : null}
                               </button>

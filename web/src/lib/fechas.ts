@@ -34,6 +34,32 @@ export function fechaHoyIso(): string {
     .split("T")[0]!;
 }
 
+const DIAS_ES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"] as const;
+
+/** 0 = domingo. Misma cuenta que el servidor: no usa el idioma del navegador. */
+function indiceDiaSemana(anio: number, mes: number, dia: number): number {
+  const t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  let y = anio;
+  if (mes < 3) y -= 1;
+  return (y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) + t[mes - 1]! + dia) % 7;
+}
+
+export function indiceDiaSemanaYmd(ymd: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd.trim());
+  if (!m) return null;
+  const anio = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  if (!anio || mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+  return indiceDiaSemana(anio, mes, dia);
+}
+
+export function nombreDiaSemana(ymd: string): string {
+  const indice = indiceDiaSemanaYmd(ymd);
+  if (indice == null) return "";
+  return DIAS_ES[indice] ?? "";
+}
+
 export function formatFechaYmd(ymd: string): string {
   // Acepta YYYY-MM-DD o ISO con hora; siempre muestra dd/mm/aaaa.
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd.trim());
@@ -42,6 +68,13 @@ export function formatFechaYmd(ymd: string): string {
   const month = m[2]!;
   const year = m[1]!;
   return `${day}/${month}/${year}`;
+}
+
+/** Día de la semana en español más dd/mm/aaaa. */
+export function formatFechaConDia(ymd: string): string {
+  const fecha = formatFechaYmd(ymd);
+  const dia = nombreDiaSemana(ymd);
+  return dia ? `${dia} ${fecha}` : fecha;
 }
 
 /** Formatea un ISO datetime a dd/mm/yyyy hh:mm (hora local). */

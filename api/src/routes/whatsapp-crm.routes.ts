@@ -12,6 +12,9 @@ import {
   getDerivacionTurnoConfig,
   saveDerivacionTurnoConfig,
 } from "../whatsapp/derivacion-turno.js";
+import { resolverPrestacionParaBusca } from "../whatsapp/bot-menu.js";
+import { dniDesdeTelefono, listarTurnosFicha, type TurnoFichaItem } from "../whatsapp/acciones.js";
+import { getBuscaTurnoConfig } from "../services/db.service.js";
 import {
   createQuickReply,
   deleteQuickReply,
@@ -46,6 +49,7 @@ import {
   setDiagnosticoPresuntivoHumano,
   setPruebaNota,
   updateContact,
+  listRecentMessagesByConversation,
 } from "../whatsapp/firestore-store.js";
 import { nombresMotivosCatalogo, resolverNombreMotivoCatalogo } from "../whatsapp/motivos-catalogo.js";
 import { listLlmUsageByConversation } from "../whatsapp/llm-usage.js";
@@ -183,6 +187,38 @@ router.put("/derivacion-turno", async (req, res) => {
     res.json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudo guardar la derivación de turnos");
+  }
+});
+
+router.post("/match-prestacion", async (req, res) => {
+  try {
+    const texto = String(req.body?.texto ?? "").trim();
+    if (!texto) {
+      res.status(400).json({ ok: false, message: "Falta el tratamiento" });
+      return;
+    }
+    const modalidadRaw = String(req.body?.modalidad ?? "").trim();
+    const modalidad =
+      modalidadRaw === "presencial" ||
+      modalidadRaw === "virtual" ||
+      modalidadRaw === "indistinto"
+        ? modalidadRaw
+        : "";
+    const grupoRaw = String(req.body?.grupoEtario ?? "").trim();
+    const grupoEtario = grupoRaw === "adulto" || grupoRaw === "infanto" ? grupoRaw : "";
+    const data = await resolverPrestacionParaBusca({
+      texto,
+      profesionalDoc: String(req.body?.profesionalDoc ?? "").trim(),
+      profesionalNombre: String(req.body?.profesionalNombre ?? "").trim(),
+      modalidad,
+      grupoEtario,
+      fechaNacimiento: String(req.body?.fechaNacimiento ?? "").trim(),
+      dni: String(req.body?.dni ?? "").replace(/\D/g, ""),
+      conversacionId: String(req.body?.conversacionId ?? "").trim(),
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo matchear la prestación");
   }
 });
 
@@ -778,6 +814,139 @@ router.get("/conversations/by-contact/:contactId", async (req, res) => {
   }
 });
 
+function sinTildesRuta(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function coincideProfesional(etiqueta: string, profesional: string): boolean {
+  if (!etiqueta || !profesional) return false;
+  if (profesional === etiqueta) return true;
+  if (etiqueta.length >= 5 && profesional.includes(etiqueta)) return true;
+  if (profesional.length >= 5 && etiqueta.includes(profesional)) return true;
+  const delProfesional = new Set(profesional.split(" ").filter((parte) => parte.length >= 4));
+  return etiqueta.split(" ").some((parte) => parte.length >= 4 && delProfesional.has(parte));
+}
+
+function dniDichoEnTexto(texto: string): string {
+  const explicito = texto.match(/\bdni\b\D{0,12}(\d{7,9})\b/i);
+  return explicito?.[1]?.replace(/\D/g, "") || "";
+}
+
+async function clasificarTurnosEnConversacion(
+  conversationId: string,
+  tagIds: string[],
+  turnos: TurnoFichaItem[],
+): Promise<string[]> {
+  if (!turnos.length) return tagIds;
+  const catalogo = await listWhatsappTagCatalog();
+  const grupoDe = (nombre: string) =>
+    catalogo.groups.find((group) => sinTildesRuta(group.name) === nombre)?.id;
+  const profId = grupoDe("profesionales");
+  const tratId = grupoDe("tratamientos");
+  const sumar = new Set<string>();
+  for (const turno of turnos) {
+    const profesional = sinTildesRuta(turno.profesional);
+    const prestacion = sinTildesRuta(turno.prestacion);
+    for (const tag of catalogo.items) {
+      const nombre = sinTildesRuta(tag.name);
+      if (nombre.length < 4) continue;
+      if (tag.groupId === profId && coincideProfesional(nombre, profesional)) sumar.add(tag.id);
+      if (
+        tag.groupId === tratId &&
+        nombre.length >= 5 &&
+        nombre !== "consulta" &&
+        nombre !== "ineco" &&
+        prestacion.includes(nombre)
+      ) {
+        sumar.add(tag.id);
+      }
+    }
+  }
+  if (!sumar.size) return tagIds;
+  const next = [...new Set([...tagIds, ...sumar])];
+  if (next.length === tagIds.length) return tagIds;
+  const updated = await setConversationTags(conversationId, next);
+  return updated?.tagIds ?? next;
+}
+
+router.get("/conversations/:id/historial-turnos", async (req, res) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const conversation = await getConversation(String(id ?? ""));
+    if (!conversation) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    let dni = String(conversation.contact?.dni || conversation.menuEstado?.dni || "").replace(/\D/g, "");
+    if (dni.length < 7) {
+      const mensajes = await listRecentMessagesByConversation(conversation.id, 40);
+      for (const mensaje of mensajes) {
+        const hallado = dniDichoEnTexto(String(mensaje.text ?? ""));
+        if (hallado) {
+          dni = hallado;
+          break;
+        }
+      }
+    }
+    if (dni.length < 7) {
+      dni = await dniDesdeTelefono(
+        conversation.contact?.phoneNumber || conversation.menuEstado?.telefono || "",
+      );
+    }
+    if (dni.length < 7) {
+      res.json({
+        ok: true,
+        data: {
+          turnos: [],
+          ultimosProfesionales: [],
+          tagIds: conversation.tagIds ?? [],
+          aviso: "No hay DNI para buscar los turnos.",
+        },
+      });
+      return;
+    }
+    let config = null;
+    try {
+      config = await getBuscaTurnoConfig();
+    } catch {
+      config = null;
+    }
+    const turnos = await listarTurnosFicha(dni, config);
+    const ultimosProfesionales: string[] = [];
+    const vistos = new Set<string>();
+    for (const turno of turnos) {
+      const nombre = turno.profesional.trim();
+      const clave = sinTildesRuta(nombre);
+      if (!clave || vistos.has(clave)) continue;
+      vistos.add(clave);
+      ultimosProfesionales.push(nombre);
+      if (ultimosProfesionales.length >= 3) break;
+    }
+    const tagIds = await clasificarTurnosEnConversacion(
+      conversation.id,
+      conversation.tagIds ?? [],
+      turnos,
+    );
+    res.json({
+      ok: true,
+      data: {
+        turnos,
+        ultimosProfesionales,
+        tagIds,
+        aviso: turnos.length ? "" : "No hay turnos en el último año.",
+      },
+    });
+  } catch (error) {
+    sendError(res, error, "No se pudo cargar el historial de turnos");
+  }
+});
+
 router.get("/conversations/:id", async (req, res) => {
   try {
     const data = await getConversation(req.params.id);
@@ -878,32 +1047,31 @@ router.patch("/conversations/:id/diagnostico", async (req: AuthedRequest, res) =
       res.status(404).json({ ok: false, message: "Conversación no encontrada" });
       return;
     }
-    // Sincronizar etiqueta del grupo Diagnóstico si hay valor.
-    if (diagnostico) {
-      try {
-        const catalogo = await listWhatsappTagCatalog();
-        const grupo = catalogo.groups.find(
-          (g) => g.name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase() === "diagnostico",
-        );
-        const diagIds = new Set(
-          catalogo.items
-            .filter((item) => (grupo ? item.groupId === grupo.id : false))
-            .map((item) => item.id),
-        );
-        const tag = catalogo.items.find(
-          (item) =>
-            item.name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase() ===
-            diagnostico.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase(),
-        );
-        const sinDiag = (conversation.tagIds ?? []).filter((tid) => !diagIds.has(tid));
-        const next = tag ? [...new Set([...sinDiag, tag.id])] : sinDiag;
-        await setConversationTags(id, next);
-        const fresh = await getConversation(id);
-        res.json({ ok: true, data: fresh ?? data });
-        return;
-      } catch {
-        /* si falla el tag, igual quedó el diagnóstico */
-      }
+    try {
+      const catalogo = await listWhatsappTagCatalog();
+      const grupo = catalogo.groups.find(
+        (g) => g.name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase() === "diagnostico",
+      );
+      const diagIds = new Set(
+        catalogo.items
+          .filter((item) => (grupo ? item.groupId === grupo.id : false))
+          .map((item) => item.id),
+      );
+      const tag = diagnostico
+        ? catalogo.items.find(
+            (item) =>
+              item.name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase() ===
+              diagnostico.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase(),
+          )
+        : undefined;
+      const sinDiag = (data.tagIds ?? conversation.tagIds ?? []).filter((tid) => !diagIds.has(tid));
+      const next = tag ? [...new Set([...sinDiag, tag.id])] : sinDiag;
+      await setConversationTags(id, next);
+      const fresh = await getConversation(id);
+      res.json({ ok: true, data: fresh ?? data });
+      return;
+    } catch {
+      /* si falla el tag, igual quedó el diagnóstico */
     }
     res.json({ ok: true, data });
   } catch (error) {

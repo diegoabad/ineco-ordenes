@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode } from "react";
 import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
-import { formatFechaHora, formatFechaYmd, fechaHoyIso } from "../lib/fechas";
+import { formatFechaConDia, formatFechaHora, formatFechaYmd, fechaHoyIso, indiceDiaSemanaYmd } from "../lib/fechas";
 import { formatNombrePersona } from "../lib/nombrePersona";
 import {
   extractSlashQuery,
@@ -21,6 +21,7 @@ import {
   connectWhatsapp,
   fetchWaConversation,
   fetchWaConversationByContact,
+  fetchWaHistorialTurnos,
   fetchWaConversations,
   fetchWaMessages,
   fetchWaLlmUsage,
@@ -34,6 +35,7 @@ import {
   fetchWhatsappMotorConfig,
   fetchWhatsappStatus,
   markWaConversationRead,
+  matchWaPrestacion,
   createWaPrueba,
   saveWaAccesos,
   saveWaPruebaNota,
@@ -42,6 +44,7 @@ import {
   sendWaPruebaMessage,
   setWaConversationTags,
   updateWaContact,
+  type WaTurnoFicha,
   waMediaUrl,
 } from "../services/whatsappCrmService";
 import type { WaContact, WaConversation, WaMessage, WaOperator, WaTag, WaTagGroup } from "../types/whatsappCrm";
@@ -308,9 +311,26 @@ function esMensajePedidoTurno(text: string): boolean {
   return /^Datos del pedido de turno:/i.test(String(text ?? "").trim());
 }
 
-/** Solo el pedido cerrado (tras el motivo). El aviso “Perfecto, el turno será cancelado” es intermedio. */
+/** Pedido cerrado: el paciente ya eligió el turno y el motivo. No espera a que la recepción lo anule. */
 function esMensajeCancelacionTurno(text: string): boolean {
-  return /^Pedido de cancelación registrado/i.test(String(text ?? "").trim());
+  const t = String(text ?? "").trim();
+  return (
+    /^Pedido de cancelación registrado/i.test(t) ||
+    /registramos tu pedido de cancelaci[oó]n/i.test(t)
+  );
+}
+
+function textoPrevioCancelacion(
+  lista: Array<{ direction?: string; isDeleted?: boolean; text?: string | null }>,
+  index: number,
+): string {
+  for (let i = index - 1; i >= 0 && i >= index - 8; i -= 1) {
+    const prev = lista[i];
+    if (!prev || prev.direction !== "OUTBOUND" || prev.isDeleted) continue;
+    const body = String(prev.text ?? "");
+    if (/ser[aá] cancelado/i.test(body) || /FechaISO/i.test(body)) return body;
+  }
+  return "";
 }
 
 function campoGlobo(text: string, etiqueta: string): string {
@@ -394,6 +414,102 @@ function fechaHoraBaDeCrudo(crudo: string): string {
   const iso = crudo.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]} ${iso[4]}:${iso[5]}`;
   return "";
+}
+
+type FranjaTurno = { dia: number; desde: number; hasta: number };
+type PreferenciaTurnos = { franjas: FranjaTurno[]; texto: string };
+
+function reloj(minutos: number): string {
+  const hora = Math.floor(minutos / 60);
+  const minuto = minutos % 60;
+  return `${String(hora).padStart(2, "0")}:${String(minuto).padStart(2, "0")}`;
+}
+
+function agruparHorarios(minutos: number[]): { desde: number; hasta: number; etiqueta: string }[] {
+  const ordenados = [...minutos].sort((a, b) => a - b);
+  const grupos: number[][] = [];
+  for (const minuto of ordenados) {
+    const ultimo = grupos[grupos.length - 1];
+    const previo = ultimo?.[ultimo.length - 1];
+    if (ultimo && previo != null && minuto - previo <= 120) ultimo.push(minuto);
+    else grupos.push([minuto]);
+  }
+  return grupos.map((grupo) => {
+    const menor = Math.min(...grupo);
+    const mayor = Math.max(...grupo);
+    const etiqueta =
+      menor === mayor ? `a las ${reloj(menor)}` : `entre las ${reloj(menor)} y las ${reloj(mayor)}`;
+    return { desde: menor, hasta: mayor, etiqueta };
+  });
+}
+
+function preferenciaDeTurnos(
+  turnos: { fecha: string; hora: string; estado: string }[],
+): PreferenciaTurnos | null {
+  const base = turnos.filter((turno) => {
+    const estado = normWa(turno.estado);
+    return !estado.includes("cancel") && !estado.includes("anul");
+  });
+  if (base.length < 1) return null;
+  const porDia = new Map<number, number[]>();
+  for (const turno of base) {
+    const dia = indiceDiaSemanaYmd(turno.fecha);
+    const hora = /^(\d{1,2}):(\d{2})/.exec(turno.hora.trim());
+    if (dia == null || !hora) continue;
+    const minuto = Number(hora[1]) * 60 + Number(hora[2]);
+    const lista = porDia.get(dia) ?? [];
+    lista.push(minuto);
+    porDia.set(dia, lista);
+  }
+  const franjas = [...porDia.entries()]
+    .sort((a, b) => ((a[0] + 6) % 7) - ((b[0] + 6) % 7))
+    .flatMap(([dia, minutos]) =>
+      agruparHorarios(minutos).map((franja) => ({
+        dia,
+        desde: franja.desde,
+        hasta: franja.hasta,
+        etiqueta: franja.etiqueta,
+      })),
+    );
+  if (!franjas.length) return null;
+  const nombres = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const grupos = new Map<string, string[]>();
+  for (const franja of franjas) {
+    const dias = grupos.get(franja.etiqueta) ?? [];
+    dias.push(nombres[franja.dia] ?? "");
+    grupos.set(franja.etiqueta, dias);
+  }
+  const texto = [...grupos.entries()]
+    .map(([hora, dias]) => {
+      const lista =
+        dias.length === 1 ? dias[0] : `${dias.slice(0, -1).join(", ")} y ${dias[dias.length - 1]}`;
+      const titulo = lista ? lista.charAt(0).toUpperCase() + lista.slice(1) : lista;
+      return `${titulo} ${hora}`;
+    })
+    .join(" · ");
+  return { franjas: franjas.map(({ dia, desde, hasta }) => ({ dia, desde, hasta })), texto };
+}
+
+function mismaPrestacion(a: string, b: string): boolean {
+  const marca = (texto: string) =>
+    ["infantil", "online", "virtual", "domicilio", "30"]
+      .filter((item) => normWa(texto).includes(item))
+      .sort()
+      .join("|");
+  if (!normWa(a) || !normWa(b)) return false;
+  if (normWa(a) === normWa(b)) return true;
+  return scoreNombreProf(a, b) >= 80 && marca(a) === marca(b);
+}
+
+function claseEstadoTurno(estado: string): string {
+  const n = normWa(estado);
+  if (n.includes("cancel") || n.includes("anul")) return "is-cancelado";
+  if (n.includes("ausente")) return "is-ausente";
+  if (n.includes("presente")) return "is-presente";
+  if (n.includes("reserv")) return "is-reservado";
+  if (n.includes("dispon")) return "is-disponible";
+  if (n.includes("asign") || n.includes("proxim")) return "is-proximo";
+  return "is-sindato";
 }
 
 function scoreNombreProf(buscado: string, candidato: string): number {
@@ -970,6 +1086,32 @@ function sameClusters(a: PinnedCluster[], b: PinnedCluster[]): boolean {
   });
 }
 
+function FichaAcordeon({
+  titulo,
+  abierto,
+  onCambio,
+  children,
+}: {
+  titulo: string;
+  abierto: boolean;
+  onCambio: (abierto: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      className="wa-ficha-fold"
+      open={abierto}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        if (next !== abierto) onCambio(next);
+      }}
+    >
+      <summary>{titulo}</summary>
+      <div className="wa-ficha-fold__body">{children}</div>
+    </details>
+  );
+}
+
 export function WhatsAppConversationsPanel({
   onConnectionChange,
   connectRef,
@@ -1023,10 +1165,107 @@ export function WhatsAppConversationsPanel({
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
   const [sidePanelPinned, setSidePanelPinned] = useState(false);
   const [sidePanelUiLocked, setSidePanelUiLocked] = useState(false);
-  const [operadoraTab, setOperadoraTab] = useState<"paciente" | "etiquetas" | "busca">(
-    "paciente",
-  );
+  const [operadoraTab, setOperadoraTab] = useState<
+    "paciente" | "historial" | "etiquetas" | "busca"
+  >("paciente");
+  const [historialTurnos, setHistorialTurnos] = useState<{
+    conversationId: string;
+    turnos: WaTurnoFicha[];
+    ultimosProfesionales: string[];
+    aviso: string;
+    loading: boolean;
+  } | null>(null);
+  const [historialBusqueda, setHistorialBusqueda] = useState("");
+  const [historialTick, setHistorialTick] = useState(0);
+  const [historialGrupos, setHistorialGrupos] = useState({ proximos: true, anteriores: true });
+  useEffect(() => {
+    setHistorialBusqueda("");
+  }, [selectedId]);
+  useEffect(() => {
+    if (!selectedId) {
+      setHistorialTurnos(null);
+      return;
+    }
+    const id = selectedId;
+    let cancel = false;
+    setHistorialTurnos({
+      conversationId: id,
+      turnos: [],
+      ultimosProfesionales: [],
+      aviso: "",
+      loading: true,
+    });
+    void fetchWaHistorialTurnos(id)
+      .then((data) => {
+        if (cancel) return;
+        setHistorialTurnos({
+          conversationId: id,
+          turnos: data.turnos,
+          ultimosProfesionales: data.ultimosProfesionales,
+          aviso: data.aviso,
+          loading: false,
+        });
+        const sumar = (actuales: string[]) => {
+          const extra = data.tagIds.filter((tagId) => !actuales.includes(tagId));
+          return extra.length ? [...actuales, ...extra] : actuales;
+        };
+        setSelected((prev) => {
+          if (!prev || prev.id !== id) return prev;
+          const tagIds = sumar(prev.tagIds ?? []);
+          return tagIds === prev.tagIds ? prev : { ...prev, tagIds };
+        });
+        setConversations((prev) =>
+          prev.map((item) => {
+            if (item.id !== id) return item;
+            const tagIds = sumar(item.tagIds ?? []);
+            return tagIds === item.tagIds ? item : { ...item, tagIds };
+          }),
+        );
+      })
+      .catch(() => {
+        if (cancel) return;
+        setHistorialTurnos({
+          conversationId: id,
+          turnos: [],
+          ultimosProfesionales: [],
+          aviso: "No se pudo cargar el historial.",
+          loading: false,
+        });
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [selectedId, historialTick]);
   const [buscaTurnoMounted, setBuscaTurnoMounted] = useState(false);
+  const [catalogoBusca, setCatalogoBusca] = useState<{
+    profesionales?: { doc?: string; nombre?: string; enabled?: boolean }[];
+    prestaciones?: Record<
+      string,
+      {
+        nombre?: string;
+        enabled?: boolean;
+        profesionales?: { doc?: string; nombre?: string }[];
+      }
+    >;
+  } | null>(null);
+  const [prestacionElegida, setPrestacionElegida] = useState<Record<string, string>>({});
+  const [fichaAbierta, setFichaAbierta] = useState({
+    escribe: false,
+    paciente: true,
+    diagnostico: true,
+    profesionales: true,
+  });
+  useEffect(() => {
+    let cancel = false;
+    void fetchBuscaTurnoConfig()
+      .then((cfg) => {
+        if (!cancel && cfg) setCatalogoBusca(cfg);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, []);
   const [buscaPedidoSeed, setBuscaPedidoSeed] = useState<{
     key: string;
     prestacionCodigo?: string;
@@ -1035,6 +1274,7 @@ export function WhatsAppConversationsPanel({
     profesionalDoc?: string;
     profesionalNombre?: string;
     modalidad?: "" | "presencial" | "virtual" | "indistinto";
+    preferencia?: PreferenciaTurnos | null;
     paciente?: {
       dni?: string;
       fechaNacimiento?: string;
@@ -1085,7 +1325,9 @@ export function WhatsAppConversationsPanel({
   } | null>(null);
   const [aclaraciones, setAclaraciones] = useState<Record<string, string>>({});
   const [notaSaving, setNotaSaving] = useState(false);
-  const [pruebaTab, setPruebaTab] = useState<"paciente" | "modulo" | "intenciones" | "resultado">("paciente");
+  const [pruebaTab, setPruebaTab] = useState<
+    "paciente" | "historial" | "modulo" | "intenciones" | "resultado"
+  >("paciente");
   const pruebaTabsRef = useRef<HTMLDivElement | null>(null);
   const [tabsPueden, setTabsPueden] = useState({ izq: false, der: false });
   const medirTabs = useCallback(() => {
@@ -1105,8 +1347,6 @@ export function WhatsAppConversationsPanel({
     window.addEventListener("resize", medirTabs);
     return () => window.removeEventListener("resize", medirTabs);
   }, [medirTabs, pruebaTab, selectedId, pruebaMode]);
-  const tagWatch = useRef<{ id: string; tags: string[] }>({ id: "", tags: [] });
-  const [freshTagIds, setFreshTagIds] = useState<string[]>([]);
   const [uso, setUso] = useState<WaLlmUsage[]>([]);
   const [takeOverOpen, setTakeOverOpen] = useState(false);
   const [pendingAssignee, setPendingAssignee] = useState<string | null>(null);
@@ -1474,15 +1714,6 @@ export function WhatsAppConversationsPanel({
   }, [datoMenu]);
 
   useEffect(() => {
-    const current = selected?.tagIds ?? [];
-    const sameChat = tagWatch.current.id === (selected?.id ?? "");
-    const added = sameChat ? current.filter((id) => !tagWatch.current.tags.includes(id)) : [];
-    if (!sameChat) setFreshTagIds([]);
-    else if (added.length) setFreshTagIds(added);
-    tagWatch.current = { id: selected?.id ?? "", tags: [...current] };
-  }, [selected?.id, selected?.tagIds]);
-
-  useEffect(() => {
     if (!pruebaMode || !selectedId) {
       setUso([]);
       return;
@@ -1761,7 +1992,6 @@ export function WhatsAppConversationsPanel({
   }, [pruebaMode, selected]);
 
   const accionesPendientes = useMemo((): AccionPendiente[] => {
-    if (pruebaMode) return [];
     const out: AccionPendiente[] = [];
     for (const m of messages) {
       if (m.isDeleted || m.direction !== "OUTBOUND") continue;
@@ -1779,23 +2009,26 @@ export function WhatsAppConversationsPanel({
           messageText: text,
         });
       } else if (esMensajeCancelacionTurno(text)) {
+        const combinado = [textoPrevioCancelacion(messages, messages.indexOf(m)), text]
+          .filter(Boolean)
+          .join("\n");
         out.push({
           id: m.id,
           kind: "cancelar_turno",
           createdAt: m.createdAt,
           title: "Eliminar turno",
           explanation:
-            "El paciente quiere cancelar un turno. Confirmá los datos y anulalo en Medexis.",
+            "El paciente pidió cancelar un turno. Confirmá los datos y anulalo en Medexis.",
           details: detallesCancelacionTurno(
-            text,
+            combinado,
             selected?.menuEstado?.dni?.trim() || selected?.contact?.dni || "",
           ),
-          messageText: text,
+          messageText: combinado,
         });
       }
     }
     return out;
-  }, [accionesHechas, messages, pruebaMode, selected?.contact, selected?.menuEstado]);
+  }, [accionesHechas, messages, selected?.contact, selected?.menuEstado]);
 
   useEffect(() => {
     setAccionesHechas({});
@@ -2110,11 +2343,6 @@ export function WhatsAppConversationsPanel({
 
   function tagColor(tag: { groupId: string }): string {
     return tagGroups.find((group) => group.id === tag.groupId)?.color ?? "#a61948";
-  }
-
-  function appliedTagColor(tag: WaTag): string {
-    const cluster = activeClusters.find((item) => item.tagIds.includes(tag.id));
-    return cluster?.color ?? tagColor(tag);
   }
 
   function tagGroupLabel(tag: { groupId: string }): string {
@@ -2857,28 +3085,69 @@ export function WhatsAppConversationsPanel({
       sexoRaw === "masculino" || sexoRaw === "femenino"
         ? (sexoRaw as "masculino" | "femenino")
         : "";
+    const tratamientoLibre = pick(
+      estado?.tratamiento,
+      delGlobo.tratamiento,
+      delGlobo.prestacion,
+    );
+    let prestacionCodigo = estado?.prestacionCodigo?.trim() || "";
+    let prestacionNombre = estado?.tratamientoCatalogo?.trim() || delGlobo.prestacion || "";
+    let profesionalDoc = estado?.profesionalDoc?.trim() || "";
+    let profesionalNombre = pick(
+      estado?.profesionalCatalogo,
+      estado?.profesional,
+      delGlobo.profesional,
+    );
+    const pidioProfesional = Boolean(profesionalDoc || profesionalNombre);
+    const modalidad = estado?.modalidad || delGlobo.modalidad || "";
+    const fechaNacimiento = pick(
+      estado?.fechaNacimiento,
+      contact?.fechaNacimiento,
+      delGlobo.fechaNacimiento,
+    );
+    const grupoEtario =
+      contact?.grupoEtario === "adulto" || contact?.grupoEtario === "infanto"
+        ? contact.grupoEtario
+        : "";
+    if (tratamientoLibre) {
+      try {
+        const match = await matchWaPrestacion({
+          texto: tratamientoLibre,
+          profesionalDoc: profesionalDoc || undefined,
+          profesionalNombre: profesionalNombre || undefined,
+          modalidad,
+          grupoEtario,
+          fechaNacimiento: fechaNacimiento || undefined,
+          dni: dni || undefined,
+          conversacionId: selectedId || undefined,
+        });
+        if (match) {
+          prestacionCodigo = match.codigo;
+          prestacionNombre = match.nombre;
+          if (!pidioProfesional && match.profesionalDoc) {
+            profesionalDoc = match.profesionalDoc;
+            profesionalNombre = match.profesionalNombre || profesionalNombre;
+          }
+        }
+      } catch {
+        /* el catálogo local de Busca Turno sigue intentando el match */
+      }
+    }
     setBuscaTurnoMounted(true);
     setVistaOperadora(true);
     setSidePanelPinned(true);
     setSidePanelOpen(true);
     setOperadoraTab("busca");
+    const preferencia = preferenciaPaciente(selectedId || "", profesionalNombre, prestacionNombre);
     setBuscaPedidoSeed({
       key: `${selectedId ?? ""}-${m.id}-${Date.now()}`,
-      prestacionCodigo: estado?.prestacionCodigo?.trim() || undefined,
-      prestacionNombre:
-        estado?.tratamientoCatalogo?.trim() || delGlobo.prestacion || undefined,
-      tratamiento:
-        estado?.tratamiento?.trim() ||
-        delGlobo.tratamiento ||
-        delGlobo.prestacion ||
-        undefined,
-      profesionalDoc: estado?.profesionalDoc?.trim() || undefined,
-      profesionalNombre:
-        estado?.profesionalCatalogo?.trim() ||
-        estado?.profesional?.trim() ||
-        delGlobo.profesional ||
-        undefined,
+      prestacionCodigo: prestacionCodigo || undefined,
+      prestacionNombre: prestacionNombre || undefined,
+      tratamiento: tratamientoLibre || undefined,
+      profesionalDoc: profesionalDoc || undefined,
+      profesionalNombre: profesionalNombre || undefined,
       modalidad: estado?.modalidad || delGlobo.modalidad || "",
+      preferencia,
       paciente: {
         dni: dni || undefined,
         fechaNacimiento:
@@ -2917,8 +3186,9 @@ export function WhatsAppConversationsPanel({
         /* ignore */
       }
     }
+    const idx = messages.findIndex((item) => item.id === m.id);
     const pedido = parseCancelacionBubble(
-      String(m.text ?? ""),
+      [textoPrevioCancelacion(messages, idx), String(m.text ?? "")].filter(Boolean).join("\n"),
       estado?.dni?.trim() || selected?.contact?.dni || "",
     );
     if (!pedido) {
@@ -3736,8 +4006,13 @@ export function WhatsAppConversationsPanel({
     const persona = (value: string | null | undefined) => formatNombrePersona(value ?? "");
     return (
       <>
-        <section>
-          <h3>Quien escribe</h3>
+        <FichaAcordeon
+          titulo="Quien escribe"
+          abierto={fichaAbierta.escribe}
+          onCambio={(abierto) =>
+            setFichaAbierta((prev) => (prev.escribe === abierto ? prev : { ...prev, escribe: abierto }))
+          }
+        >
           <dl>
             {(
               [
@@ -3753,9 +4028,14 @@ export function WhatsAppConversationsPanel({
               </div>
             ))}
           </dl>
-        </section>
-        <section>
-          <h3>Paciente</h3>
+        </FichaAcordeon>
+        <FichaAcordeon
+          titulo="Paciente"
+          abierto={fichaAbierta.paciente}
+          onCambio={(abierto) =>
+            setFichaAbierta((prev) => (prev.paciente === abierto ? prev : { ...prev, paciente: abierto }))
+          }
+        >
           <dl>
             {(
               [
@@ -3791,7 +4071,7 @@ export function WhatsAppConversationsPanel({
                 // Email sin Title Case.
                 ["Email", conv.contact?.email],
                 [
-                  "Fecha de nacimiento",
+                  "Nacimiento",
                   conv.contact?.fechaNacimiento
                     ? formatFechaYmd(conv.contact.fechaNacimiento) || conv.contact.fechaNacimiento
                     : "",
@@ -3804,10 +4084,17 @@ export function WhatsAppConversationsPanel({
               </div>
             ))}
           </dl>
-        </section>
-        <section className="wa-side-panel__diagnostico">
-          <h3>Diagnóstico presuntivo</h3>
-          <dl>
+        </FichaAcordeon>
+        <FichaAcordeon
+          titulo="Diagnóstico"
+          abierto={fichaAbierta.diagnostico}
+          onCambio={(abierto) =>
+            setFichaAbierta((prev) =>
+              prev.diagnostico === abierto ? prev : { ...prev, diagnostico: abierto },
+            )
+          }
+        >
+          <dl className="wa-side-panel__diagnostico">
             <div>
               <dt>Motivo</dt>
               <dd
@@ -3840,8 +4127,9 @@ export function WhatsAppConversationsPanel({
               </dd>
             </div>
             <div className="wa-side-panel__dx-equipo-row">
-              <dt>Equipo</dt>
-              <dd className="wa-side-panel__dx-equipo">
+              <div className="wa-side-panel__dx-equipo-line">
+                <dt>Equipo</dt>
+                <div className="wa-side-panel__dx-equipo-field">
                 <input
                   id={`wa-dx-${conv.id}`}
                   key={`wa-dx-${conv.id}-${conv.diagnosticoHumano ?? ""}-${conv.diagnosticoHumanoAt ?? ""}`}
@@ -3882,42 +4170,97 @@ export function WhatsAppConversationsPanel({
                     }
                   }}
                 />
+                {conv.diagnosticoHumano?.trim() ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm wa-side-panel__dx-quitar"
+                    disabled={diagnosticoSaving || !selectedId || selectedId !== conv.id}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void guardarDiagnosticoHumano("")}
+                  >
+                    Quitar
+                  </button>
+                ) : null}
+                </div>
+              </div>
                 <datalist id={`wa-dx-list-${conv.id}`}>
                   {diagnosticoOpciones.map((nombre) => (
                     <option key={nombre} value={nombre} />
                   ))}
                 </datalist>
                 {conv.diagnosticoHumanoByName?.trim() ? (
-                  <small className="wa-side-panel__dx-meta">
+                  <small className="wa-side-panel__dx-equipo-meta">
                     {persona(conv.diagnosticoHumanoByName)}
                     {conv.diagnosticoHumanoAt
                       ? ` · ${formatFechaHora(conv.diagnosticoHumanoAt)}`
                       : ""}
                   </small>
                 ) : null}
-              </dd>
             </div>
           </dl>
-        </section>
-        <section>
-          <h3>Etiquetas</h3>
-          {assignedTags.length ? (
-            <div className="wa-prueba-tags">
-              {assignedTags.map((tag) => (
-                <span
-                  key={tag.id}
-                  className={`wa-tag${freshTagIds.includes(tag.id) ? " is-new" : ""}`}
-                  style={{ "--tag": appliedTagColor(tag) } as CSSProperties}
-                  title={tagGroupLabel(tag)}
-                >
-                  {tag.name}
-                </span>
-              ))}
+        </FichaAcordeon>
+        <FichaAcordeon
+          titulo="Profesionales"
+          abierto={fichaAbierta.profesionales}
+          onCambio={(abierto) =>
+            setFichaAbierta((prev) =>
+              prev.profesionales === abierto ? prev : { ...prev, profesionales: abierto },
+            )
+          }
+        >
+          <div className="wa-prof-prev">
+          {historialTurnos?.conversationId === conv.id && historialTurnos.loading ? (
+            <p>Buscando turnos…</p>
+          ) : fichaProfesionales(conv).length ? (
+            <div className="wa-prof-prev__list">
+              {fichaProfesionales(conv).map((prof) => {
+                const clave = `${conv.id}:${prof.clave}`;
+                const elegida =
+                  prestacionElegida[clave] ||
+                  prof.opciones.find((item) => item.habitual)?.nombre ||
+                  prof.opciones[0]?.nombre ||
+                  "";
+                const horario = prof.opciones.find((item) => item.nombre === elegida)?.preferencia?.texto;
+                return (
+                  <article key={prof.clave} className="wa-prof-card">
+                    <div className="wa-prof-card__head">
+                      <strong>{prof.nombre}</strong>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => abrirBuscaDesdeProfesional(conv, prof, elegida)}
+                      >
+                        Buscar turno
+                      </button>
+                    </div>
+                    {prof.opciones.length ? (
+                      <div className="wa-prof-card__chips" role="listbox" aria-label="Prestaciones">
+                        {prof.opciones.map((item) => (
+                          <button
+                            key={item.nombre}
+                            type="button"
+                            className={`wa-prof-card__chip${elegida === item.nombre ? " is-on" : ""}`}
+                            onClick={() =>
+                              setPrestacionElegida((prev) => ({ ...prev, [clave]: item.nombre }))
+                            }
+                          >
+                            {item.nombre}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="wa-prof-card__hint">Sin prestación cargada.</p>
+                    )}
+                    {horario ? <p className="wa-prof-card__pref">{horario}</p> : null}
+                  </article>
+                );
+              })}
             </div>
           ) : (
-            <p>Todavía ninguna.</p>
+            <p>Sin profesionales anteriores.</p>
           )}
-        </section>
+          </div>
+        </FichaAcordeon>
         {(conv.resumen ?? "").trim() ? (
           <section>
             <h3>Resumen</h3>
@@ -3925,6 +4268,299 @@ export function WhatsAppConversationsPanel({
           </section>
         ) : null}
       </>
+    );
+  }
+
+  function fichaProfesionales(conv: WaConversation): {
+    clave: string;
+    nombre: string;
+    doc: string;
+    opciones: { codigo: string; nombre: string; habitual: boolean; preferencia: PreferenciaTurnos | null }[];
+  }[] {
+    const grupos = new Map<string, { nombre: string; prestaciones: string[] }>();
+    const sumar = (profesional: string, prestacion: string) => {
+      const nombre = profesional.trim();
+      if (!nombre) return;
+      const clave = nombre.toLocaleLowerCase("es");
+      let grupo = grupos.get(clave);
+      if (!grupo) {
+        if (grupos.size >= 3) return;
+        grupo = { nombre, prestaciones: [] };
+        grupos.set(clave, grupo);
+      }
+      const trato = prestacion.trim();
+      if (
+        trato &&
+        !grupo.prestaciones.some((item) => item.toLocaleLowerCase("es") === trato.toLocaleLowerCase("es"))
+      ) {
+        grupo.prestaciones.push(trato);
+      }
+    };
+    if (historialTurnos?.conversationId === conv.id) {
+      for (const turno of historialTurnos.turnos) sumar(turno.profesional, turno.prestacion);
+      for (const nombre of historialTurnos.ultimosProfesionales) sumar(nombre, "");
+    }
+    sumar(conv.menuEstado?.profesionalCatalogo || conv.menuEstado?.profesional || "", "");
+    const prestaciones = catalogoBusca?.prestaciones ?? {};
+    const profesionales = (catalogoBusca?.profesionales ?? []).filter((item) => item.enabled !== false);
+    return [...grupos.entries()].map(([clave, grupo]) => {
+      const doc = String(
+        profesionales
+          .map((item) => ({ item, pts: scoreNombreProf(grupo.nombre, item.nombre || "") }))
+          .filter((row) => row.pts >= 40)
+          .sort((a, b) => b.pts - a.pts)[0]?.item.doc || "",
+      );
+      const turnosConv = historialTurnos?.conversationId === conv.id ? historialTurnos.turnos : [];
+      const vistas = new Map<
+        string,
+        {
+          codigo: string;
+          nombre: string;
+          habitual: boolean;
+          turnos: { fecha: string; hora: string; estado: string }[];
+        }
+      >();
+      const matchCatalogo = (nombre: string) =>
+        Object.entries(prestaciones)
+          .map(([codigo, item]) => ({
+            codigo,
+            nombre: (item.nombre || "").trim(),
+            pts: scoreNombreProf(nombre, item.nombre || ""),
+          }))
+          .filter((row) => row.nombre && row.pts >= 60)
+          .sort((a, b) => b.pts - a.pts)[0];
+      grupo.prestaciones.forEach((nombre, index) => {
+        const match = matchCatalogo(nombre);
+        const label = match?.nombre || nombre;
+        const key = label.toLocaleLowerCase("es");
+        const propios = turnosConv.filter(
+          (turno) =>
+            normWa(turno.profesional) === normWa(grupo.nombre) && normWa(turno.prestacion) === normWa(nombre),
+        );
+        const prev = vistas.get(key);
+        vistas.set(key, {
+          codigo: prev?.codigo || match?.codigo || "",
+          nombre: label,
+          habitual: prev?.habitual || index === 0,
+          turnos: [...(prev?.turnos ?? []), ...propios],
+        });
+      });
+      return {
+        clave,
+        nombre: grupo.nombre,
+        doc,
+        opciones: [...vistas.values()].map((item) => ({
+          codigo: item.codigo,
+          nombre: item.nombre,
+          habitual: item.habitual,
+          preferencia: preferenciaDeTurnos(item.turnos),
+        })),
+      };
+    });
+  }
+
+  function turnosDelProfesional(convId: string, profesional: string) {
+    const turnos = historialTurnos?.conversationId === convId ? historialTurnos.turnos : [];
+    const clave = normWa(profesional);
+    if (!clave) return [];
+    return turnos.filter((turno) => normWa(turno.profesional) === clave);
+  }
+
+  function preferenciaPaciente(
+    convId: string,
+    profesional: string,
+    prestacion: string,
+  ): PreferenciaTurnos | null {
+    if (!prestacion.trim()) return null;
+    return preferenciaDeTurnos(
+      turnosDelProfesional(convId, profesional).filter((turno) =>
+        mismaPrestacion(turno.prestacion, prestacion),
+      ),
+    );
+  }
+
+  function abrirBuscaDesdeProfesional(
+    conv: WaConversation,
+    prof: {
+      clave: string;
+      nombre: string;
+      doc: string;
+      opciones: { codigo: string; nombre: string; preferencia: PreferenciaTurnos | null }[];
+    },
+    prestacionNombre: string,
+  ) {
+    const opcion = prof.opciones.find((item) => item.nombre === prestacionNombre) || prof.opciones[0];
+    const sexo =
+      conv.contact?.sexo === "masculino" || conv.contact?.sexo === "femenino" ? conv.contact.sexo : "";
+    setBuscaTurnoMounted(true);
+    setVistaOperadora(true);
+    setSidePanelPinned(true);
+    setSidePanelOpen(true);
+    setOperadoraTab("busca");
+    setBuscaPedidoSeed({
+      key: `prof-${conv.id}-${prof.clave}-${opcion?.codigo || prestacionNombre}-${Date.now()}`,
+      profesionalDoc: prof.doc || undefined,
+      profesionalNombre: prof.nombre,
+      prestacionCodigo: opcion?.codigo || undefined,
+      prestacionNombre: opcion?.nombre || prestacionNombre || undefined,
+      tratamiento: opcion?.nombre || prestacionNombre || undefined,
+      preferencia: opcion?.preferencia ?? preferenciaPaciente(conv.id, prof.nombre, opcion?.nombre || prestacionNombre),
+      paciente: {
+        dni: conv.contact?.dni || conv.menuEstado?.dni || undefined,
+        fechaNacimiento: conv.contact?.fechaNacimiento || conv.menuEstado?.fechaNacimiento || undefined,
+        nombre: conv.contact?.firstName || conv.menuEstado?.nombre || undefined,
+        apellido: conv.contact?.lastName || conv.menuEstado?.apellido || undefined,
+        email: conv.contact?.email || conv.menuEstado?.email || undefined,
+        telefono: conv.contact?.phoneNumber || conv.menuEstado?.telefono || undefined,
+        sexo,
+      },
+    });
+  }
+
+  function esTurnoFuturo(fecha: string, hora: string): boolean {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const valor = (tipo: Intl.DateTimeFormatPartTypes) =>
+      parts.find((parte) => parte.type === tipo)?.value ?? "";
+    const horaAhora = valor("hour") === "24" ? "00" : valor("hour");
+    const ahora = `${valor("year")}-${valor("month")}-${valor("day")} ${horaAhora}:${valor("minute")}`;
+    return `${fecha} ${hora.slice(0, 5)}` >= ahora;
+  }
+
+  function estadoVisible(turno: WaTurnoFicha): string {
+    const estado = turno.estado?.trim() || "Sin dato";
+    if (esTurnoFuturo(turno.fecha, turno.hora) && /presente|ausente/i.test(estado)) return "Asignado";
+    return estado;
+  }
+
+  function pedirCancelarDesdeHistorial(turno: WaTurnoFicha) {
+    const dni = String(selected?.contact?.dni || selected?.menuEstado?.dni || "").replace(/\D/g, "");
+    if (dni.length < 7) {
+      toast.error("Falta el DNI del paciente para anular el turno");
+      return;
+    }
+    setCancelTurnoPendiente({
+      dni,
+      profesional: turno.profesional,
+      prestacion: turno.prestacion,
+      fechaHora: `${turno.fecha} ${turno.hora.slice(0, 5)}`,
+      resumen: `${formatFechaConDia(turno.fecha) || turno.fecha} ${turno.hora} · ${turno.profesional} · ${turno.prestacion}`,
+    });
+  }
+
+  function renderHistorialTurnos(convId: string) {
+    const data = historialTurnos?.conversationId === convId ? historialTurnos : null;
+    if (!data || data.loading) {
+      return <p className="wa-inbox__empty">Buscando turnos…</p>;
+    }
+    if (!data.turnos.length) {
+      return <p className="wa-inbox__empty">{data.aviso || "Sin turnos para mostrar."}</p>;
+    }
+    const consulta = normWa(historialBusqueda);
+    const turnos = consulta
+      ? data.turnos.filter(
+          (turno) =>
+            normWa(turno.profesional).includes(consulta) || normWa(turno.prestacion).includes(consulta),
+        )
+      : data.turnos;
+    return (
+      <div className="wa-historial">
+        <div className="table-search wa-historial__buscar">
+          <span className="table-search__icon" aria-hidden>
+            <IconSearch size={16} />
+          </span>
+          <input
+            value={historialBusqueda}
+            onChange={(event) => setHistorialBusqueda(event.target.value)}
+            placeholder="Buscar"
+            aria-label="Buscar por profesional o prestación"
+            autoComplete="off"
+          />
+        </div>
+        {turnos.length ? (
+          <>
+            {(["Próximos", "Anteriores"] as const).map((titulo) => {
+              const futuros = titulo === "Próximos";
+              const lista = turnos
+                .filter((turno) => esTurnoFuturo(turno.fecha, turno.hora) === futuros)
+                .sort((a, b) =>
+                  futuros
+                    ? `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`)
+                    : `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`),
+                );
+              return (
+                <details
+                  key={titulo}
+                  className="wa-historial__fold"
+                  open={futuros ? historialGrupos.proximos : historialGrupos.anteriores}
+                  onToggle={(event) => {
+                    const abierto = event.currentTarget.open;
+                    const clave = futuros ? "proximos" : "anteriores";
+                    setHistorialGrupos((prev) =>
+                      prev[clave] === abierto ? prev : { ...prev, [clave]: abierto },
+                    );
+                  }}
+                >
+                  <summary>{titulo}</summary>
+                  {lista.length ? (
+                    <ul className="wa-historial-cards">
+                      {lista.map((turno, index) => {
+                        const estado = estadoVisible(turno);
+                        const cancelable =
+                          futuros && !/cancel|anul/i.test(normWa(estado));
+                        return (
+                          <li
+                            key={`${turno.fecha}-${turno.hora}-${turno.prestacion}-${index}`}
+                            className="wa-historial-card"
+                          >
+                            <div className="wa-historial-card__top">
+                              <strong>{formatFechaConDia(turno.fecha) || turno.fecha}</strong>
+                              <span>{turno.hora}</span>
+                              <span className={`wa-historial-card__estado ${claseEstadoTurno(estado)}`}>
+                                {estado}
+                              </span>
+                            </div>
+                            <p>
+                              <span className="wa-historial-card__label">Profesional</span>
+                              <span>{turno.profesional || "Sin dato"}</span>
+                            </p>
+                            <p>
+                              <span className="wa-historial-card__label">Prestación</span>
+                              <span>{turno.prestacion || "Sin dato"}</span>
+                            </p>
+                            {cancelable ? (
+                              <button
+                                type="button"
+                                className="wa-historial-card__cancelar"
+                                onClick={() => pedirCancelarDesdeHistorial(turno)}
+                              >
+                                Cancelar turno
+                              </button>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="wa-historial__vacio">
+                      {futuros ? "Sin turnos próximos." : "Sin turnos anteriores."}
+                    </p>
+                  )}
+                </details>
+              );
+            })}
+          </>
+        ) : (
+          <p className="wa-inbox__empty">Ningún turno coincide.</p>
+        )}
+      </div>
     );
   }
 
@@ -3945,6 +4581,7 @@ export function WhatsAppConversationsPanel({
             [
               ["paciente", "Paciente"],
               ["etiquetas", "Etiquetas"],
+              ["historial", "Historial"],
               ["busca", "Turnos"],
             ] as const
           ).map(([id, label]) => (
@@ -3993,6 +4630,19 @@ export function WhatsAppConversationsPanel({
               <p className="wa-inbox__empty">Elegí una conversación para ver la ficha.</p>
             ) : (
               renderPacienteFicha(selected)
+            )}
+          </div>
+          <div
+            className={`wa-side-panel__pane wa-side-panel__pane--historial${
+              operadoraTab === "historial" ? " is-active" : ""
+            }`}
+            role="tabpanel"
+            hidden={operadoraTab !== "historial"}
+          >
+            {!selected ? (
+              <p className="wa-inbox__empty">Elegí una conversación para ver el historial.</p>
+            ) : (
+              renderHistorialTurnos(selected.id)
             )}
           </div>
           <div
@@ -4351,7 +5001,6 @@ export function WhatsAppConversationsPanel({
                     className="wa-inbox__avatar"
                     disabled={!selected?.contactId}
                     aria-label="Ver ficha del contacto"
-                    title="Ver ficha del contacto"
                     onClick={() => {
                       setProfileOpen(true);
                       // Refrescar ficha (cobertura, dni, etc.) por si el bot la actualizó.
@@ -4381,14 +5030,23 @@ export function WhatsAppConversationsPanel({
                   onClick={() => {
                     if (!pruebaMode) setProfileOpen(true);
                   }}
-                  title={pruebaMode ? "Datos de la prueba" : "Ver ficha del contacto"}
                 >
                   <div className="wa-inbox__title-row">
                     <h2>{threadHeader.title}</h2>
+                    {pruebaMode ? null : (
+                      <span className="wa-inbox__name-tip" role="tooltip">
+                        Ver ficha del contacto
+                      </span>
+                    )}
                     {pruebaMode && selected?.pruebaCreadorNombre ? (
                       <span className="wa-prueba-creador">{selected.pruebaCreadorNombre}</span>
                     ) : null}
                   </div>
+                  {!pruebaMode &&
+                  threadHeader.phone &&
+                  threadHeader.phone !== threadHeader.title ? (
+                    <p className="wa-inbox__thread-phone">{threadHeader.phone}</p>
+                  ) : null}
                   {threadHeader.subtitle ? (
                     <p className="wa-inbox__thread-rel">{threadHeader.subtitle}</p>
                   ) : null}
@@ -4902,6 +5560,7 @@ export function WhatsAppConversationsPanel({
                   {(
                     [
                       ["paciente", "Paciente"],
+                      ["historial", "Historial"],
                       ["modulo", "Módulo"],
                       ["intenciones", "Intenciones"],
                       ["resultado", "Resultado"],
@@ -4936,8 +5595,11 @@ export function WhatsAppConversationsPanel({
                   <IconChevronRight size={16} />
                 </button>
               </div>
-              <div className="wa-prueba-panel__body">
+              <div
+                className={`wa-prueba-panel__body${pruebaTab === "historial" ? " is-historial" : ""}`}
+              >
               {pruebaTab === "paciente" ? renderPacienteFicha(selected) : null}
+              {pruebaTab === "historial" ? renderHistorialTurnos(selected.id) : null}
               {pruebaTab === "modulo" ? (
                 <section>
                     <h3>Modelos</h3>
@@ -5419,11 +6081,7 @@ export function WhatsAppConversationsPanel({
         contact={selected?.contact}
         phoneNumber={selected?.contact?.phoneNumber}
         fechaNacimientoPedido={selected?.menuEstado?.fechaNacimiento}
-        tagIds={selected?.tagIds ?? []}
-        tags={tags}
-        tagGroups={tagGroups}
         onClose={() => setProfileOpen(false)}
-        onToggleTag={toggleConversationTag}
         onContactSaved={(updated) => {
           setSelected((prev) =>
             prev && prev.contactId === updated.id
@@ -5695,13 +6353,14 @@ export function WhatsAppConversationsPanel({
 
       <ConfirmDialog
         open={cancelTurnoPendiente !== null}
-        title="Confirmar anulación"
+        title="Cancelar turno"
         message={
           cancelTurnoPendiente
-            ? `¿Anular este turno en Medexis? ${cancelTurnoPendiente.resumen}`
+            ? `¿Cancelar este turno? ${cancelTurnoPendiente.resumen}`
             : ""
         }
-        confirmLabel={cancelTurnoBusy ? "Anulando…" : "Sí, anular"}
+        confirmTone="primary"
+        confirmLabel={cancelTurnoBusy ? "Cancelando…" : "Cancelar turno"}
         cancelLabel="Volver"
         onCancel={() => {
           if (!cancelTurnoBusy) setCancelTurnoPendiente(null);
@@ -5718,6 +6377,7 @@ export function WhatsAppConversationsPanel({
               }
               setCancelTurnoPendiente(null);
               setAccionesOpen(false);
+              setHistorialTick((tick) => tick + 1);
             } catch (error) {
               toast.error(error instanceof Error ? error.message : "No se pudo anular el turno");
             } finally {

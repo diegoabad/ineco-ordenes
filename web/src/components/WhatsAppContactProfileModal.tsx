@@ -1,20 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatFechaHora } from "../lib/fechas";
 import { subscribeInicioItemsChanged } from "../lib/inicioEvents";
 import { fetchInicioItems } from "../services/dataService";
 import type { InicioItem } from "../types";
-import type { WaContact, WaTag, WaTagGroup } from "../types/whatsappCrm";
+import type { WaContact } from "../types/whatsappCrm";
 import { waContactLabel, waContactThreadHeader } from "../types/whatsappCrm";
 import { Modal } from "./Modal";
 import type { WaFollowUpKind } from "./WhatsAppContactFollowUpModal";
 import { WhatsAppContactDatosForm } from "./WhatsAppContactDatosForm";
 
-export type WaProfileTab =
-  | "datos"
-  | "tareas"
-  | "recordatorios"
-  | "notas"
-  | "etiquetas";
+export type WaProfileTab = "datos" | "tareas" | "recordatorios" | "notas";
 
 type Props = {
   open: boolean;
@@ -22,12 +17,8 @@ type Props = {
   phoneNumber?: string | null;
   /** Fecha del pedido de turno (menuEstado) si la ficha aún no la tiene. */
   fechaNacimientoPedido?: string | null;
-  tagIds: string[];
-  tags: WaTag[];
-  tagGroups: WaTagGroup[];
   initialTab?: WaProfileTab;
   onClose: () => void;
-  onToggleTag?: (tagId: string) => void;
   onCreate?: (kind: WaFollowUpKind) => void;
   onContactSaved?: (contact: WaContact) => void;
 };
@@ -40,36 +31,21 @@ function isAgendado(contact?: WaContact | null): boolean {
   );
 }
 
-function tagColor(tag: WaTag, groups: WaTagGroup[]): string {
-  return groups.find((g) => g.id === tag.groupId)?.color || "#64748b";
-}
-
-function tagGroupName(tag: WaTag, groups: WaTagGroup[]): string {
-  return groups.find((g) => g.id === tag.groupId)?.name || "Sin grupo";
-}
-
 export function WhatsAppContactProfileModal({
   open,
   contact,
   phoneNumber,
   fechaNacimientoPedido,
-  tagIds,
-  tags,
-  tagGroups,
   initialTab = "datos",
   onClose,
-  onToggleTag,
   onCreate,
   onContactSaved,
 }: Props) {
   const [tab, setTab] = useState<WaProfileTab>(initialTab);
   const [items, setItems] = useState<InicioItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
-  const [tagQuery, setTagQuery] = useState("");
-  const [tagSuggestOpen, setTagSuggestOpen] = useState(false);
   const [datosSaving, setDatosSaving] = useState(false);
   const [datosCanSubmit, setDatosCanSubmit] = useState(false);
-  const tagSearchWrapRef = useRef<HTMLDivElement | null>(null);
 
   const contactId = contact?.id?.trim() || "";
   const header = waContactThreadHeader(contact);
@@ -98,21 +74,6 @@ export function WhatsAppContactProfileModal({
     [items],
   );
 
-  const currentTags = useMemo(
-    () => tags.filter((tag) => tagIds.includes(tag.id)),
-    [tags, tagIds],
-  );
-  const availableTags = useMemo(() => {
-    const q = tagQuery.trim().toLowerCase();
-    return tags
-      .filter((tag) => !tagIds.includes(tag.id))
-      .filter((tag) => {
-        if (!q) return true;
-        const group = tagGroupName(tag, tagGroups).toLowerCase();
-        return tag.name.toLowerCase().includes(q) || group.includes(q);
-      });
-  }, [tags, tagIds, tagQuery, tagGroups]);
-
   async function reloadItems() {
     if (!contactId) {
       setItems([]);
@@ -131,16 +92,8 @@ export function WhatsAppContactProfileModal({
 
   useEffect(() => {
     if (!open) return;
-    const allowed: WaProfileTab[] = [
-      "datos",
-      "tareas",
-      "recordatorios",
-      "notas",
-      "etiquetas",
-    ];
+    const allowed: WaProfileTab[] = ["datos", "tareas", "recordatorios", "notas"];
     setTab(allowed.includes(initialTab) ? initialTab : "datos");
-    setTagQuery("");
-    setTagSuggestOpen(false);
     void reloadItems();
   }, [open, contactId, initialTab]);
 
@@ -149,25 +102,8 @@ export function WhatsAppContactProfileModal({
     return subscribeInicioItemsChanged(() => void reloadItems());
   }, [open, contactId]);
 
-  useEffect(() => {
-    if (!tagSuggestOpen) return;
-    function onPointerDown(e: MouseEvent) {
-      if (!tagSearchWrapRef.current?.contains(e.target as Node)) {
-        setTagSuggestOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [tagSuggestOpen]);
-
   function requestCreate(kind: WaFollowUpKind) {
     onCreate?.(kind);
-  }
-
-  function addTag(tagId: string) {
-    onToggleTag?.(tagId);
-    setTagQuery("");
-    setTagSuggestOpen(true);
   }
 
   return (
@@ -224,7 +160,6 @@ export function WhatsAppContactProfileModal({
                 ["tareas", `Tareas${tareas.length ? ` (${tareas.length})` : ""}`],
                 ["recordatorios", `Recordatorios${recordatorios.length ? ` (${recordatorios.length})` : ""}`],
                 ["notas", `Notas${notas.length ? ` (${notas.length})` : ""}`],
-                ["etiquetas", `Etiquetas${currentTags.length ? ` (${currentTags.length})` : ""}`],
               ] as const
             ).map(([id, text]) => (
               <button
@@ -291,95 +226,6 @@ export function WhatsAppContactProfileModal({
                   formatFechaHora(item.actualizadoAt || item.creadoAt || "")
                 }
               />
-            ) : null}
-
-            {tab === "etiquetas" ? (
-              <div className="wa-profile__tags">
-                <section className="wa-profile__tags-block">
-                  <header className="wa-profile__tags-head">
-                    <h3>Agregar etiquetas</h3>
-                  </header>
-                  <div className="wa-profile__tag-search-wrap" ref={tagSearchWrapRef}>
-                    <input
-                      type="search"
-                      className="wa-profile__tag-search"
-                      value={tagQuery}
-                      onChange={(e) => {
-                        setTagQuery(e.target.value);
-                        setTagSuggestOpen(true);
-                      }}
-                      onFocus={() => setTagSuggestOpen(true)}
-                      placeholder="Buscar etiqueta…"
-                      aria-label="Buscar etiqueta"
-                      aria-expanded={tagSuggestOpen}
-                    />
-                    {tagSuggestOpen ? (
-                      <div className="wa-profile__tag-suggest" role="listbox" aria-label="Etiquetas sugeridas">
-                        {tags.length === 0 ? (
-                          <p className="wa-profile__tag-suggest-empty">
-                            No hay etiquetas creadas en el sistema.
-                          </p>
-                        ) : availableTags.length === 0 ? (
-                          <p className="wa-profile__tag-suggest-empty">
-                            {tagQuery.trim()
-                              ? "Ninguna coincide con la búsqueda."
-                              : "Ya tiene todas las etiquetas disponibles."}
-                          </p>
-                        ) : (
-                          availableTags.map((tag) => (
-                            <button
-                              key={tag.id}
-                              type="button"
-                              className="wa-profile__tag-suggest-item"
-                              role="option"
-                              onClick={() => addTag(tag.id)}
-                            >
-                              <span
-                                className="wa-profile__tag-dot"
-                                style={{ background: tagColor(tag, tagGroups) }}
-                                aria-hidden
-                              />
-                              <span className="wa-profile__tag-suggest-main">
-                                <span className="wa-profile__tag-suggest-name">{tag.name}</span>
-                                <span className="wa-profile__tag-suggest-group">
-                                  {tagGroupName(tag, tagGroups)}
-                                </span>
-                              </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                </section>
-
-                <section className="wa-profile__tags-block">
-                  <header className="wa-profile__tags-head">
-                    <h3>Etiquetas actuales</h3>
-                    <span className="wa-profile__tags-count">{currentTags.length}</span>
-                  </header>
-                  <div className="wa-profile__selected">
-                    {currentTags.length === 0 ? null : (
-                      <div className="wa-profile__tag-chips">
-                        {currentTags.map((tag) => (
-                          <button
-                            key={tag.id}
-                            type="button"
-                            className="wa-profile__tag is-active"
-                            style={{ "--tag-color": tagColor(tag, tagGroups) } as CSSProperties}
-                            title="Quitar etiqueta"
-                            onClick={() => onToggleTag?.(tag.id)}
-                          >
-                            <span className="wa-profile__tag-dot" aria-hidden />
-                            <span>{tag.name}</span>
-                            <span aria-hidden>×</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </div>
             ) : null}
           </div>
         </div>

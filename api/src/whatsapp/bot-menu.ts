@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   consultarPaciente,
   ejecutarAccion,
+  historialTurnosPaciente,
   pideAfirmacion,
   pideMasFechas,
   pideMasTemprano,
@@ -9,6 +10,7 @@ import {
   textoDeTurnosPropios,
 } from "./acciones.js";
 import { documentoDePersona } from "./estado-dialogo.js";
+import { nombreDiaSemana, nombreMes } from "../lib/fechaEs.js";
 import { sexoDesdeNombre } from "../lib/nombrePersona.js";
 import { getBuscaTurnoConfig } from "../services/db.service.js";
 import type { BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional } from "../types.js";
@@ -130,11 +132,11 @@ const MOTIVOS_CANCELACION = [
   "Otro motivo",
 ];
 
-/** Texto libre: la salida va en la misma frase, no como menú aparte. */
+/** Aviso de volver, siempre en un renglón aparte y con el mismo formato que los menús. */
 function conVolver(texto: string): string {
   const base = texto.trim();
-  if (/toc[aá] 0\b|0 para volver/i.test(base)) return base;
-  return `${base} O tocá 0 para volver atrás.`;
+  if (/toc[aá] 0\b|0 para volver|0\.\s*volver atrás|volver atrás/i.test(base)) return base;
+  return `${base}\n\n0. Volver atrás`;
 }
 
 function quiereVolver(texto: string): boolean {
@@ -322,41 +324,13 @@ function numerar(lineas: string[], separar = false): string {
   return unidos.join(separar ? "\n\n" : "\n");
 }
 
-/** Nombres fijos en español (sin depender de ICU/locales del servidor). */
-const DIAS_ES = [
-  "Domingo",
-  "Lunes",
-  "Martes",
-  "Miércoles",
-  "Jueves",
-  "Viernes",
-  "Sábado",
-] as const;
-const MESES_ES = [
-  "enero",
-  "febrero",
-  "marzo",
-  "abril",
-  "mayo",
-  "junio",
-  "julio",
-  "agosto",
-  "septiembre",
-  "octubre",
-  "noviembre",
-  "diciembre",
-] as const;
-
-/** Día de la semana en español para una fecha `YYYY-MM-DD` (mediodía AR). */
+/** Día de la semana en español para una fecha calendario (no usa el idioma del servidor). */
 function diaSemanaEs(y: string, mes: string, dia: string): string {
-  const cuando = new Date(`${y}-${mes}-${dia}T12:00:00-03:00`);
-  if (Number.isNaN(cuando.getTime())) return "";
-  return DIAS_ES[cuando.getUTCDay()] ?? "";
+  return nombreDiaSemana(Number(y), Number(mes), Number(dia));
 }
 
 function mesNombreEs(mes: string): string {
-  const i = Number(mes) - 1;
-  return MESES_ES[i] ?? "";
+  return nombreMes(Number(mes));
 }
 
 /** Horarios agrupados por día, con número para elegir. */
@@ -437,7 +411,7 @@ function listaMenu(modo: "inicio" | "otraVez" = "otraVez"): string {
   const lineas = OPCIONES.map((item) => `${item.n}. ${item.titulo}`);
   const titulo =
     modo === "inicio" ? "¿Con qué te puedo ayudar?" : "¿Necesitás ayuda con algo más?";
-  return `${titulo}\n\n${lineas.join("\n")}\n\n0. Volver atrás (terminar conversación)`;
+  return `${titulo}\n\n${lineas.join("\n")}\n\n0. Por ahora nada más`;
 }
 
 function listaTurnos(): string {
@@ -1152,6 +1126,8 @@ function scoreMatchTexto(consulta: string, candidato: string): number {
   // «consulta psiquiatrica» → preferir CONSULTA … y no «PRIMERA CONSULTA …».
   if (/^consulta\b/.test(c) && /^consulta\b/.test(n)) puntos += 4;
   if (/\bprimera\b/.test(n) && !/\bprimera\b/.test(c)) puntos -= 4;
+  if (/\binfant/.test(n) && !/\binfant/.test(c)) puntos -= 20;
+  if (/\bonline\b|\bvirtual\b/.test(n) && !/\bonline\b|\bvirtual\b/.test(c)) puntos -= 16;
   // «- INECO» = presencial canónico; domicilio / 30' / programas solo si lo pidieron.
   if (/\bineco\b/.test(n) && !/\bonline\b|\bvirtual\b|\bdomicilio\b/.test(n)) puntos += 8;
   if (/\bdomicilio\b/.test(n) && !/\bdomicilio\b/.test(c)) puntos -= 8;
@@ -1317,6 +1293,350 @@ function mejorPrestacionCatalogo(
   return { codigo: mejor.codigo, prestacion: mejor.prestacion };
 }
 
+type RankingPrestacion = {
+  codigo: string;
+  prestacion: BuscaTurnoPrestacion;
+  puntos: number;
+};
+
+/** Mismo ranking que el match heurístico, sin el corte por empate. */
+function rankingPrestaciones(
+  config: BuscaTurnoConfig,
+  dicho: string,
+  opts: PrestacionMatchOpts | string = {},
+): RankingPrestacion[] {
+  const opciones: PrestacionMatchOpts =
+    typeof opts === "string" ? { profesionalDoc: opts } : opts ?? {};
+  const texto = dicho.trim();
+  if (!texto) return [];
+  const todas = Object.entries(config.prestaciones).filter(([, item]) => item.enabled !== false);
+  let candidatos = opciones.profesionalDoc
+    ? todas.filter(([, item]) =>
+        (item.profesionales ?? []).some((p) => String(p.doc) === String(opciones.profesionalDoc)),
+      )
+    : todas;
+  if (!candidatos.length) return [];
+
+  const modalidadPedida = opciones.modalidad || "";
+  const grupoPedido = opciones.grupoEtario || "";
+  if (modalidadPedida === "presencial" || modalidadPedida === "virtual") {
+    const filtrados = candidatos.filter(
+      ([, item]) => modalidadDePrestacionNombre(item.nombre || "") === modalidadPedida,
+    );
+    if (filtrados.length) candidatos = filtrados;
+  }
+  if (grupoPedido === "adulto" || grupoPedido === "infanto") {
+    const filtrados = candidatos.filter(([, item]) => {
+      const e = etarioDePrestacionNombre(item.nombre || "");
+      return !e || e === grupoPedido;
+    });
+    if (filtrados.length) candidatos = filtrados;
+  }
+
+  return candidatos
+    .map(([codigo, prestacion]) => ({
+      codigo,
+      prestacion,
+      puntos: Math.max(
+        scoreMatchTexto(texto, prestacion.nombre || ""),
+        scoreMatchTexto(texto, codigo),
+      ),
+    }))
+    .filter((row) => row.puntos >= 4)
+    .sort((a, b) => b.puntos - a.puntos);
+}
+
+function nombrePrestacionIgual(a: string, b: string): boolean {
+  const na = sinTildes(a).replace(/\s+/g, " ").trim();
+  const nb = sinTildes(b).replace(/\s+/g, " ").trim();
+  return Boolean(na && nb && na === nb);
+}
+
+async function elegirPrestacionConIa(
+  texto: string,
+  modalidad: string,
+  grupoEtario: string,
+  ranking: RankingPrestacion[],
+  conversacionId: string,
+  historial = "",
+): Promise<RankingPrestacion | null> {
+  const lista = ranking.slice(0, 12);
+  if (!lista.length) return null;
+  const nombres = lista.map((row) => row.prestacion.nombre?.trim() || row.codigo);
+  try {
+    const ia = await completeStructured<{ nombre: string }>({
+      conversacionId: conversacionId || "match-prestacion",
+      paso: "detectar",
+      modelo: MODELO_PEDIDO_DATOS,
+      reasoningEffort: "low",
+      skipUsage: !conversacionId || isLocalPruebaId(conversacionId),
+      schemaName: "prestacion_catalogo",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["nombre"],
+        properties: { nombre: { type: "string" } },
+      },
+      instructions: [
+        "Elegí la prestación del catálogo de INECO que corresponde al texto libre del paciente.",
+        "Copiá el nombre EXACTO de una opción de la lista. Si ninguna corresponde, devolvé nombre vacío.",
+        "No inventes prestaciones ni mezcles nombres.",
+        historial
+          ? "Si no dijo online, virtual, primera vez, infantil, domicilio ni una duración, y el historial muestra una prestación compatible que ya usa, preferí esa. Si pidió otra cosa, respetá el texto y no el historial."
+          : "Si el paciente no dijo online, virtual, primera vez, infantil, infantojuvenil, domicilio ni una duración, elegí la consulta presencial estándar (la que dice INECO, sin online, sin primera y sin infantil).",
+        historial ? `Historial de turnos de los últimos 6 meses. No obliga a repetir tratamiento ni profesional:\n${historial}` : "",
+        modalidad ? `Modalidad pedida: ${modalidad}.` : "No indicó modalidad: preferí presencial.",
+        grupoEtario === "adulto"
+          ? "Es un paciente adulto: no elijas prestaciones infantiles."
+          : grupoEtario === "infanto"
+            ? "Es un paciente infantojuvenil: preferí la prestación infantil si está en la lista."
+            : "No indicó si es adulto o infantil: si no lo dijo, no elijas la infantil.",
+        `Opciones:\n${nombres.map((nombre, i) => `${i + 1}. ${nombre}`).join("\n")}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      content: historial ? `Pedido: ${texto}\n\n${historial}` : texto,
+    });
+    const elegido = ia.nombre?.trim() || "";
+    if (!elegido) return null;
+    return (
+      lista.find((row) => nombrePrestacionIgual(row.prestacion.nombre || "", elegido)) ||
+      lista.find((row) => row.codigo === elegido) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Match de prestación para Busca Turno.
+ * Primero el heurístico; si hay empate, o el historial de 6 meses muestra otra prestación compatible, la IA elige.
+ * El historial no pisa un pedido distinto: si pide otro tratamiento o con otro profesional, se respeta.
+ */
+export async function resolverPrestacionParaBusca(input: {
+  texto: string;
+  profesionalDoc?: string;
+  profesionalNombre?: string;
+  modalidad?: MenuEstado["modalidad"] | "";
+  grupoEtario?: "" | "infanto" | "adulto";
+  fechaNacimiento?: string;
+  dni?: string;
+  conversacionId?: string;
+}): Promise<{
+  codigo: string;
+  nombre: string;
+  profesionalDoc?: string;
+  profesionalNombre?: string;
+} | null> {
+  const texto = input.texto.trim();
+  if (!texto) return null;
+  const config = await getBuscaTurnoConfig();
+  if (!config) return null;
+
+  let doc = String(input.profesionalDoc ?? "").trim();
+  if (!doc && input.profesionalNombre?.trim()) {
+    doc = String(mejorProfesionalCatalogo(config, input.profesionalNombre)?.doc ?? "").trim();
+  }
+  const modalidad = input.modalidad || "";
+  const grupoEtario =
+    input.grupoEtario || grupoEtarioDeFecha(String(input.fechaNacimiento ?? "")) || "";
+  const opts: PrestacionMatchOpts = {
+    profesionalDoc: doc || undefined,
+    modalidad: modalidad || undefined,
+    grupoEtario: grupoEtario || undefined,
+  };
+
+  const conversacionId = input.conversacionId?.trim() || "";
+  const dni = String(input.dni ?? "").replace(/\D/g, "");
+  const historial = dni ? await historialTurnosPaciente(dni, config) : [];
+  const pidioProfesional = Boolean(
+    String(input.profesionalDoc ?? "").trim() || String(input.profesionalNombre ?? "").trim(),
+  );
+  const pedido = sinTildes(texto);
+  const ruido = new Set(["consulta", "consultas", "turno", "turnos", "ineco", "doctor", "doctora"]);
+  const motivos = tokensMatch(texto).filter((token) => !ruido.has(token));
+  const aceptable = (row: RankingPrestacion) => {
+    const nombre = sinTildes(row.prestacion.nombre || "");
+    const propios = tokensMatch(row.prestacion.nombre || "");
+    if (
+      motivos.length &&
+      !motivos.every((token) => propios.some((propio) => tokensParecidos(token, propio)))
+    ) {
+      return false;
+    }
+    if (/\binfant/.test(nombre) && !/\binfant/.test(pedido)) return false;
+    if (/\bprimera\b/.test(nombre) && !/\bprimera\b/.test(pedido)) return false;
+    if (/\bonline\b|\bvirtual\b/.test(nombre) && !/\bonline\b|\bvirtual\b/.test(pedido)) return false;
+    if (/\bdomicilio\b/.test(nombre) && !/\bdomicilio\b/.test(pedido)) return false;
+    const duracion = pedido.match(/\b(30|45|60)\b/);
+    if (duracion && !new RegExp(`\\b${duracion[1]}\\b`).test(nombre)) return false;
+    if (/\binfant/.test(pedido) && !/\binfant/.test(nombre)) return false;
+    if ((/\bonline\b|\bvirtual\b/.test(pedido)) && !(/\bonline\b|\bvirtual\b/.test(nombre))) return false;
+    if (/\bdomicilio\b/.test(pedido) && !/\bdomicilio\b/.test(nombre)) return false;
+    if (/\bprimera\b/.test(pedido) && !/\bprimera\b/.test(nombre)) return false;
+    return true;
+  };
+  const mismoCodigo = (a: string, b: string) => {
+    const na = a.replace(/^0+/, "") || a;
+    const nb = b.replace(/^0+/, "") || b;
+    return Boolean(na && nb && na === nb);
+  };
+  const entradaPrestacion = (codigo: string, nombre = "") => {
+    const key = codigo.trim();
+    const sin = key.replace(/^0+/, "") || key;
+    const porCodigo = key
+      ? config.prestaciones[key] ||
+        (sin !== key ? config.prestaciones[sin] : undefined) ||
+        Object.entries(config.prestaciones).find(([k]) => (k.replace(/^0+/, "") || k) === sin)?.[1]
+      : undefined;
+    if (porCodigo && porCodigo.enabled !== false) {
+      const codigoCatalogo =
+        Object.entries(config.prestaciones).find(([, item]) => item === porCodigo)?.[0] || key;
+      return { codigo: codigoCatalogo, prestacion: porCodigo };
+    }
+    if (!nombre.trim()) return null;
+    const porNombre = Object.entries(config.prestaciones).find(
+      ([, item]) => item.enabled !== false && nombrePrestacionIgual(item.nombre || "", nombre),
+    );
+    return porNombre ? { codigo: porNombre[0], prestacion: porNombre[1] } : null;
+  };
+
+  type Habito = {
+    codigo: string;
+    prestacion: BuscaTurnoPrestacion;
+    n: number;
+    ultima: string;
+  };
+  const habitos = new Map<string, Habito>();
+  for (const item of historial) {
+    const entrada = entradaPrestacion(item.prestacionCodigo, item.prestacion);
+    if (!entrada) continue;
+    if (!aceptable({ codigo: entrada.codigo, prestacion: entrada.prestacion, puntos: 0 })) continue;
+    const prev = habitos.get(entrada.codigo);
+    if (!prev) {
+      habitos.set(entrada.codigo, {
+        codigo: entrada.codigo,
+        prestacion: entrada.prestacion,
+        n: 1,
+        ultima: item.fecha,
+      });
+    } else {
+      prev.n += 1;
+      if (item.fecha > prev.ultima) prev.ultima = item.fecha;
+    }
+  }
+  const ordenHabitos = [...habitos.values()].sort(
+    (a, b) => b.n - a.n || b.ultima.localeCompare(a.ultima),
+  );
+  const dominante =
+    ordenHabitos[0] && (!ordenHabitos[1] || ordenHabitos[1].n < ordenHabitos[0].n)
+      ? ordenHabitos[0]
+      : null;
+  const historialTexto = (() => {
+    const grupos = new Map<string, { n: number; ultima: string; prestacion: string; profesional: string }>();
+    for (const item of historial) {
+      const clave = `${item.prestacion}|${item.profesional}`;
+      const prev = grupos.get(clave);
+      if (!prev) {
+        grupos.set(clave, {
+          n: 1,
+          ultima: item.fecha,
+          prestacion: item.prestacion,
+          profesional: item.profesional,
+        });
+      } else {
+        prev.n += 1;
+        if (item.fecha > prev.ultima) prev.ultima = item.fecha;
+      }
+    }
+    return [...grupos.values()]
+      .sort((a, b) => b.ultima.localeCompare(a.ultima) || b.n - a.n)
+      .slice(0, 8)
+      .map((grupo) => {
+        const [anio, mes, dia] = grupo.ultima.split("-");
+        const fecha = dia && mes && anio ? `${dia}/${mes}/${anio}` : grupo.ultima;
+        const quien = grupo.profesional ? ` con ${grupo.profesional}` : "";
+        return `- ${grupo.n} turno${grupo.n === 1 ? "" : "s"}, último ${fecha}: ${grupo.prestacion}${quien}`;
+      })
+      .join("\n");
+  })();
+  const profesionalHabitual = (codigo: string) => {
+    if (pidioProfesional) return null;
+    const cuentas = new Map<string, { n: number; nombre: string; ultima: string }>();
+    for (const item of historial) {
+      const entrada = entradaPrestacion(item.prestacionCodigo, item.prestacion);
+      if (!entrada || !mismoCodigo(entrada.codigo, codigo) || !item.profesionalDoc) continue;
+      const prev = cuentas.get(item.profesionalDoc);
+      if (!prev) {
+        cuentas.set(item.profesionalDoc, { n: 1, nombre: item.profesional, ultima: item.fecha });
+      } else {
+        prev.n += 1;
+        if (item.fecha > prev.ultima) {
+          prev.ultima = item.fecha;
+          if (item.profesional) prev.nombre = item.profesional;
+        }
+      }
+    }
+    const orden = [...cuentas.entries()].sort(
+      (a, b) => b[1].n - a[1].n || b[1].ultima.localeCompare(a[1].ultima),
+    );
+    if (!orden[0] || (orden[1] && orden[1][1].n === orden[0][1].n)) return null;
+    return { doc: orden[0][0], nombre: orden[0][1].nombre };
+  };
+  const armar = (codigo: string, nombre: string) => {
+    const habitual = profesionalHabitual(codigo);
+    return {
+      codigo,
+      nombre,
+      ...(habitual?.doc ? { profesionalDoc: habitual.doc, profesionalNombre: habitual.nombre || undefined } : {}),
+    };
+  };
+  const elegir = async (ranking: RankingPrestacion[]) => {
+    const lista = [...ranking];
+    if (dominante && !lista.some((row) => mismoCodigo(row.codigo, dominante.codigo))) {
+      lista.unshift({ codigo: dominante.codigo, prestacion: dominante.prestacion, puntos: 0 });
+    }
+    if (!lista.length) return null;
+    const ia = await elegirPrestacionConIa(
+      texto,
+      modalidad,
+      grupoEtario,
+      lista,
+      conversacionId,
+      historialTexto,
+    );
+    if (ia && aceptable(ia)) return ia;
+    // Un pedido claro no se reemplaza por el hábito si la IA no eligió. Una sola visita tampoco.
+    if (directoOk) {
+      return { codigo: directoOk.codigo, prestacion: directoOk.prestacion, puntos: 0 };
+    }
+    if (dominante && dominante.n >= 2) {
+      return { codigo: dominante.codigo, prestacion: dominante.prestacion, puntos: 0 };
+    }
+    return ranking.find(aceptable) ?? null;
+  };
+
+  const directo = mejorPrestacionCatalogo(config, texto, opts);
+  const directoOk =
+    directo && aceptable({ codigo: directo.codigo, prestacion: directo.prestacion, puntos: 0 })
+      ? directo
+      : null;
+  const habitoFuerte = dominante && dominante.n >= 2 ? dominante : null;
+  if (directoOk && (!habitoFuerte || mismoCodigo(directoOk.codigo, habitoFuerte.codigo))) {
+    return armar(directoOk.codigo, directoOk.prestacion.nombre?.trim() || directoOk.codigo);
+  }
+
+  let elegido = await elegir(rankingPrestaciones(config, texto, opts));
+  if (!elegido && doc) {
+    elegido = await elegir(
+      rankingPrestaciones(config, texto, { ...opts, profesionalDoc: undefined }),
+    );
+  }
+  if (!elegido) return null;
+  return armar(elegido.codigo, elegido.prestacion.nombre?.trim() || elegido.codigo);
+}
+
 function modalidadDePedido(texto: string): MenuEstado["modalidad"] {
   const t = sinTildes(texto);
   if (!t.trim()) return "";
@@ -1332,8 +1652,11 @@ function modalidadDePedido(texto: string): MenuEstado["modalidad"] {
   return "";
 }
 
-/** Match interno contra BuscaTurno (el paciente puede escribir libre; el equipo ve el catálogo). */
-async function matchearPedidoConCatalogo(estado: MenuEstado): Promise<void> {
+/** Match interno contra Busca Turno (el paciente puede escribir libre; el equipo ve el catálogo). */
+async function matchearPedidoConCatalogo(
+  estado: MenuEstado,
+  conversacionId = "",
+): Promise<void> {
   try {
     const config = await getBuscaTurnoConfig();
     if (!config) return;
@@ -1346,18 +1669,27 @@ async function matchearPedidoConCatalogo(estado: MenuEstado): Promise<void> {
       estado.profesionalCatalogo = prof.nombre;
       estado.profesionalDoc = String(prof.doc ?? "").trim();
     }
-    // Prestación: trámites del dr + modalidad + grupo etario (adulto ≠ infantil online).
-    const dichoPrest = estado.tratamiento.trim();
-    const prest = mejorPrestacionCatalogo(config, dichoPrest || estado.tratamientoCatalogo, {
-      profesionalDoc: prof?.doc,
-      modalidad: estado.modalidad,
-      grupoEtario: grupoEtarioDeEstado(estado),
-    });
+    const dichoPrest = estado.tratamiento.trim() || estado.tratamientoCatalogo.trim();
+    const pidioProfesional = Boolean(estado.profesional.trim() || estado.profesionalCatalogo.trim());
+    const prest = dichoPrest
+      ? await resolverPrestacionParaBusca({
+          texto: dichoPrest,
+          profesionalDoc: String(prof?.doc ?? estado.profesionalDoc ?? ""),
+          profesionalNombre: estado.profesional || estado.profesionalCatalogo,
+          modalidad: estado.modalidad,
+          grupoEtario: grupoEtarioDeEstado(estado),
+          dni: estado.dni,
+          conversacionId,
+        })
+      : null;
     if (prest) {
-      estado.tratamientoCatalogo = prest.prestacion.nombre?.trim() || prest.codigo;
+      estado.tratamientoCatalogo = prest.nombre;
       estado.prestacionCodigo = prest.codigo;
+      if (!pidioProfesional && prest.profesionalDoc) {
+        estado.profesionalDoc = prest.profesionalDoc;
+        if (prest.profesionalNombre) estado.profesionalCatalogo = prest.profesionalNombre;
+      }
     } else {
-      // Sin match claro: el operador elige en Busca Turno.
       estado.tratamientoCatalogo = "";
       estado.prestacionCodigo = "";
     }
@@ -1439,7 +1771,7 @@ const TEXTO_PRIMERA_VEZ_PEDIR = [
   "• Cobertura",
   "• Motivo de la consulta (síntomas, si te derivaron o tenés un diagnóstico). Cuanto más detalles nos des, más sencillo será para nosotros orientarte.",
   "",
-  "Escribí 0 para volver atrás.",
+  "0. Volver atrás",
 ].join("\n");
 
 function textoCierrePrimeraVez(estado: MenuEstado): string {
@@ -1509,7 +1841,7 @@ function mensajePedirFaltantesPrimeraVez(faltan: CampoPrimeraVez[]): string {
     "",
     "Podés enviarlos en un solo mensaje.",
     "",
-    "Escribí 0 para volver atrás.",
+    "0. Volver atrás",
   ].join("\n");
 }
 
@@ -1645,7 +1977,7 @@ async function prepararPedidoCierre(
   }
   // Sexo solo acá (al cerrar el pedido), no en el DNI: menos writes/llamados.
   completarSexoDesdeNombre(estado);
-  await matchearPedidoConCatalogo(estado);
+  await matchearPedidoConCatalogo(estado, conversation.id);
   await sincronizarPacienteYEdad(conversation, estado);
 }
 
@@ -1666,7 +1998,7 @@ async function finalizarPedidoConfirmado(
   estado: MenuEstado,
 ): Promise<void> {
   await prepararPedidoCierre(conversation, estado);
-  await etiquetarNombres(conversation, ["Derivado a asesor", "pedir-turno", "turnos"]);
+  await etiquetarNombres(conversation, ["Derivado a asesor", "pedir-turno"]);
   await etiquetarCobertura(conversation, estado.cobertura);
   await etiquetarProfesionalDerivado(conversation, estado);
   await etiquetarParecido(
@@ -2212,7 +2544,7 @@ async function recibirPedidoDatosJuntos(
   try {
     const extraido = await parsearPedidoDatosConIa(conversation.id, texto, faltanAntes);
     aplicarPedidoExtraido(estado, extraido, faltanAntes);
-    await matchearPedidoConCatalogo(estado);
+    await matchearPedidoConCatalogo(estado, conversation.id);
     await sincronizarPacienteYEdad(conversation, estado);
   } catch (error) {
     console.warn(
@@ -2506,28 +2838,9 @@ async function pedirMotivoCancelacion(
 async function registrarPedidoCancelacion(
   conversation: WaConversation,
   estado: MenuEstado,
-  motivo: string,
+  _motivo: string,
 ): Promise<void> {
-  const turno = etiquetaFuturo(estado.pendiente);
-  const iso = fechaIsoDeFuturo(estado.pendiente);
-  const quien = [estado.nombre, estado.apellido].filter(Boolean).join(" ") || "Paciente";
-  // Queda en el hilo del chat para el equipo; no se anula en Medexis todavía.
-  await decir(
-    conversation.id,
-    conversation.contactId,
-    [
-      "Pedido de cancelación registrado (pendiente de procesar)",
-      `Paciente: ${quien}`,
-      `DNI: ${estado.dni || "—"}`,
-      `Turno:`,
-      turno,
-      iso ? `FechaISO: ${iso}` : "",
-      `Motivo: ${motivo}`,
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  );
-  await etiquetarNombres(conversation, ["turnos", "cancelar-turno"]);
+  await etiquetarNombres(conversation, ["Eliminar turno"]);
   await volverTurnos(
     conversation,
     estado,
@@ -3171,14 +3484,14 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
     }
     // 1 próximos · 2 cancelar · 3 pedir
     const modo =
-      t === "1" || /\bproxim|\bver\b|\bmis turnos\b|\blistar\b/.test(t)
-        ? "ver"
-        : t === "2" || /\b(cancel|anul)/.test(t)
-          ? "cancelar"
-          : t === "3" || /\b(pedir|sacar|nuevo)\b/.test(t)
-            ? "sacar"
-            : t === "4" || /\b(cambi|reprogram|mover)\b/.test(t)
-              ? "cambiar"
+      t === "2" || /\b(cancel|anul)/.test(t)
+        ? "cancelar"
+        : t === "3" || /\b(pedir|sacar|nuevo)\b/.test(t)
+          ? "sacar"
+          : t === "4" || /\b(cambi|reprogram|mover)\b/.test(t)
+            ? "cambiar"
+            : t === "1" || /\bproxim|\bver\b|\bmis turnos\b|\blistar\b/.test(t)
+              ? "ver"
               : "";
     if (!modo) {
       await decir(conversation.id, conversation.contactId, noValida(listaTurnos()));
@@ -3198,12 +3511,12 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
     }
     const tagsTurno =
       modo === "sacar"
-        ? ["turnos", "pedir-turno", "CABA"]
+        ? ["pedir-turno", "CABA"]
         : modo === "cancelar"
-          ? ["turnos", "cancelar-turno", "CABA"]
+          ? ["Eliminar turno", "CABA"]
           : modo === "ver"
-            ? ["turnos", "proximos-turnos", "CABA"]
-            : ["turnos", "CABA"];
+            ? ["proximos-turnos", "CABA"]
+            : ["CABA"];
     await etiquetarNombres(conversation, tagsTurno, true);
     // Pedir turno: no reserva en Medexis; junta datos y deriva (sin aviso largo).
     if (modo === "sacar") {
@@ -4011,7 +4324,7 @@ async function responderMenu(conversation: WaConversation, estado: MenuEstado, t
     return;
   }
   if (opcion.clave === "turnos") {
-    await etiquetarNombres(conversation, ["turnos", "CABA"], true);
+    await etiquetarNombres(conversation, ["CABA"], true);
     await guardar(conversation.id, vacio("turnos", estado));
     await decir(conversation.id, conversation.contactId, listaTurnos());
     return;

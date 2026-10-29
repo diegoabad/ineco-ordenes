@@ -407,6 +407,37 @@ export async function fetchWaConversation(id: string): Promise<WaConversation> {
   return res.data;
 }
 
+export type WaTurnoFicha = {
+  fecha: string;
+  hora: string;
+  profesional: string;
+  prestacion: string;
+  estado: string;
+};
+
+export async function fetchWaHistorialTurnos(id: string): Promise<{
+  turnos: WaTurnoFicha[];
+  ultimosProfesionales: string[];
+  tagIds: string[];
+  aviso: string;
+}> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: {
+      turnos: WaTurnoFicha[];
+      ultimosProfesionales: string[];
+      tagIds: string[];
+      aviso?: string;
+    };
+  }>(`/api/whatsapp-crm/conversations/${encodeURIComponent(id)}/historial-turnos`);
+  return {
+    turnos: res.data.turnos ?? [],
+    ultimosProfesionales: res.data.ultimosProfesionales ?? [],
+    tagIds: res.data.tagIds ?? [],
+    aviso: res.data.aviso ?? "",
+  };
+}
+
 export async function fetchWaConversationByContact(
   contactId: string,
 ): Promise<WaConversation> {
@@ -498,6 +529,36 @@ export async function saveWaPruebaNota(
     },
   );
   return res.data;
+}
+
+export async function matchWaPrestacion(input: {
+  texto: string;
+  profesionalDoc?: string;
+  profesionalNombre?: string;
+  modalidad?: "" | "presencial" | "virtual" | "indistinto";
+  grupoEtario?: "" | "infanto" | "adulto";
+  fechaNacimiento?: string;
+  dni?: string;
+  conversacionId?: string;
+}): Promise<{
+  codigo: string;
+  nombre: string;
+  profesionalDoc?: string;
+  profesionalNombre?: string;
+} | null> {
+  const res = await apiFetch<{
+    ok: boolean;
+    data: {
+      codigo: string;
+      nombre: string;
+      profesionalDoc?: string;
+      profesionalNombre?: string;
+    } | null;
+  }>("/api/whatsapp-crm/match-prestacion", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.data?.codigo ? res.data : null;
 }
 
 export async function sendWaMessage(

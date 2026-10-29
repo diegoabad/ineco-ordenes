@@ -422,7 +422,11 @@ async function main(): Promise<void> {
     await s.decir("1");
     const dniMsg = ultimo(s.messages);
     esperar("pide DNI", /DNI/i.test(dniMsg) && /sin puntos ni espacios/i.test(dniMsg), dniMsg.slice(0, 160));
-    esperar("volver en la misma frase", /tocá 0 para volver/i.test(dniMsg) && !/00\.\s*Cancelar/i.test(dniMsg), dniMsg.slice(0, 180));
+    esperar(
+      "volver en renglón aparte",
+      /\n\n0\. Volver atrás$/i.test(dniMsg.trim()) && !/O tocá 0/i.test(dniMsg),
+      dniMsg.slice(-180),
+    );
     esperar("Pedido de turno + CABA", nombres(s.conversation.tagIds).includes("Pedido de turno") && nombres(s.conversation.tagIds).includes("CABA"), nombres(s.conversation.tagIds));
   });
 

@@ -1,7 +1,8 @@
+import { nombreDiaSemana, nombreDiaSemanaCorto, nombreMes, partesBuenosAires } from "../lib/fechaEs.js";
 import { getBuscaTurnoConfig } from "../services/db.service.js";
 import type { BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional } from "../types.js";
 import { documentoDePersona } from "./estado-dialogo.js";
-import { detalle, medexisPost } from "./medexis-client.js";
+import { detalle, medexisGet, medexisPost } from "./medexis-client.js";
 
 export type AccionClave =
   | "profesionales.listarTratamientos"
@@ -809,17 +810,11 @@ async function diasLibres(
       const virtual = esSlotVirtual(row);
       if (modalidad === "virtual" ? !virtual : virtual) continue;
       const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || "");
-      const cuando = new Date(crudo);
-      if (!crudo || Number.isNaN(cuando.getTime()) || vistos.has(crudo)) continue;
+      const cuando = instanteTurno(crudo);
+      if (!cuando || vistos.has(crudo)) continue;
       vistos.add(crudo);
-      const hora = new Intl.DateTimeFormat("es-AR", {
-        timeZone: "America/Argentina/Buenos_Aires",
-        weekday: "short",
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(cuando);
+      const p = partesBuenosAires(cuando);
+      const hora = `${nombreDiaSemanaCorto(p.anio, p.mes, p.dia)} ${String(p.dia).padStart(2, "0")}/${String(p.mes).padStart(2, "0")} ${p.hora}:${p.minuto}`;
       const modo = virtual ? "virtual" : "presencial";
       libres.push({ cuando, texto: `${hora}, ${modo} (${horaLocal(cuando)})` });
     }
@@ -907,16 +902,7 @@ export function formatearHorariosAgrupados(lineas: string[]): string {
     if (!m) continue;
     const [, y, mes, dia, hh, mm] = m;
     const claveDia = `${y}-${mes}-${dia}`;
-    const cuando = new Date(`${claveDia}T12:00:00-03:00`);
-    const weekday = new Intl.DateTimeFormat("es-AR", {
-      weekday: "long",
-      timeZone: "America/Argentina/Buenos_Aires",
-    }).format(cuando);
-    const mesNombre = new Intl.DateTimeFormat("es-AR", {
-      month: "long",
-      timeZone: "America/Argentina/Buenos_Aires",
-    }).format(cuando);
-    const etiqueta = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dia} de ${mesNombre}`;
+    const etiqueta = `${nombreDiaSemana(Number(y), Number(mes), Number(dia))} ${dia} de ${nombreMes(Number(mes))}`;
     slots.push({ claveDia, etiqueta, hora: `${hh}:${mm}` });
   }
   if (!slots.length) return "";
@@ -1176,10 +1162,36 @@ async function reservarTurno(
 }
 
 function filasTurno(data: unknown): Record<string, unknown>[] {
-  const lista = Array.isArray(data)
-    ? data
-    : ((data as { Turnos?: unknown[] })?.Turnos ?? (data as { turnos?: unknown[] })?.turnos ?? []);
-  return lista.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  if (Array.isArray(data)) {
+    return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  if (!data || typeof data !== "object") return [];
+  const row = data as Record<string, unknown>;
+  const lista = row.Turnos ?? row.turnos;
+  if (Array.isArray(lista)) {
+    return lista.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  if (row.TurnoFechaHora || row.turnoFechaHora) return [row];
+  return [];
+}
+
+/** Medexis manda el reloj de Argentina. Si no trae zona, no hay que leerlo como hora del servidor. */
+function instanteTurno(crudo: string): Date | null {
+  const texto = String(crudo ?? "").trim();
+  if (!texto) return null;
+  if (/(?:z|[+-]\d{2}:?\d{2})$/i.test(texto)) {
+    const cuando = new Date(texto);
+    return Number.isNaN(cuando.getTime()) ? null : cuando;
+  }
+  const plano = texto.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (plano) {
+    const cuando = new Date(
+      `${plano[1]}-${plano[2]}-${plano[3]}T${plano[4]}:${plano[5]}:${plano[6] ?? "00"}-03:00`,
+    );
+    return Number.isNaN(cuando.getTime()) ? null : cuando;
+  }
+  const cuando = new Date(texto);
+  return Number.isNaN(cuando.getTime()) ? null : cuando;
 }
 
 function mismaHora(crudo: string, cuando: string): boolean {
@@ -1252,9 +1264,9 @@ function textoFilas(
     .slice(0, 12)
     .map((row) => {
       const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
-      const cuando = new Date(crudo);
-      const momento = !Number.isNaN(cuando.getTime()) && cuando.getTime() < ahora ? "anterior" : "futuro";
-      const profesional = nombreProfesionalTurno(row);
+      const cuando = instanteTurno(crudo);
+      const momento = cuando && cuando.getTime() < ahora ? "anterior" : "futuro";
+      const profesional = nombreProfesionalTurno(row, config);
       const prestacion = nombrePrestacionTurno(row, config);
       const conQuien = profesional ? ` con ${profesional}` : "";
       const conQue = prestacion ? ` ${prestacion}` : "";
@@ -1263,12 +1275,64 @@ function textoFilas(
     .join("\n");
 }
 
-function nombreProfesionalTurno(row: Record<string, unknown>): string {
-  const armado = String(row.profesionalNombre || "").trim();
-  if (armado) return armado;
-  const apellido = String(row.PrestadorApellido || row.prestadorApellido || "").trim();
-  const nombre = String(row.PrestadorNombre || row.prestadorNombre || "").trim();
-  return [apellido, nombre].filter(Boolean).join(", ") || nombre || apellido;
+function textoNombre(valor: unknown): string {
+  const texto = String(valor ?? "").trim();
+  if (!texto || /^\d+$/.test(texto)) return "";
+  return texto;
+}
+
+function nombreProfesionalTurno(
+  row: Record<string, unknown>,
+  config?: BuscaTurnoConfig | null,
+  profundidad = 0,
+): string {
+  if (profundidad > 2) return "";
+  for (const clave of [
+    "profesionalNombre",
+    "ProfesionalNombre",
+    "PrestadorNombreCompleto",
+    "MedicoNombre",
+    "medicoNombre",
+    "RecursoNombre",
+    "AgendaNombre",
+  ]) {
+    const armado = textoNombre(row[clave]);
+    if (armado) return armado;
+  }
+  const apellido = textoNombre(
+    row.PrestadorApellido ||
+      row.prestadorApellido ||
+      row.ProfesionalApellido ||
+      row.profesionalApellido,
+  );
+  const nombre = textoNombre(
+    row.PrestadorNombre || row.prestadorNombre || row.ProfesionalNombrePila || row.NombrePrestador,
+  );
+  const junto = [apellido, nombre].filter(Boolean).join(", ");
+  if (junto) return junto;
+  for (const clave of ["Prestador", "prestador", "Profesional", "profesional", "Medico", "medico"]) {
+    const anidado = row[clave];
+    if (typeof anidado === "string") {
+      const suelto = textoNombre(anidado);
+      if (suelto) return suelto;
+    }
+    if (anidado && typeof anidado === "object" && !Array.isArray(anidado)) {
+      const interno = nombreProfesionalTurno(anidado as Record<string, unknown>, config, profundidad + 1);
+      if (interno) return interno;
+    }
+  }
+  const doc = String(
+    row.PrestadorDocumento ||
+      row.prestadorDocumento ||
+      row.profesionalDocumento ||
+      row.ProfesionalDocumento ||
+      "",
+  ).replace(/\D/g, "");
+  if (doc && config?.profesionales) {
+    const hit = config.profesionales.find((item) => String(item.doc).replace(/\D/g, "") === doc);
+    if (hit?.nombre?.trim()) return hit.nombre.trim();
+  }
+  return "";
 }
 
 function codigoPrestacionTurno(row: Record<string, unknown>): string {
@@ -1335,9 +1399,9 @@ function textoFilasParaElegir(
   return lista
     .map((row) => {
       const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
-      const cuando = new Date(crudo);
-      if (Number.isNaN(cuando.getTime()) || cuando.getTime() < inicioHoy) return null;
-      const profesional = nombreProfesionalTurno(row);
+      const cuando = instanteTurno(crudo);
+      if (!cuando || cuando.getTime() < inicioHoy) return null;
+      const profesional = nombreProfesionalTurno(row, config);
       const prestacion = nombrePrestacionTurno(row, config);
       const partes = [
         `futuro: ${crudo}`,
@@ -1365,12 +1429,12 @@ function textoProximosAgrupados(
   const filas = lista
     .map((row) => {
       const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
-      const cuando = new Date(crudo);
-      if (Number.isNaN(cuando.getTime()) || cuando.getTime() < inicioHoy) return null;
+      const cuando = instanteTurno(crudo);
+      if (!cuando || cuando.getTime() < inicioHoy) return null;
       return {
         cuando,
         crudo,
-        profesional: nombreProfesionalTurno(row),
+        profesional: nombreProfesionalTurno(row, config),
         prestacion: nombrePrestacionTurno(row, config),
       };
     })
@@ -1385,39 +1449,217 @@ function textoProximosAgrupados(
   const bloques: string[] = ["Estos son tus próximos turnos:"];
   let diaActual = "";
   for (const fila of filas) {
-    const claveDia = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Argentina/Buenos_Aires",
-    }).format(fila.cuando);
+    const p = partesBuenosAires(fila.cuando);
+    const claveDia = `${p.anio}-${String(p.mes).padStart(2, "0")}-${String(p.dia).padStart(2, "0")}`;
     if (claveDia !== diaActual) {
       diaActual = claveDia;
-      const weekday = new Intl.DateTimeFormat("es-AR", {
-        weekday: "long",
-        timeZone: "America/Argentina/Buenos_Aires",
-      }).format(fila.cuando);
-      const dia = new Intl.DateTimeFormat("es-AR", {
-        day: "numeric",
-        timeZone: "America/Argentina/Buenos_Aires",
-      }).format(fila.cuando);
-      const mes = new Intl.DateTimeFormat("es-AR", {
-        month: "long",
-        timeZone: "America/Argentina/Buenos_Aires",
-      }).format(fila.cuando);
       bloques.push(
         "",
-        `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dia} de ${mes}`,
+        `${nombreDiaSemana(p.anio, p.mes, p.dia)} ${p.dia} de ${nombreMes(p.mes)}`,
       );
     }
-    const hora = new Intl.DateTimeFormat("es-AR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-      timeZone: "America/Argentina/Buenos_Aires",
-    }).format(fila.cuando);
+    const hora = `${p.hora}:${p.minuto}`;
     bloques.push(`• ${hora}`);
     if (fila.profesional) bloques.push(`  Profesional: ${fila.profesional}`);
     bloques.push(`  Prestación: ${fila.prestacion || "sin dato"}`);
   }
   return bloques.join("\n");
+}
+
+export type TurnoHistorialItem = {
+  fecha: string;
+  profesional: string;
+  profesionalDoc: string;
+  prestacion: string;
+  prestacionCodigo: string;
+};
+
+/** Turnos ya pasados del paciente, de hoy hacia 6 meses atrás. */
+export async function historialTurnosPaciente(
+  dni: string,
+  config: BuscaTurnoConfig | null,
+): Promise<TurnoHistorialItem[]> {
+  const documento = String(dni ?? "").replace(/\D/g, "");
+  if (documento.length < 6) return [];
+  let data: unknown;
+  try {
+    data = await Promise.race([
+      medexisPost("api/Turno", {
+        query: {
+          PersonaDocumento: documento,
+          FechaDesde: fechaBa(-180),
+          FechaHasta: fechaBa(0),
+        },
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]);
+  } catch {
+    return [];
+  }
+  if (!data) return [];
+  if (typeof data === "object" && (data as { Resultado?: string }).Resultado === "ERROR") return [];
+  const desde = new Date(`${fechaBa(-180)}T00:00:00-03:00`).getTime();
+  const hasta = new Date(`${fechaBa(0)}T23:59:59-03:00`).getTime();
+  const filas: TurnoHistorialItem[] = [];
+  for (const row of filasTurno(data)) {
+    const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
+    const cuando = instanteTurno(crudo);
+    if (!cuando || cuando.getTime() < desde || cuando.getTime() > hasta) continue;
+    const prestacion = nombrePrestacionTurno(row, config);
+    const profesional = nombreProfesionalTurno(row, config);
+    if (!prestacion && !profesional) continue;
+    const partes = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(cuando);
+    filas.push({
+      fecha: partes,
+      profesional,
+      profesionalDoc: String(row.PrestadorDocumento || row.prestadorDocumento || "").replace(/\D/g, ""),
+      prestacion,
+      prestacionCodigo: codigoPrestacionTurno(row),
+    });
+  }
+  filas.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.prestacion.localeCompare(a.prestacion));
+  return filas.slice(0, 40);
+}
+
+export type TurnoFichaItem = {
+  fecha: string;
+  hora: string;
+  profesional: string;
+  prestacion: string;
+  estado: string;
+};
+
+function estadoDeTurno(row: Record<string, unknown>, cuando: Date): string {
+  if (row.Anulado === true || row.anulado === true) return "Anulado";
+  const codigo = String(row.TurnoEstado || row.turnoEstado || row.Estado || row.estado || "")
+    .trim()
+    .toUpperCase();
+  const conocidos: Record<string, string> = {
+    A: "Asignado",
+    C: "Cancelado",
+    D: "Disponible",
+    P: "Presente",
+    R: "Reservado",
+    N: "Ausente",
+    X: "Anulado",
+  };
+  if (conocidos[codigo]) return estadoSiYaPaso(conocidos[codigo], cuando);
+  for (const valor of [
+    row.TurnoEstadoDescripcion,
+    row.turnoEstadoDescripcion,
+    row.EstadoDescripcion,
+    row.estadoDescripcion,
+  ]) {
+    const texto = String(valor ?? "").trim();
+    if (texto && !/^\d+$/.test(texto)) return estadoSiYaPaso(texto, cuando);
+  }
+  if (codigo) return estadoSiYaPaso(codigo, cuando);
+  return cuando.getTime() > Date.now() ? "Próximo" : "Sin dato";
+}
+
+/** Presente y ausente solo tienen sentido después del horario del turno. */
+function estadoSiYaPaso(estado: string, cuando: Date): string {
+  if (cuando.getTime() > Date.now() && /presente|ausente/i.test(estado)) return "Asignado";
+  return estado;
+}
+
+function documentoDeFila(data: unknown, profundidad = 0): string {
+  if (profundidad > 3 || !data || typeof data !== "object") return "";
+  if (Array.isArray(data)) {
+    if (data.length !== 1) return "";
+    return documentoDeFila(data[0], profundidad + 1);
+  }
+  const fila = data as Record<string, unknown>;
+  if (String(fila.Resultado ?? "").toUpperCase() === "ERROR") return "";
+  const directo = String(fila.PersonaDocumento ?? fila.personaDocumento ?? "").replace(/\D/g, "");
+  if (directo.length >= 7 && directo.length <= 9) return directo;
+  for (const clave of ["Detalle", "detalle", "Data", "data"]) {
+    const anidado = fila[clave];
+    if (anidado && typeof anidado === "object") {
+      const documento = documentoDeFila(anidado, profundidad + 1);
+      if (documento) return documento;
+    }
+  }
+  return "";
+}
+
+/** DNI a partir del celular de WhatsApp, cuando el paciente no lo escribió. */
+export async function dniDesdeTelefono(telefono: string): Promise<string> {
+  const cel = String(telefono ?? "").replace(/\D/g, "");
+  const variantes = [
+    ...new Set([cel, cel.replace(/^549/, ""), cel.replace(/^54/, "")].filter((n) => n.length >= 8)),
+  ];
+  const hallados = await Promise.all(
+    variantes.map(async (numero) => {
+      try {
+        const data = await Promise.race([
+          medexisGet("api/Persona", { Telefono: numero }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+        return documentoDeFila(data);
+      } catch {
+        return "";
+      }
+    }),
+  );
+  return hallados.find(Boolean) ?? "";
+}
+
+/** Turnos del paciente, un año atrás y seis meses adelante, para la ficha. */
+export async function listarTurnosFicha(
+  dni: string,
+  config: BuscaTurnoConfig | null,
+): Promise<TurnoFichaItem[]> {
+  const documento = String(dni ?? "").replace(/\D/g, "");
+  if (documento.length < 6) return [];
+  let data: unknown;
+  try {
+    data = await Promise.race([
+      medexisPost("api/Turno", {
+        query: {
+          PersonaDocumento: documento,
+          FechaDesde: fechaBa(-365),
+          FechaHasta: fechaBa(180),
+        },
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]);
+  } catch {
+    return [];
+  }
+  if (!data || (typeof data === "object" && (data as { Resultado?: string }).Resultado === "ERROR")) {
+    return [];
+  }
+  const filas: TurnoFichaItem[] = [];
+  for (const row of filasTurno(data)) {
+    const crudo = String(row.turnoFechaHora || row.TurnoFechaHora || row.Fecha || "");
+    const cuando = instanteTurno(crudo);
+    if (!cuando) continue;
+    const profesional = nombreProfesionalTurno(row, config);
+    const prestacion = nombrePrestacionTurno(row, config);
+    if (!profesional && !prestacion) continue;
+    const partes = partesBuenosAires(cuando);
+    filas.push({
+      fecha: `${partes.anio}-${String(partes.mes).padStart(2, "0")}-${String(partes.dia).padStart(2, "0")}`,
+      hora: `${partes.hora}:${partes.minuto}`,
+      profesional,
+      prestacion,
+      estado: estadoDeTurno(row, cuando),
+    });
+  }
+  filas.sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+  const ahora = (() => {
+    const p = partesBuenosAires(new Date());
+    return `${p.anio}-${String(p.mes).padStart(2, "0")}-${String(p.dia).padStart(2, "0")} ${p.hora}:${p.minuto}`;
+  })();
+  const futuros = filas.filter((fila) => `${fila.fecha} ${fila.hora}` >= ahora);
+  const pasados = filas.filter((fila) => `${fila.fecha} ${fila.hora}` < ahora).reverse();
+  return [...pasados.slice(0, 40), ...futuros.slice(0, 24)];
 }
 
 async function turnosDelPaciente(

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -1331,7 +1332,16 @@ export async function setDiagnosticoPresuntivoHumano(
   }
   const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
   if (!snap.exists()) return null;
-  await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
+  const write = diag
+    ? patch
+    : {
+        diagnosticoHumano: deleteField(),
+        diagnosticoHumanoByUserId: deleteField(),
+        diagnosticoHumanoByName: deleteField(),
+        diagnosticoHumanoAt: deleteField(),
+        updatedAt: now,
+      };
+  await updateDoc(doc(firestore, CONVERSATIONS, id), write);
   return normalizeConversation(id, { ...snap.data(), ...patch });
 }
 
