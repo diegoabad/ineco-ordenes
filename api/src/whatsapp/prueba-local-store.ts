@@ -58,6 +58,23 @@ function persist(): void {
   }
 }
 
+function isoFechaNacimiento(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const dmy = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!dmy) return null;
+  return `${dmy[3]}-${dmy[2]!.padStart(2, "0")}-${dmy[1]!.padStart(2, "0")}`;
+}
+
+/** Si el pedido ya tiene fecha y la ficha no, copiarla (recupera pruebas viejas). */
+function backfillFechaDesdePedido(contact: WaContact, conversation: WaConversation): WaContact {
+  if ((contact.fechaNacimiento ?? "").trim()) return contact;
+  const iso = isoFechaNacimiento(conversation.menuEstado?.fechaNacimiento);
+  if (!iso) return contact;
+  return { ...contact, fechaNacimiento: iso, updatedAt: nowIso() };
+}
+
 function hydrate(): void {
   try {
     if (!existsSync(PERSIST_FILE)) return;
@@ -78,18 +95,27 @@ function hydrate(): void {
       }
     }
     if (!Array.isArray(raw.bundles)) return;
+    let reparados = 0;
     for (const row of raw.bundles) {
       const id = String(row.id ?? row.conversation?.id ?? "").trim();
       if (!id || !row.conversation || !row.contact) continue;
-      const conversation = { ...row.conversation, contact: row.contact };
+      const contact = backfillFechaDesdePedido(row.contact, row.conversation);
+      if (contact.fechaNacimiento && contact.fechaNacimiento !== row.contact.fechaNacimiento) {
+        reparados += 1;
+      }
+      const conversation = { ...row.conversation, contact };
       store.set(id, {
         conversation,
-        contact: row.contact,
+        contact,
         messages: Array.isArray(row.messages) ? row.messages : [],
       });
     }
+    if (reparados > 0) persist();
     if (store.size) {
-      console.info(`[whatsapp] pruebas locales restauradas: ${store.size}`);
+      console.info(
+        `[whatsapp] pruebas locales restauradas: ${store.size}` +
+          (reparados ? ` (fecha nacimiento en ficha: ${reparados})` : ""),
+      );
     }
   } catch (error) {
     console.warn(
@@ -192,6 +218,7 @@ export function createLocalPruebaConversation(
     whatsappName: null,
     cobertura: null,
     email: null,
+    fechaNacimiento: null,
     grupoEtario: null,
     consultaPara: null,
     contactoNombre: null,
@@ -216,6 +243,20 @@ export function createLocalPruebaConversation(
     assigneeUserId: null,
     assigneeName: "Bot",
     tagIds: [],
+    resolutionStatus: "open",
+    resolvedAt: null,
+    resolvedByKind: null,
+    resolvedByUserId: null,
+    resolvedByName: null,
+    botPausedUntilInbound: false,
+    resoluciones: [],
+    motivoConsulta: null,
+    diagnosticoIa: null,
+    diagnosticoIaAt: null,
+    diagnosticoHumano: null,
+    diagnosticoHumanoByUserId: null,
+    diagnosticoHumanoByName: null,
+    diagnosticoHumanoAt: null,
     resumen: null,
     intencionAbierta: null,
     intencionConcluida: false,

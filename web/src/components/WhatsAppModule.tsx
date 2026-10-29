@@ -11,6 +11,7 @@ import { WhatsAppIntencionesPanel } from "./WhatsAppIntencionesPanel";
 import { WhatsAppConocimientoPanel } from "./WhatsAppConocimientoPanel";
 import { WhatsAppMetricasPanel } from "./WhatsAppMetricasPanel";
 import { WhatsAppMenuFlujosPanel } from "./WhatsAppMenuFlujosPanel";
+import { WhatsAppDerivacionPanel } from "./WhatsAppDerivacionPanel";
 
 type Props = {
   section: WhatsappSection;
@@ -51,6 +52,8 @@ export function WhatsAppModule({ section }: Props) {
               <p>Mapa visual de menús, opciones, acciones y respuestas del bot sin IA</p>
             ) : section === "operadoras" ? (
               <p>Usuarios a los que se pueden derivar las conversaciones</p>
+            ) : section === "derivacion" ? (
+              <p>Profesional → recepcionista para pedidos de turno del bot menú</p>
             ) : section === "respuestas-rapidas" ? (
               <p>Atajos con disparadores tipo /saludo y variables como {"{{nombre}}"}</p>
             ) : section === "etiquetas" ? (
@@ -167,6 +170,8 @@ export function WhatsAppModule({ section }: Props) {
         />
       ) : section === "operadoras" ? (
         <WhatsAppOperatorsPanel addRef={addOperatorRef} />
+      ) : section === "derivacion" ? (
+        <WhatsAppDerivacionPanel />
       ) : section === "respuestas-rapidas" ? (
         <WhatsAppQuickRepliesPanel createRef={createReplyRef} />
       ) : section === "etiquetas" ? (

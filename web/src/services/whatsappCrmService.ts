@@ -6,6 +6,8 @@ import type {
   WaContactGrupoEtario,
   WaCobertura,
   WaConversation,
+  WaDerivacionConfig,
+  WaDerivacionRegla,
   WaIntencion,
   WaMessage,
   WaOperator,
@@ -262,6 +264,7 @@ export async function updateWaContact(
     lastName?: string;
     cobertura?: string;
     email?: string;
+    fechaNacimiento?: string | null;
     grupoEtario?: string | null;
     consultaPara?: string | null;
     contactoNombre?: string | null;
@@ -281,6 +284,7 @@ export async function updateWaContact(
         lastName: input.lastName ?? "",
         cobertura: input.cobertura ?? "",
         email: input.email ?? "",
+        fechaNacimiento: input.fechaNacimiento ?? "",
         grupoEtario: input.grupoEtario ?? "",
         consultaPara: input.consultaPara ?? "",
         relacionFamiliar: input.relacionFamiliar ?? "",
@@ -300,6 +304,24 @@ export async function fetchWaOperators(): Promise<WaOperator[]> {
     "/api/whatsapp-crm/operators",
   );
   return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function fetchWaDerivacionTurno(): Promise<WaDerivacionConfig> {
+  const res = await apiFetch<{ ok: boolean; data: WaDerivacionConfig }>(
+    "/api/whatsapp-crm/derivacion-turno",
+  );
+  return res.data;
+}
+
+export async function saveWaDerivacionTurno(input: {
+  defaultRecepcionista: string;
+  reglas: WaDerivacionRegla[];
+}): Promise<WaDerivacionConfig> {
+  const res = await apiFetch<{ ok: boolean; data: WaDerivacionConfig }>(
+    "/api/whatsapp-crm/derivacion-turno",
+    { method: "PUT", body: JSON.stringify(input) },
+  );
+  return res.data;
 }
 
 export async function addWaOperator(userId: string, color: string): Promise<WaOperator[]> {
@@ -518,6 +540,27 @@ export async function assignWaConversation(
   return res.data;
 }
 
+/** Marca el episodio como resuelto por humano → bot + pausa hasta próximo inbound. */
+export async function resolveWaConversation(id: string): Promise<WaConversation> {
+  const res = await apiFetch<{ ok: boolean; data: WaConversation }>(
+    `/api/whatsapp-crm/conversations/${id}/resolve`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return res.data;
+}
+
+/** Diagnóstico presuntivo confirmado/corregido por el equipo. */
+export async function setWaDiagnosticoPresuntivo(
+  id: string,
+  diagnostico: string,
+): Promise<WaConversation> {
+  const res = await apiFetch<{ ok: boolean; data: WaConversation }>(
+    `/api/whatsapp-crm/conversations/${id}/diagnostico`,
+    { method: "PATCH", body: JSON.stringify({ diagnostico }) },
+  );
+  return res.data;
+}
+
 export function waMediaUrl(messageId: string): string {
   const base = getApiUrl() || "";
   return `${base}/api/whatsapp-crm/messages/${messageId}/media`;
@@ -695,6 +738,15 @@ export type WaMetricaFila = {
   assigneeKind: "none" | "bot" | "user";
   assigneeUserId: string | null;
   assigneeName: string | null;
+  resolutionStatus?: "open" | "resolved";
+  resolucionesEnPeriodo?: {
+    id: string;
+    at: string;
+    byKind: "human" | "bot";
+    byUserId: string | null;
+    byName: string | null;
+    motivo?: "manual" | "timeout" | "cierre_bot";
+  }[];
 };
 
 export type WaMetricas = {

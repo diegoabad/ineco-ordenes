@@ -15,6 +15,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { firestore } from "../config/firebase.js";
+import { formatNombrePersona } from "../lib/nombrePersona.js";
 import { documentoDePersona } from "./estado-dialogo.js";
 import {
   clearAllLocalPruebas,
@@ -44,6 +45,10 @@ import type {
   WaMessageDirection,
   WaMessageStatus,
   WaMessageType,
+  WaResolucion,
+  WaResolucionByKind,
+  WaResolucionMotivo,
+  WaResolutionStatus,
 } from "./types.js";
 import {
   normalizarCasos,
@@ -75,30 +80,40 @@ function normalizeSexo(raw: unknown): WaContactSexo | null {
   return value === "masculino" || value === "femenino" ? value : null;
 }
 
+function personaONull(raw: unknown): string | null {
+  if (raw == null) return null;
+  return formatNombrePersona(String(raw)) || null;
+}
+
 function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
+  const firstName = personaONull(raw.firstName);
+  const lastName = personaONull(raw.lastName);
+  const displayFromParts = [firstName, lastName].filter(Boolean).join(" ") || null;
   return {
     id,
     phoneNumber: String(raw.phoneNumber ?? ""),
-    firstName: raw.firstName != null ? String(raw.firstName) : null,
-    lastName: raw.lastName != null ? String(raw.lastName) : null,
-    displayName: raw.displayName != null ? String(raw.displayName) : null,
-    whatsappName: raw.whatsappName != null ? String(raw.whatsappName) : null,
-    cobertura: raw.cobertura != null ? String(raw.cobertura).trim() || null : null,
+    firstName,
+    lastName,
+    displayName: personaONull(raw.displayName) || displayFromParts,
+    whatsappName: personaONull(raw.whatsappName),
+    cobertura: personaONull(raw.cobertura),
+    // Email: sin Title Case (se deja tal cual, solo trim).
     email: raw.email != null ? String(raw.email).trim() || null : null,
+    fechaNacimiento: (() => {
+      const rawFecha =
+        raw.fechaNacimiento != null ? String(raw.fechaNacimiento).trim() : "";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawFecha)) return rawFecha;
+      return null;
+    })(),
     grupoEtario: normalizeGrupoEtario(raw.grupoEtario),
     consultaPara: normalizeConsultaPara(raw.consultaPara),
     contactoNombre: (() => {
-      const next =
-        raw.contactoNombre != null ? String(raw.contactoNombre).trim() : "";
+      const next = personaONull(raw.contactoNombre);
       if (next) return next;
-      const legacy =
-        raw.terceroNombre != null ? String(raw.terceroNombre).trim() : "";
-      return legacy || null;
+      return personaONull(raw.terceroNombre);
     })(),
-    contactoApellido:
-      raw.contactoApellido != null ? String(raw.contactoApellido).trim() || null : null,
-    relacionFamiliar:
-      raw.relacionFamiliar != null ? String(raw.relacionFamiliar).trim() || null : null,
+    contactoApellido: personaONull(raw.contactoApellido),
+    relacionFamiliar: personaONull(raw.relacionFamiliar),
     dni: raw.dni != null ? String(raw.dni).trim() || null : null,
     sexo: normalizeSexo(raw.sexo),
     esPaciente:
@@ -130,6 +145,8 @@ function menuPasoDe(raw: unknown): MenuPaso | null {
     "email",
     "fechaNacimiento",
     "pedidoDatos",
+    "confirmarPedido",
+    "corregirPedido",
     "profesional",
     "tratamiento",
     "cobertura",
@@ -259,7 +276,37 @@ function normalizePruebaAclaraciones(value: unknown): { messageId: string; texto
   return items;
 }
 
+function normalizeResoluciones(value: unknown): WaResolucion[] {
+  if (!Array.isArray(value)) return [];
+  const out: WaResolucion[] = [];
+  for (const row of value.slice(-200)) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const byKind: WaResolucionByKind | null =
+      r.byKind === "human" || r.byKind === "bot" ? r.byKind : null;
+    const at = String(r.at ?? "").trim();
+    if (!byKind || !at) continue;
+    const motivo: WaResolucionMotivo | undefined =
+      r.motivo === "manual" || r.motivo === "timeout" || r.motivo === "cierre_bot"
+        ? r.motivo
+        : undefined;
+    out.push({
+      id: String(r.id ?? "").trim() || randomUUID(),
+      at,
+      byKind,
+      byUserId: r.byUserId != null ? String(r.byUserId).trim() || null : null,
+      byName: r.byName != null ? String(r.byName).trim() || null : null,
+      ...(motivo ? { motivo } : {}),
+    });
+  }
+  return out;
+}
+
 function normalizeConversation(id: string, raw: Record<string, unknown>): WaConversation {
+  const resolutionStatus: WaResolutionStatus =
+    raw.resolutionStatus === "resolved" ? "resolved" : "open";
+  const resolvedByKind: WaResolucionByKind | null =
+    raw.resolvedByKind === "human" || raw.resolvedByKind === "bot" ? raw.resolvedByKind : null;
   return {
     id,
     contactId: String(raw.contactId ?? ""),
@@ -274,6 +321,28 @@ function normalizeConversation(id: string, raw: Record<string, unknown>): WaConv
     tagIds: Array.isArray(raw.tagIds)
       ? [...new Set(raw.tagIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
       : [],
+    resolutionStatus,
+    resolvedAt: raw.resolvedAt != null ? String(raw.resolvedAt).trim() || null : null,
+    resolvedByKind,
+    resolvedByUserId: raw.resolvedByUserId != null ? String(raw.resolvedByUserId).trim() || null : null,
+    resolvedByName: raw.resolvedByName != null ? String(raw.resolvedByName).trim() || null : null,
+    botPausedUntilInbound: raw.botPausedUntilInbound === true,
+    resoluciones: normalizeResoluciones(raw.resoluciones),
+    motivoConsulta: raw.motivoConsulta != null ? String(raw.motivoConsulta).trim() || null : null,
+    diagnosticoIa: raw.diagnosticoIa != null ? String(raw.diagnosticoIa).trim() || null : null,
+    diagnosticoIaAt: raw.diagnosticoIaAt != null ? String(raw.diagnosticoIaAt).trim() || null : null,
+    diagnosticoHumano:
+      raw.diagnosticoHumano != null ? String(raw.diagnosticoHumano).trim() || null : null,
+    diagnosticoHumanoByUserId:
+      raw.diagnosticoHumanoByUserId != null
+        ? String(raw.diagnosticoHumanoByUserId).trim() || null
+        : null,
+    diagnosticoHumanoByName:
+      raw.diagnosticoHumanoByName != null
+        ? String(raw.diagnosticoHumanoByName).trim() || null
+        : null,
+    diagnosticoHumanoAt:
+      raw.diagnosticoHumanoAt != null ? String(raw.diagnosticoHumanoAt).trim() || null : null,
     resumen: raw.resumen != null ? String(raw.resumen).trim() || null : null,
     intencionAbierta: raw.intencionAbierta != null ? String(raw.intencionAbierta).trim() || null : null,
     intencionConcluida: raw.intencionConcluida === true,
@@ -352,6 +421,19 @@ export async function getContact(id: string): Promise<WaContact | null> {
   return normalizeContact(snap.id, snap.data() as Record<string, unknown>);
 }
 
+function normalizeFechaNacimiento(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const dmy = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmy) {
+    const dd = dmy[1]!.padStart(2, "0");
+    const mm = dmy[2]!.padStart(2, "0");
+    return `${dmy[3]}-${mm}-${dd}`;
+  }
+  return null;
+}
+
 export async function updateContact(
   id: string,
   input: {
@@ -359,6 +441,7 @@ export async function updateContact(
     lastName: string;
     cobertura?: string;
     email?: string;
+    fechaNacimiento?: string | null;
     grupoEtario?: string | null;
     consultaPara?: string | null;
     contactoNombre?: string | null;
@@ -372,20 +455,34 @@ export async function updateContact(
   const existing = await getContact(id);
   if (!existing) return null;
   const esLocal = Boolean(getLocalContact(id));
-  const firstName = input.firstName.trim();
-  const lastName = input.lastName.trim();
+  const firstName = formatNombrePersona(input.firstName);
+  const lastName = formatNombrePersona(input.lastName);
   if (!firstName) {
     throw new Error("El nombre del paciente es obligatorio");
   }
   const cobertura =
     input.cobertura !== undefined
-      ? input.cobertura.trim() || null
+      ? formatNombrePersona(input.cobertura) || null
       : existing.cobertura;
   const emailRaw =
     input.email !== undefined ? input.email.trim() : existing.email ?? "";
   const email = emailRaw || null;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error("El email no es válido");
+  }
+  let fechaNacimiento =
+    input.fechaNacimiento !== undefined
+      ? normalizeFechaNacimiento(input.fechaNacimiento)
+      : existing.fechaNacimiento;
+  if (
+    input.fechaNacimiento !== undefined &&
+    String(input.fechaNacimiento ?? "").trim() &&
+    !fechaNacimiento
+  ) {
+    throw new Error("La fecha de nacimiento no es válida");
+  }
+  if (input.fechaNacimiento !== undefined && !String(input.fechaNacimiento ?? "").trim()) {
+    fechaNacimiento = null;
   }
   const grupoEtario =
     input.grupoEtario !== undefined
@@ -407,11 +504,11 @@ export async function updateContact(
       : existing.relacionFamiliar;
   let contactoNombre =
     input.contactoNombre !== undefined
-      ? input.contactoNombre?.trim() || null
+      ? formatNombrePersona(input.contactoNombre ?? "") || null
       : existing.contactoNombre;
   let contactoApellido =
     input.contactoApellido !== undefined
-      ? input.contactoApellido?.trim() || null
+      ? formatNombrePersona(input.contactoApellido ?? "") || null
       : existing.contactoApellido;
   if (consultaPara !== "tercero") {
     relacionFamiliar = null;
@@ -447,6 +544,7 @@ export async function updateContact(
     displayName,
     cobertura,
     email,
+    fechaNacimiento,
     grupoEtario,
     consultaPara,
     relacionFamiliar,
@@ -472,6 +570,7 @@ export async function updateContact(
     phoneNumber: existing.phoneNumber,
     cobertura,
     email,
+    fechaNacimiento,
     grupoEtario,
     consultaPara,
     relacionFamiliar,
@@ -521,6 +620,7 @@ export async function findOrCreateContact(input: {
     whatsappName: input.whatsappName?.trim() || null,
     cobertura: null,
     email: null,
+    fechaNacimiento: null,
     grupoEtario: null,
     consultaPara: null,
     contactoNombre: null,
@@ -588,6 +688,20 @@ export async function findOrCreateOpenConversation(contactId: string): Promise<W
     assigneeUserId: null,
     assigneeName: null,
     tagIds: [],
+    resolutionStatus: "open",
+    resolvedAt: null,
+    resolvedByKind: null,
+    resolvedByUserId: null,
+    resolvedByName: null,
+    botPausedUntilInbound: false,
+    resoluciones: [],
+    motivoConsulta: null,
+    diagnosticoIa: null,
+    diagnosticoIaAt: null,
+    diagnosticoHumano: null,
+    diagnosticoHumanoByUserId: null,
+    diagnosticoHumanoByName: null,
+    diagnosticoHumanoAt: null,
     resumen: null,
     intencionAbierta: null,
     intencionConcluida: false,
@@ -648,6 +762,7 @@ async function createPruebaConversationFirebase(
     displayName: null,
     cobertura: null,
     email: null,
+    fechaNacimiento: null,
     grupoEtario: null,
     consultaPara: null,
     contactoNombre: null,
@@ -674,6 +789,7 @@ async function createPruebaConversationFirebase(
       whatsappName: null,
       cobertura: null,
       email: null,
+      fechaNacimiento: null,
       grupoEtario: null,
       consultaPara: null,
       contactoNombre: null,
@@ -702,6 +818,20 @@ async function createPruebaConversationFirebase(
     assigneeUserId: null,
     assigneeName: "Bot",
     tagIds: [],
+    resolutionStatus: "open",
+    resolvedAt: null,
+    resolvedByKind: null,
+    resolvedByUserId: null,
+    resolvedByName: null,
+    botPausedUntilInbound: false,
+    resoluciones: [],
+    motivoConsulta: null,
+    diagnosticoIa: null,
+    diagnosticoIaAt: null,
+    diagnosticoHumano: null,
+    diagnosticoHumanoByUserId: null,
+    diagnosticoHumanoByName: null,
+    diagnosticoHumanoAt: null,
     resumen: null,
     intencionAbierta: null,
     intencionConcluida: false,
@@ -831,34 +961,40 @@ export async function deleteAllPruebaConversations(): Promise<{
   return { locales, firestore: firestoreCount, mensajes, contactos };
 }
 
+export type WaMetricaFilaStore = {
+  tagIds: string[];
+  assigneeKind: "none" | "bot" | "user";
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+  /** Snapshot actual del episodio. */
+  resolutionStatus: WaResolutionStatus;
+  /** Resoluciones del período (episodios cerrados). */
+  resolucionesEnPeriodo: WaResolucion[];
+};
+
 export async function listConversacionesMetricas(
   desde: string,
   hasta: string,
-): Promise<
-  {
-    tagIds: string[];
-    assigneeKind: "none" | "bot" | "user";
-    assigneeUserId: string | null;
-    assigneeName: string | null;
-  }[]
-> {
+): Promise<WaMetricaFilaStore[]> {
   const from = Date.parse(`${desde}T00:00:00-03:00`);
   const to = Date.parse(`${hasta}T23:59:59.999-03:00`);
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
     throw new Error("Elegí un rango de fechas válido");
   }
   const snap = await getDocs(collection(firestore, CONVERSATIONS));
-  const filas: {
-    tagIds: string[];
-    assigneeKind: "none" | "bot" | "user";
-    assigneeUserId: string | null;
-    assigneeName: string | null;
-  }[] = [];
+  const filas: WaMetricaFilaStore[] = [];
   for (const item of snap.docs) {
     const raw = item.data();
     if (raw.prueba === true) continue;
     const cuando = Date.parse(String(raw.lastMessageAt || raw.createdAt || ""));
-    if (!Number.isFinite(cuando) || cuando < from || cuando > to) continue;
+    const resoluciones = normalizeResoluciones(raw.resoluciones).filter((r) => {
+      const at = Date.parse(r.at);
+      return Number.isFinite(at) && at >= from && at <= to;
+    });
+    const enRangoActividad =
+      Number.isFinite(cuando) && cuando >= from && cuando <= to;
+    // Incluir si hubo actividad en el rango o al menos una resolución en el período.
+    if (!enRangoActividad && !resoluciones.length) continue;
     const assigneeKind =
       raw.assigneeKind === "bot" || raw.assigneeKind === "user" ? raw.assigneeKind : "none";
     filas.push({
@@ -868,18 +1004,39 @@ export async function listConversacionesMetricas(
       assigneeKind,
       assigneeUserId: raw.assigneeUserId != null ? String(raw.assigneeUserId) : null,
       assigneeName: raw.assigneeName != null ? String(raw.assigneeName).trim() || null : null,
+      resolutionStatus: raw.resolutionStatus === "resolved" ? "resolved" : "open",
+      resolucionesEnPeriodo: resoluciones,
     });
   }
   return filas;
 }
 
+/** Pedido de turno → ficha: si la fecha quedó solo en menuEstado, copiarla al contacto. */
+async function asegurarFechaNacimientoEnFicha(
+  conversation: WaConversation,
+  contact: WaContact | null | undefined,
+): Promise<WaContact | null | undefined> {
+  if (!contact) return contact;
+  if ((contact.fechaNacimiento ?? "").trim()) return contact;
+  const iso = normalizeFechaNacimiento(conversation.menuEstado?.fechaNacimiento ?? "");
+  if (!iso) return contact;
+  const updated = await fillEmptyContactFields(contact.id, { fechaNacimiento: iso });
+  return updated ?? { ...contact, fechaNacimiento: iso };
+}
+
 export async function getConversation(id: string): Promise<WaConversation | null> {
   const local = getLocalConversation(id);
-  if (local) return local;
+  if (local) {
+    const contact = await asegurarFechaNacimientoEnFicha(local, local.contact);
+    return { ...local, contact: contact ?? undefined };
+  }
   const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
   if (!snap.exists()) return null;
   const conversation = normalizeConversation(snap.id, snap.data() as Record<string, unknown>);
-  const contact = await getContact(conversation.contactId);
+  const contact = await asegurarFechaNacimientoEnFicha(
+    conversation,
+    await getContact(conversation.contactId),
+  );
   return { ...conversation, contact: contact ?? undefined };
 }
 
@@ -894,7 +1051,10 @@ async function withContacts(items: WaConversation[]): Promise<WaConversation[]> 
   return Promise.all(
     items.map(async (c) => {
       try {
-        const contact = await getContact(c.contactId);
+        const contact = await asegurarFechaNacimientoEnFicha(
+          c,
+          (await getContact(c.contactId)) ?? c.contact,
+        );
         return { ...c, contact: contact ?? c.contact ?? undefined };
       } catch {
         // Sin cuota / error de lectura: no tumbar todo el listado.
@@ -1039,7 +1199,9 @@ export async function markConversationRead(id: string): Promise<WaConversation |
     unreadCount: 0,
     updatedAt: now,
   });
-  return { ...current, unreadCount: 0, updatedAt: now };
+  // Releer: si no, un snapshot viejo puede pisar assignee recién cambiado en el cliente.
+  const fresh = await getConversation(id);
+  return fresh ? { ...fresh, unreadCount: 0 } : { ...current, unreadCount: 0, updatedAt: now };
 }
 
 export async function setConversationAssignee(
@@ -1062,6 +1224,141 @@ export async function setConversationAssignee(
     assigneeName: input.kind === "none" ? null : input.name ?? null,
     updatedAt: now,
   };
+  await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
+  return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+/**
+ * Marca el episodio como resuelto, pasa al bot y pausa respuestas hasta el próximo inbound.
+ */
+export async function resolveConversation(
+  id: string,
+  input: {
+    byKind: WaResolucionByKind;
+    byUserId?: string | null;
+    byName?: string | null;
+    motivo?: WaResolucionMotivo;
+  },
+): Promise<WaConversation | null> {
+  const current = await getConversation(id);
+  if (!current) return null;
+  if (current.resolutionStatus === "resolved" && current.botPausedUntilInbound) {
+    return current;
+  }
+  const now = nowIso();
+  const entry: WaResolucion = {
+    id: randomUUID(),
+    at: now,
+    byKind: input.byKind,
+    byUserId: input.byKind === "human" ? input.byUserId ?? null : null,
+    byName:
+      input.byKind === "bot"
+        ? input.byName?.trim() || "Bot"
+        : input.byName?.trim() || current.assigneeName || "Operador",
+    motivo: input.motivo ?? (input.byKind === "human" ? "manual" : "cierre_bot"),
+  };
+  const resoluciones = [...(current.resoluciones ?? []), entry].slice(-200);
+  const patch = {
+    resolutionStatus: "resolved" as const,
+    resolvedAt: now,
+    resolvedByKind: entry.byKind,
+    resolvedByUserId: entry.byUserId,
+    resolvedByName: entry.byName,
+    botPausedUntilInbound: true,
+    resoluciones,
+    assigneeKind: "bot" as const,
+    assigneeUserId: null as string | null,
+    assigneeName: "Bot",
+    derivacionPendiente: false,
+    updatedAt: now,
+  };
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, patch);
+  }
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return null;
+  await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
+  return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+/** Guarda motivo + diagnóstico sugerido por la IA (primera vez / oportunidad). */
+export async function setDiagnosticoPresuntivoIa(
+  id: string,
+  input: { diagnostico?: string | null; motivoConsulta?: string | null },
+): Promise<WaConversation | null> {
+  const current = await getConversation(id);
+  if (!current) return null;
+  const now = nowIso();
+  const motivo = String(input.motivoConsulta ?? "").trim().slice(0, 800);
+  const diag = String(input.diagnostico ?? "").trim().slice(0, 160);
+  const patch = {
+    ...(motivo ? { motivoConsulta: motivo } : {}),
+    ...(diag ? { diagnosticoIa: diag, diagnosticoIaAt: now } : {}),
+    updatedAt: now,
+  };
+  if (!motivo && !diag) return current;
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, patch);
+  }
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return null;
+  await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
+  return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+/** Diagnóstico corregido/confirmado por una persona del equipo. */
+export async function setDiagnosticoPresuntivoHumano(
+  id: string,
+  input: {
+    diagnostico: string;
+    byUserId: string;
+    byName: string;
+  },
+): Promise<WaConversation | null> {
+  const current = await getConversation(id);
+  if (!current) return null;
+  const diag = String(input.diagnostico ?? "").trim().slice(0, 160);
+  const now = nowIso();
+  const patch = {
+    diagnosticoHumano: diag || null,
+    diagnosticoHumanoByUserId: diag ? input.byUserId : null,
+    diagnosticoHumanoByName: diag ? input.byName.trim() || "Operador" : null,
+    diagnosticoHumanoAt: diag ? now : null,
+    updatedAt: now,
+  };
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, patch);
+  }
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return null;
+  await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
+  return normalizeConversation(id, { ...snap.data(), ...patch });
+}
+
+/** Tras inbound: si estaba resuelta/pausada, abre un episodio nuevo. */
+export async function reopenConversationEpisodeIfNeeded(
+  id: string,
+): Promise<WaConversation | null> {
+  const current = await getConversation(id);
+  if (!current) return null;
+  if (current.resolutionStatus !== "resolved" && !current.botPausedUntilInbound) {
+    return current;
+  }
+  const now = nowIso();
+  const patch = {
+    resolutionStatus: "open" as const,
+    resolvedAt: null as string | null,
+    resolvedByKind: null as WaResolucionByKind | null,
+    resolvedByUserId: null as string | null,
+    resolvedByName: null as string | null,
+    botPausedUntilInbound: false,
+    updatedAt: now,
+  };
+  if (isLocalPruebaId(id)) {
+    return setLocalConversationPatch(id, patch);
+  }
+  const snap = await getDoc(doc(firestore, CONVERSATIONS, id));
+  if (!snap.exists()) return null;
   await updateDoc(doc(firestore, CONVERSATIONS, id), patch);
   return normalizeConversation(id, { ...snap.data(), ...patch });
 }
@@ -1135,6 +1432,7 @@ export type DatosVaciosContacto = {
   contactoApellido?: string;
   grupoEtario?: "infanto" | "adulto" | "";
   cobertura?: string;
+  fechaNacimiento?: string;
   esPaciente?: "si" | "no" | "";
   dni?: string;
   sexo?: "masculino" | "femenino" | "";
@@ -1154,32 +1452,42 @@ export function datosVaciosParaContacto(
   if (nextConsulta === "tercero") {
     const relacion = matchRelacion(input.relacionFamiliar ?? "");
     if (relacion && relacion !== (existing.relacionFamiliar ?? "")) patch.relacionFamiliar = relacion;
-    const contactoNombre = input.contactoNombre?.trim() ?? "";
-    const contactoApellido = input.contactoApellido?.trim() ?? "";
-    if (contactoNombre && contactoNombre !== (existing.contactoNombre ?? "").trim()) {
+    const contactoNombre = formatNombrePersona(input.contactoNombre ?? "");
+    const contactoApellido = formatNombrePersona(input.contactoApellido ?? "");
+    if (contactoNombre && contactoNombre !== formatNombrePersona(existing.contactoNombre ?? "")) {
       patch.contactoNombre = contactoNombre;
     }
-    if (contactoApellido && contactoApellido !== (existing.contactoApellido ?? "").trim()) {
+    if (contactoApellido && contactoApellido !== formatNombrePersona(existing.contactoApellido ?? "")) {
       patch.contactoApellido = contactoApellido;
     }
   }
 
-  const pacienteNombre = input.pacienteNombre?.trim() ?? "";
-  const pacienteApellido = input.pacienteApellido?.trim() ?? "";
-  if (pacienteNombre && pacienteNombre !== (existing.firstName ?? "").trim()) patch.firstName = pacienteNombre;
-  if (pacienteApellido && pacienteApellido !== (existing.lastName ?? "").trim()) {
+  const pacienteNombre = formatNombrePersona(input.pacienteNombre ?? "");
+  const pacienteApellido = formatNombrePersona(input.pacienteApellido ?? "");
+  if (pacienteNombre && pacienteNombre !== formatNombrePersona(existing.firstName ?? "")) {
+    patch.firstName = pacienteNombre;
+  }
+  if (pacienteApellido && pacienteApellido !== formatNombrePersona(existing.lastName ?? "")) {
     patch.lastName = pacienteApellido;
   }
   if (patch.firstName || patch.lastName) {
     const first = String(patch.firstName ?? existing.firstName ?? "");
     const last = String(patch.lastName ?? existing.lastName ?? "");
-    patch.displayName = [first, last].filter(Boolean).join(" ");
+    patch.displayName = [formatNombrePersona(first), formatNombrePersona(last)]
+      .filter(Boolean)
+      .join(" ");
   }
 
   const grupo = normalizeGrupoEtario(input.grupoEtario);
   if (grupo && grupo !== existing.grupoEtario) patch.grupoEtario = grupo;
-  const cobertura = input.cobertura?.trim() ?? "";
-  if (cobertura && cobertura !== (existing.cobertura ?? "").trim()) patch.cobertura = cobertura;
+  const cobertura = formatNombrePersona(input.cobertura ?? "");
+  if (cobertura && cobertura !== formatNombrePersona(existing.cobertura ?? "")) {
+    patch.cobertura = cobertura;
+  }
+  const fechaNacimiento = normalizeFechaNacimiento(input.fechaNacimiento ?? "");
+  if (fechaNacimiento && fechaNacimiento !== (existing.fechaNacimiento ?? "").trim()) {
+    patch.fechaNacimiento = fechaNacimiento;
+  }
   if (existing.esPaciente == null && input.esPaciente === "si") patch.esPaciente = true;
   if (existing.esPaciente == null && input.esPaciente === "no") patch.esPaciente = false;
   const dni = documentoDePersona(input.dni ?? "");
@@ -1252,8 +1560,8 @@ export async function replaceContactPatientFields(
 ): Promise<WaContact | null> {
   const existing = await getContact(id);
   if (!existing) return null;
-  const nombre = input.pacienteNombre.trim();
-  const apellido = input.pacienteApellido.trim();
+  const nombre = formatNombrePersona(input.pacienteNombre);
+  const apellido = formatNombrePersona(input.pacienteApellido);
   const grupo = input.grupoEtario === "infanto" || input.grupoEtario === "adulto" ? input.grupoEtario : null;
   const sexo = input.sexo === "masculino" || input.sexo === "femenino" ? input.sexo : null;
   const consulta = input.consultaPara === "propio" || input.consultaPara === "tercero" ? input.consultaPara : null;
@@ -1262,9 +1570,9 @@ export async function replaceContactPatientFields(
     lastName: apellido || null,
     displayName: [nombre, apellido].filter(Boolean).join(" ") || null,
     consultaPara: consulta,
-    relacionFamiliar: input.relacionFamiliar.trim() || null,
-    contactoNombre: input.contactoNombre.trim() || null,
-    contactoApellido: input.contactoApellido.trim() || null,
+    relacionFamiliar: formatNombrePersona(input.relacionFamiliar) || null,
+    contactoNombre: formatNombrePersona(input.contactoNombre) || null,
+    contactoApellido: formatNombrePersona(input.contactoApellido) || null,
     grupoEtario: grupo,
     dni: input.dni.trim() || null,
     sexo,

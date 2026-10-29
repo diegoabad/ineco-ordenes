@@ -23,6 +23,8 @@ export type WaContact = {
   whatsappName: string | null;
   cobertura: string | null;
   email: string | null;
+  /** YYYY-MM-DD */
+  fechaNacimiento?: string | null;
   grupoEtario: WaContactGrupoEtario | null;
   consultaPara: WaContactConsultaPara | null;
   /** Quien escribe por WhatsApp cuando no es el paciente. */
@@ -34,6 +36,19 @@ export type WaContact = {
   esPaciente: boolean | null;
   isBlocked: boolean;
   updatedAt?: string;
+};
+
+export type WaResolutionStatus = "open" | "resolved";
+export type WaResolucionByKind = "human" | "bot";
+export type WaResolucionMotivo = "manual" | "timeout" | "cierre_bot";
+
+export type WaResolucion = {
+  id: string;
+  at: string;
+  byKind: WaResolucionByKind;
+  byUserId: string | null;
+  byName: string | null;
+  motivo?: WaResolucionMotivo;
 };
 
 export type WaConversation = {
@@ -49,6 +64,20 @@ export type WaConversation = {
   assigneeUserId?: string | null;
   assigneeName?: string | null;
   tagIds?: string[];
+  resolutionStatus?: WaResolutionStatus;
+  resolvedAt?: string | null;
+  resolvedByKind?: WaResolucionByKind | null;
+  resolvedByUserId?: string | null;
+  resolvedByName?: string | null;
+  botPausedUntilInbound?: boolean;
+  resoluciones?: WaResolucion[];
+  motivoConsulta?: string | null;
+  diagnosticoIa?: string | null;
+  diagnosticoIaAt?: string | null;
+  diagnosticoHumano?: string | null;
+  diagnosticoHumanoByUserId?: string | null;
+  diagnosticoHumanoByName?: string | null;
+  diagnosticoHumanoAt?: string | null;
   resumen?: string | null;
   intencionAbierta?: string | null;
   intencionConcluida?: boolean;
@@ -81,6 +110,7 @@ export type WaConversation = {
     fechaNacimiento?: string;
     edad?: string;
     sexo?: "" | "masculino" | "femenino";
+    motivoConsulta?: string;
   } | null;
   pruebaResultado?: "correcta" | "incorrecta" | null;
   pruebaNota?: string | null;
@@ -109,6 +139,19 @@ export type WaOperator = {
   nombre: string;
   email: string;
   color: string;
+};
+
+export type WaDerivacionRegla = {
+  id: string;
+  profesionalNombre: string;
+  profesionalClave: string;
+  recepcionistaNombre: string;
+};
+
+export type WaDerivacionConfig = {
+  defaultRecepcionista: string;
+  reglas: WaDerivacionRegla[];
+  updatedAt?: string;
 };
 
 export type WaTagGroup = {
@@ -178,12 +221,26 @@ export function waAssigneeLabel(conversation?: {
   return "Sin asignar";
 }
 
+function titlePersona(value: string | null | undefined): string {
+  const n = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("es-AR");
+  if (!n) return "";
+  return n
+    .split(" ")
+    .map((w) => (w ? w.charAt(0).toLocaleUpperCase("es-AR") + w.slice(1) : w))
+    .join(" ");
+}
+
 export function waContactLabel(contact?: WaContact | null): string {
   if (!contact) return "Contacto";
-  if (contact.displayName?.trim()) return contact.displayName.trim();
-  const full = [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim();
+  const display = titlePersona(contact.displayName);
+  if (display) return display;
+  const full = titlePersona([contact.firstName, contact.lastName].filter(Boolean).join(" "));
   if (full) return full;
-  if (contact.whatsappName?.trim()) return contact.whatsappName.trim();
+  const wa = titlePersona(contact.whatsappName);
+  if (wa) return wa;
   return contact.phoneNumber || "Contacto";
 }
 
@@ -198,9 +255,9 @@ export function waPruebaTitulo(contact?: WaContact | null): string {
 /** Nombre del paciente (datos clínicos / agenda). */
 export function waPatientLabel(contact?: WaContact | null): string {
   if (!contact) return "";
-  const full = [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim();
+  const full = titlePersona([contact.firstName, contact.lastName].filter(Boolean).join(" "));
   if (full) return full;
-  return contact.displayName?.trim() || "";
+  return titlePersona(contact.displayName);
 }
 
 /**
@@ -221,11 +278,10 @@ export function waContactThreadHeader(contact?: WaContact | null): {
   const patient = waPatientLabel(contact);
   const title = patient || phone || "Contacto";
 
-  const contactoNombre = [contact.contactoNombre, contact.contactoApellido]
-    .map((p) => p?.trim())
-    .filter(Boolean)
-    .join(" ");
-  const relacion = contact.relacionFamiliar?.trim() || "";
+  const contactoNombre = titlePersona(
+    [contact.contactoNombre, contact.contactoApellido].filter(Boolean).join(" "),
+  );
+  const relacion = titlePersona(contact.relacionFamiliar);
 
   let subtitle: string | null = null;
   if (contact.consultaPara === "tercero") {

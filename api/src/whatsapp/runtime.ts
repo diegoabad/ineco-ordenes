@@ -122,6 +122,9 @@ async function handleIncomingRaw(raw: unknown, _isBackfill: boolean): Promise<vo
     });
 
     if (!_isBackfill && normalized.direction === "INBOUND" && normalized.text.trim()) {
+      // Episodio resuelto + pausa: el inbound reinicia y el bot puede volver a atender.
+      const { reopenConversationEpisodeIfNeeded } = await import("./firestore-store.js");
+      await reopenConversationEpisodeIfNeeded(conversation.id);
       scheduleBotTurn(conversation.id);
     }
   } catch (error) {
@@ -169,6 +172,7 @@ async function resumeUnansweredTurns(): Promise<void> {
   const ahora = Date.now();
   for (const conv of [...pruebas.items, ...reales.items]) {
     if (conv.assigneeKind === "user" || conv.contact?.isBlocked) continue;
+    if (conv.botPausedUntilInbound || conv.resolutionStatus === "resolved") continue;
     const at = conv.lastMessageAt ? Date.parse(conv.lastMessageAt) : 0;
     if (!at || ahora - at > 45 * 60 * 1000) continue;
     const messages = await listRecentMessagesByConversation(conv.id, 5);
@@ -308,6 +312,8 @@ export async function sendPruebaInbound(conversationId: string, text: string): P
     externalMessageId: `prueba-${randomUUID()}`,
     status: "RECEIVED",
   });
+  const { reopenConversationEpisodeIfNeeded } = await import("./firestore-store.js");
+  await reopenConversationEpisodeIfNeeded(conversationId);
   if (conversation.pruebaMotor === "menu") {
     const { runMenuTurn } = await import("./bot-menu.js");
     await runMenuTurn(conversationId);

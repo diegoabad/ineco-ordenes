@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
 import { toast } from "react-toastify";
 import { useAuth } from "../auth/AuthContext";
-import { formatFechaHora, fechaHoyIso } from "../lib/fechas";
+import { formatFechaHora, formatFechaYmd, fechaHoyIso } from "../lib/fechas";
+import { formatNombrePersona } from "../lib/nombrePersona";
 import {
   extractSlashQuery,
   formatTrigger,
@@ -15,6 +16,8 @@ import {
 } from "../lib/whatsappNav";
 import {
   assignWaConversation,
+  resolveWaConversation,
+  setWaDiagnosticoPresuntivo,
   connectWhatsapp,
   fetchWaConversation,
   fetchWaConversationByContact,
@@ -46,8 +49,6 @@ import { waAssigneeLabel, waContactLabel, waContactThreadHeader, waPruebaTitulo 
 import { DatePicker } from "./DatePicker";
 import {
   IconCheck,
-  IconCheckSquare,
-  IconClock,
   IconCollapse,
   IconConversations,
   IconExpand,
@@ -57,11 +58,10 @@ import {
   IconGrip,
   IconLink,
   IconMinus,
-  IconNote,
+  IconAlert,
   IconPin,
   IconPlus,
   IconSearch,
-  IconTag,
   IconUsers,
 } from "./Icons";
 import { LoadingBlock } from "./InecoMark";
@@ -149,26 +149,46 @@ function datoOpciones(text: string, tercero: boolean): { campo: DatoCampo; label
   return items;
 }
 
+function sameMessageList(a: WaMessage[], b: WaMessage[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.id !== y.id) return false;
+    if ((x.text ?? "") !== (y.text ?? "")) return false;
+    if (x.status !== y.status) return false;
+    if (x.isDeleted !== y.isDeleted) return false;
+  }
+  return true;
+}
+
 function mergeMensajesServidor(prev: WaMessage[], server: WaMessage[]): WaMessage[] {
   const locales = prev.filter((item) => item.id.startsWith("local-"));
-  if (!locales.length) return server;
-  const usados = new Set<string>();
-  const pendientes = locales.filter((local) => {
-    const match = server.find((msg) => {
-      if (usados.has(msg.id)) return false;
-      if (msg.direction !== local.direction) return false;
-      if ((msg.text ?? "").trim() !== (local.text ?? "").trim()) return false;
-      const delta = Math.abs(Date.parse(msg.createdAt) - Date.parse(local.createdAt));
-      return Number.isFinite(delta) && delta < 20_000;
+  let next: WaMessage[];
+  if (!locales.length) {
+    next = server;
+  } else {
+    const usados = new Set<string>();
+    const pendientes = locales.filter((local) => {
+      const match = server.find((msg) => {
+        if (usados.has(msg.id)) return false;
+        if (msg.direction !== local.direction) return false;
+        if ((msg.text ?? "").trim() !== (local.text ?? "").trim()) return false;
+        const delta = Math.abs(Date.parse(msg.createdAt) - Date.parse(local.createdAt));
+        return Number.isFinite(delta) && delta < 20_000;
+      });
+      if (!match) return true;
+      usados.add(match.id);
+      return false;
     });
-    if (!match) return true;
-    usados.add(match.id);
-    return false;
-  });
-  if (!pendientes.length) return server;
-  return [...server, ...pendientes].sort(
-    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
-  );
+    next = !pendientes.length
+      ? server
+      : [...server, ...pendientes].sort(
+          (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+        );
+  }
+  return sameMessageList(prev, next) ? prev : next;
 }
 
 type WaInboxFilters = {
@@ -216,6 +236,52 @@ function formatPreviewTime(iso: string | null | undefined): string {
   }
 }
 
+/** Firma liviana para no re-renderizar la lista si el poll no cambió nada visible. */
+function conversationListSignature(c: WaConversation): string {
+  const contact = c.contact;
+  return [
+    c.id,
+    c.lastMessageAt ?? "",
+    c.updatedAt ?? "",
+    String(c.unreadCount ?? 0),
+    c.assigneeKind ?? "",
+    c.assigneeUserId ?? "",
+    c.assigneeName ?? "",
+    (c.tagIds ?? []).join(","),
+    c.lastMessagePreview ?? "",
+    c.resumen ?? "",
+    c.pruebaResultado ?? "",
+    contact?.displayName ?? "",
+    contact?.firstName ?? "",
+    contact?.lastName ?? "",
+    contact?.updatedAt ?? "",
+  ].join("\u001f");
+}
+
+function sameConversationList(a: WaConversation[], b: WaConversation[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (conversationListSignature(a[i]!) !== conversationListSignature(b[i]!)) return false;
+  }
+  return true;
+}
+
+function patchConversationInList(
+  list: WaConversation[],
+  incoming: WaConversation,
+  touch: AssigneeTouch | null,
+): WaConversation[] {
+  const idx = list.findIndex((item) => item.id === incoming.id);
+  if (idx < 0) return list;
+  const current = list[idx]!;
+  const merged = mergeConversationKeepAssignee(current, incoming, touch);
+  if (conversationListSignature(merged) === conversationListSignature(current)) return list;
+  const next = list.slice();
+  next[idx] = merged;
+  return next;
+}
+
 type CancelTurnoPendiente = {
   dni: string;
   profesional: string;
@@ -223,7 +289,34 @@ type CancelTurnoPendiente = {
   /** `YYYY-MM-DD HH:mm` */
   fechaHora: string;
   resumen: string;
+  messageId?: string;
 };
+
+type AccionPendienteKind = "busca_turno" | "cancelar_turno";
+
+type AccionPendiente = {
+  id: string;
+  kind: AccionPendienteKind;
+  createdAt: string;
+  title: string;
+  explanation: string;
+  details: Array<{ label: string; value: string }>;
+  messageText: string;
+};
+
+function esMensajePedidoTurno(text: string): boolean {
+  return /^Datos del pedido de turno:/i.test(String(text ?? "").trim());
+}
+
+/** Solo el pedido cerrado (tras el motivo). El aviso “Perfecto, el turno será cancelado” es intermedio. */
+function esMensajeCancelacionTurno(text: string): boolean {
+  return /^Pedido de cancelación registrado/i.test(String(text ?? "").trim());
+}
+
+function campoGlobo(text: string, etiqueta: string): string {
+  const re = new RegExp(`^[•\\-]?\\s*${etiqueta}:\\s*(.+)$`, "im");
+  return text.match(re)?.[1]?.trim() || "";
+}
 
 function normWa(texto: string): string {
   return String(texto || "")
@@ -235,14 +328,10 @@ function normWa(texto: string): string {
 
 /** Extrae DNI / prof / fecha del globo de cancelación para anular en Medexis. */
 function parseCancelacionBubble(text: string, dniEstado = ""): CancelTurnoPendiente | null {
-  const campo = (etiqueta: string) => {
-    const re = new RegExp(`^[•\\-]?\\s*${etiqueta}:\\s*(.+)$`, "im");
-    return text.match(re)?.[1]?.trim() || "";
-  };
-  const dni = (campo("DNI") || dniEstado).replace(/\D/g, "");
-  const profesional = campo("Prof\\.") || campo("Profesional");
-  const prestacion = campo("Prest\\.") || campo("Prestaci[oó]n");
-  let fechaHora = campo("FechaISO").replace("T", " ").slice(0, 16);
+  const dni = (campoGlobo(text, "DNI") || dniEstado).replace(/\D/g, "");
+  const profesional = campoGlobo(text, "Prof\\.") || campoGlobo(text, "Profesional");
+  const prestacion = campoGlobo(text, "Prest\\.") || campoGlobo(text, "Prestaci[oó]n");
+  let fechaHora = campoGlobo(text, "FechaISO").replace("T", " ").slice(0, 16);
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(fechaHora)) {
     const legible = text.match(
       /(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)?\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/i,
@@ -445,13 +534,13 @@ function parsePedidoTurnoBubble(text: string): {
   prestacion?: string;
   tratamiento?: string;
   modalidad?: "" | "presencial" | "virtual" | "indistinto";
+  dni?: string;
+  paciente?: string;
+  fechaNacimiento?: string;
+  cobertura?: string;
 } {
-  const campo = (etiqueta: string) => {
-    const re = new RegExp(`^[•\\-]?\\s*${etiqueta}:\\s*(.+)$`, "im");
-    return text.match(re)?.[1]?.trim() || "";
-  };
-  const profesional = campo("Profesional");
-  const prestRaw = campo("Prestaci[oó]n\\s*/\\s*motivo");
+  const profesional = campoGlobo(text, "Profesional");
+  const prestRaw = campoGlobo(text, "Prestaci[oó]n\\s*/\\s*motivo");
   let prestacion = prestRaw;
   let tratamiento = prestRaw;
   const dijo = prestRaw.match(/^(.*?)\s*\(dijo:\s*(.+?)\)\s*$/i);
@@ -459,17 +548,98 @@ function parsePedidoTurnoBubble(text: string): {
     prestacion = dijo[1]!.trim();
     tratamiento = dijo[2]!.trim();
   }
-  const modRaw = campo("Modalidad").toLowerCase();
+  const modRaw = campoGlobo(text, "Modalidad").toLowerCase();
   let modalidad: "" | "presencial" | "virtual" | "indistinto" = "";
   if (/presencial/.test(modRaw)) modalidad = "presencial";
   else if (/virtual/.test(modRaw)) modalidad = "virtual";
   else if (/indistinto/.test(modRaw)) modalidad = "indistinto";
+  const dni = campoGlobo(text, "DNI").replace(/\D/g, "") || undefined;
+  const paciente =
+    campoGlobo(text, "Paciente") ||
+    campoGlobo(text, "Nombre") ||
+    [campoGlobo(text, "Apellido"), campoGlobo(text, "Nombre")].filter(Boolean).join(", ") ||
+    undefined;
+  const fechaNacimiento =
+    campoGlobo(text, "Fecha de nacimiento") ||
+    campoGlobo(text, "Nacimiento") ||
+    undefined;
+  const cobertura = campoGlobo(text, "Cobertura") || campoGlobo(text, "Obra social") || undefined;
   return {
     profesional: profesional || undefined,
     prestacion: prestacion || undefined,
     tratamiento: tratamiento || undefined,
     modalidad,
+    dni,
+    paciente: paciente?.trim() || undefined,
+    fechaNacimiento: fechaNacimiento || undefined,
+    cobertura: cobertura || undefined,
   };
+}
+
+function detallesPedidoTurno(
+  text: string,
+  estado?: WaConversation["menuEstado"],
+  contact?: WaContact | null,
+): Array<{ label: string; value: string }> {
+  const delGlobo = parsePedidoTurnoBubble(text);
+  const pick = (...vals: Array<string | null | undefined>) => {
+    for (const v of vals) {
+      const t = String(v ?? "").trim();
+      if (t) return t;
+    }
+    return "";
+  };
+  const nombre = pick(
+    delGlobo.paciente,
+    [contact?.lastName, contact?.firstName].filter(Boolean).join(", "),
+    contact?.displayName,
+    [estado?.apellido, estado?.nombre].filter(Boolean).join(", "),
+  );
+  const rows: Array<{ label: string; value: string }> = [];
+  const push = (label: string, value: string) => {
+    if (value) rows.push({ label, value });
+  };
+  push("Paciente", nombre);
+  push("DNI", pick(delGlobo.dni, estado?.dni, contact?.dni).replace(/\D/g, ""));
+  push(
+    "Nacimiento",
+    pick(delGlobo.fechaNacimiento, estado?.fechaNacimiento, contact?.fechaNacimiento),
+  );
+  push("Prestación", pick(delGlobo.prestacion, estado?.tratamientoCatalogo, estado?.tratamiento));
+  push("Profesional", pick(delGlobo.profesional, estado?.profesionalCatalogo, estado?.profesional));
+  push("Modalidad", pick(delGlobo.modalidad, estado?.modalidad));
+  push("Cobertura", pick(delGlobo.cobertura, estado?.cobertura));
+  return rows;
+}
+
+function detallesCancelacionTurno(
+  text: string,
+  dniEstado = "",
+): Array<{ label: string; value: string }> {
+  const dni = (campoGlobo(text, "DNI") || dniEstado).replace(/\D/g, "");
+  const profesional = campoGlobo(text, "Prof\\.") || campoGlobo(text, "Profesional");
+  const prestacion = campoGlobo(text, "Prest\\.") || campoGlobo(text, "Prestaci[oó]n");
+  let fechaHora = campoGlobo(text, "FechaISO").replace("T", " ").slice(0, 16);
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(fechaHora)) {
+    const legible = text.match(
+      /(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)?\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/i,
+    );
+    if (legible) {
+      const dia = legible[1]!.padStart(2, "0");
+      const mes = legible[2]!.padStart(2, "0");
+      let anio = legible[3]!;
+      if (anio.length === 2) anio = `20${anio}`;
+      fechaHora = `${anio}-${mes}-${dia} ${legible[4]!.padStart(2, "0")}:${legible[5]!}`;
+    } else {
+      fechaHora = campoGlobo(text, "Fecha") || campoGlobo(text, "Turno") || "";
+    }
+  }
+  const rows: Array<{ label: string; value: string }> = [];
+  if (dni) rows.push({ label: "DNI", value: dni });
+  if (profesional) rows.push({ label: "Profesional", value: profesional });
+  if (prestacion) rows.push({ label: "Prestación", value: prestacion });
+  if (fechaHora) rows.push({ label: "Fecha / hora", value: fechaHora });
+  return rows;
 }
 
 function MessageTicks({ status }: { status: string }) {
@@ -591,6 +761,8 @@ type Props = {
 const PINNED_WA_TAGS_KEY = "wa-inbox-pinned-tag-ids";
 const PINNED_CLUSTERS_KEY = "wa-inbox-pinned-tag-clusters";
 const CLUSTER_MIN = 2;
+/** Color único en el listado “Todas” (las aplicadas usan el color del grupo). */
+const TAG_TODAS_NEUTRO = "#94a3b8";
 const CLUSTER_COLORS = [
   "#a61948",
   "#64748b",
@@ -609,6 +781,105 @@ type PinnedCluster = {
   color: string;
   tagIds: string[];
 };
+
+type AssigneeTouch = {
+  id: string;
+  assigneeKind: "none" | "bot" | "user";
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+  at: number;
+};
+
+function sameAssigneeFields(
+  a: {
+    assigneeKind?: string | null;
+    assigneeUserId?: string | null;
+    assigneeName?: string | null;
+  },
+  b: {
+    assigneeKind?: string | null;
+    assigneeUserId?: string | null;
+    assigneeName?: string | null;
+  },
+): boolean {
+  return (
+    (a.assigneeKind ?? "") === (b.assigneeKind ?? "") &&
+    (a.assigneeUserId ?? "") === (b.assigneeUserId ?? "") &&
+    (a.assigneeName ?? "") === (b.assigneeName ?? "")
+  );
+}
+
+type WaInboxListItemProps = {
+  conversation: WaConversation;
+  active: boolean;
+  color: string;
+  pruebaMode: boolean;
+  onSelect: (id: string) => void;
+};
+
+const WaInboxListItem = memo(function WaInboxListItem({
+  conversation: c,
+  active,
+  color,
+  pruebaMode,
+  onSelect,
+}: WaInboxListItemProps) {
+  const label = pruebaMode ? waPruebaTitulo(c.contact) : waContactLabel(c.contact);
+  return (
+    <button
+      type="button"
+      className={`wa-inbox__item${active ? " is-active" : ""}`}
+      style={{ "--assignee": color } as CSSProperties}
+      onClick={() => onSelect(c.id)}
+    >
+      <div className="wa-inbox__item-top">
+        <strong className="wa-inbox__item-name">{label}</strong>
+        {!pruebaMode && c.prueba ? (
+          <span className="wa-inbox__prueba-pill">Prueba</span>
+        ) : null}
+        <span className="wa-inbox__item-time">{formatPreviewTime(c.lastMessageAt)}</span>
+      </div>
+      {pruebaMode ? null : (
+        <div className="wa-inbox__item-bottom">
+          <span className="wa-inbox__item-preview">
+            {c.resumen || c.lastMessagePreview || "Sin mensajes"}
+          </span>
+          <span className="wa-inbox__assignee">{waAssigneeLabel(c)}</span>
+          {c.unreadCount > 0 ? <span className="wa-inbox__badge">{c.unreadCount}</span> : null}
+        </div>
+      )}
+    </button>
+  );
+});
+
+/** Evita que un poll/mark-read atrasado revierta un cambio de asignación local. */
+function mergeConversationKeepAssignee(
+  local: WaConversation,
+  incoming: WaConversation,
+  touch: AssigneeTouch | null,
+): WaConversation {
+  const merged: WaConversation = {
+    ...local,
+    ...incoming,
+    contact: incoming.contact ?? local.contact,
+  };
+  const touched =
+    touch &&
+    touch.id === local.id &&
+    Date.now() - touch.at < 12_000 &&
+    sameAssigneeFields(local, touch);
+  if (!touched) return merged;
+  if (sameAssigneeFields(incoming, touch)) {
+    // Servidor ya alcanzó el valor local: liberar el lock.
+    return merged;
+  }
+  return {
+    ...merged,
+    assigneeKind: touch.assigneeKind,
+    assigneeUserId: touch.assigneeUserId,
+    assigneeName: touch.assigneeName,
+  };
+}
 
 function readPinnedTagIds(): string[] {
   try {
@@ -749,10 +1020,12 @@ export function WhatsAppConversationsPanel({
   const dragPinnedIdRef = useRef<string | null>(null);
   const pinnedDropIndexRef = useRef<number | null>(null);
   const [quickTagQuery, setQuickTagQuery] = useState("");
-  const [quickPanelOpen, setQuickPanelOpen] = useState(false);
-  const [leftBuscaOpen, setLeftBuscaOpen] = useState(false);
-  const [leftBuscaPinned, setLeftBuscaPinned] = useState(false);
-  const [leftBuscaUiLocked, setLeftBuscaUiLocked] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
+  const [sidePanelPinned, setSidePanelPinned] = useState(false);
+  const [sidePanelUiLocked, setSidePanelUiLocked] = useState(false);
+  const [operadoraTab, setOperadoraTab] = useState<"paciente" | "etiquetas" | "busca">(
+    "paciente",
+  );
   const [buscaTurnoMounted, setBuscaTurnoMounted] = useState(false);
   const [buscaPedidoSeed, setBuscaPedidoSeed] = useState<{
     key: string;
@@ -762,13 +1035,28 @@ export function WhatsAppConversationsPanel({
     profesionalDoc?: string;
     profesionalNombre?: string;
     modalidad?: "" | "presencial" | "virtual" | "indistinto";
+    paciente?: {
+      dni?: string;
+      fechaNacimiento?: string;
+      nombre?: string;
+      apellido?: string;
+      email?: string;
+      telefono?: string;
+      sexo?: "" | "masculino" | "femenino";
+    } | null;
   } | null>(null);
+  /** Mensaje de pedido WA abierto en Busca Turno; se marca hecho solo al asignar. */
+  const [buscaAccionMessageId, setBuscaAccionMessageId] = useState<string | null>(null);
   const [buscaSoloLibres, setBuscaSoloLibres] = useState(true);
   const [cancelTurnoPendiente, setCancelTurnoPendiente] = useState<CancelTurnoPendiente | null>(
     null,
   );
   const [cancelTurnoBusy, setCancelTurnoBusy] = useState(false);
-  const [rightTagsPinned, setRightTagsPinned] = useState(false);
+  const [accionesOpen, setAccionesOpen] = useState(false);
+  const [accionesHechas, setAccionesHechas] = useState<Record<string, true>>({});
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  const [resueltaOpen, setResueltaOpen] = useState(false);
+  const [diagnosticoSaving, setDiagnosticoSaving] = useState(false);
   const [tagGroups, setTagGroups] = useState<WaTagGroup[]>([]);
   const [tagsModalOpen, setTagsModalOpen] = useState(false);
   const [tagsModalGroupId, setTagsModalGroupId] = useState("");
@@ -853,6 +1141,7 @@ export function WhatsAppConversationsPanel({
   const pendingTags = useRef<string[] | null>(null);
   const savingTags = useRef(false);
   const lastQuickReplyRef = useRef<QuickReply | null>(null);
+  const assigneeTouchRef = useRef<AssigneeTouch | null>(null);
   pollState.current = { selectedId, loadedCount: conversations.length, filters };
 
   const activeFilterCount = useMemo(() => countWaFilters(filters), [filters]);
@@ -931,15 +1220,23 @@ export function WhatsAppConversationsPanel({
         fetchWaMessages(id),
       ]);
       if (pollState.current.selectedId !== id) return;
-      setSelected(conv);
+      const touch = assigneeTouchRef.current;
+      setSelected((prev) =>
+        prev && prev.id === id ? mergeConversationKeepAssignee(prev, conv, touch) : conv,
+      );
+      setConversations((prev) => patchConversationInList(prev, conv, touch));
       setMessages(msgs);
       void markWaConversationRead(id)
         .then((updated) => {
           if (pollState.current.selectedId !== id) return;
-          setSelected(updated);
-          setConversations((prev) =>
-            prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)),
+          const readTouch = assigneeTouchRef.current;
+          const withRead = { ...updated, unreadCount: 0 };
+          setSelected((prev) =>
+            prev && prev.id === id
+              ? { ...mergeConversationKeepAssignee(prev, withRead, readTouch), unreadCount: 0 }
+              : prev,
           );
+          setConversations((prev) => patchConversationInList(prev, withRead, readTouch));
         })
         .catch(() => {
           /* ignore */
@@ -956,14 +1253,13 @@ export function WhatsAppConversationsPanel({
   useEffect(() => {
     if (pruebaMode || !vistaOperadora) {
       document.body.classList.remove("wa-vista-operadora");
-      setLeftBuscaOpen(false);
-      setLeftBuscaPinned(false);
-      setLeftBuscaUiLocked(false);
-      setQuickPanelOpen(false);
-      setRightTagsPinned(false);
+      setSidePanelOpen(false);
+      setSidePanelPinned(false);
+      setSidePanelUiLocked(false);
       return;
     }
     setBuscaTurnoMounted(true);
+    setSidePanelPinned(true);
     document.body.classList.add("wa-vista-operadora");
     return () => document.body.classList.remove("wa-vista-operadora");
   }, [pruebaMode, vistaOperadora]);
@@ -1029,35 +1325,55 @@ export function WhatsAppConversationsPanel({
             ...waFiltersQuery(snap.filters),
           })
             .then((page) => {
+              const touch = assigneeTouchRef.current;
               setConversations((prev) => {
                 const byId = new Map(page.items.map((item) => [item.id, item]));
-                const merged = prev.map((item) => byId.get(item.id) ?? item);
+                let changed = false;
+                const merged = prev.map((item) => {
+                  const incoming = byId.get(item.id);
+                  if (!incoming) return item;
+                  const next = mergeConversationKeepAssignee(item, incoming, touch);
+                  if (next !== item && conversationListSignature(next) !== conversationListSignature(item)) {
+                    changed = true;
+                    return next;
+                  }
+                  return item;
+                });
                 const known = new Set(merged.map((item) => item.id));
                 const fresh = page.items.filter((item) => !known.has(item.id));
-                return [...fresh, ...merged].sort((a, b) => {
+                if (fresh.length) changed = true;
+                if (!changed) return prev;
+                const next = [...fresh, ...merged].sort((a, b) => {
                   const ta = Date.parse(a.lastMessageAt || a.updatedAt || a.createdAt || "") || 0;
                   const tb = Date.parse(b.lastMessageAt || b.updatedAt || b.createdAt || "") || 0;
                   return tb - ta;
                 });
+                return sameConversationList(prev, next) ? prev : next;
               });
               if (snap.selectedId) {
                 const freshSel = page.items.find((item) => item.id === snap.selectedId);
                 if (freshSel) {
-                  setSelected((prev) =>
-                    prev && prev.id === freshSel.id
-                      ? {
-                          ...prev,
-                          ...freshSel,
-                          contact: freshSel.contact ?? prev.contact,
-                          menuEstado: freshSel.menuEstado ?? prev.menuEstado,
-                          tagIds: freshSel.tagIds ?? prev.tagIds,
-                        }
-                      : prev,
-                  );
+                  setSelected((prev) => {
+                    if (!prev || prev.id !== freshSel.id) return prev;
+                    const kept = mergeConversationKeepAssignee(prev, freshSel, touch);
+                    const same =
+                      conversationListSignature(kept) === conversationListSignature(prev) &&
+                      (kept.menuEstado?.fechaNacimiento ?? "") ===
+                        (prev.menuEstado?.fechaNacimiento ?? "") &&
+                      (kept.tagIds ?? []).join() === (prev.tagIds ?? []).join();
+                    if (same) return prev;
+                    return {
+                      ...kept,
+                      menuEstado: freshSel.menuEstado ?? prev.menuEstado,
+                      tagIds: freshSel.tagIds ?? prev.tagIds,
+                    };
+                  });
                 }
               }
-              setHasMoreConversations(page.hasMore);
-              setNextConversationsOffset(page.nextOffset);
+              setHasMoreConversations((prev) => (prev === page.hasMore ? prev : page.hasMore));
+              setNextConversationsOffset((prev) =>
+                prev === page.nextOffset ? prev : page.nextOffset,
+              );
             })
             .catch(() => undefined),
         );
@@ -1065,7 +1381,10 @@ export function WhatsAppConversationsPanel({
           tasks.push(
             fetchWaMessages(snap.selectedId)
               .then((msgs) => {
-                setMessages((prev) => mergeMensajesServidor(prev, msgs));
+                setMessages((prev) => {
+                  const next = mergeMensajesServidor(prev, msgs);
+                  return next === prev ? prev : next;
+                });
               })
               .catch(() => undefined),
           );
@@ -1075,13 +1394,11 @@ export function WhatsAppConversationsPanel({
         busy = false;
       });
     }, pruebaMode
-      ? pruebaMotor === "menu"
-        ? 1000
-        : 2000
+      ? 2500
       : waitingQr
         ? 3000
         : selected?.prueba
-          ? 2000
+          ? 2500
           : 20000);
     return () => window.clearInterval(id);
   }, [ready, refreshStatus, qrModalOpen, waStatus, pruebaMode, pruebaMotor, selected?.prueba]);
@@ -1131,10 +1448,11 @@ export function WhatsAppConversationsPanel({
   }, [selectedId]);
 
   useEffect(() => {
-    if (!tagSearchFocus.current || !quickPanelOpen) return;
+    if (!tagSearchFocus.current || !(sidePanelOpen || sidePanelPinned)) return;
+    if (operadoraTab !== "etiquetas") return;
     tagSearchFocus.current = false;
     quickTagSearchRef.current?.focus();
-  }, [quickPanelOpen, quickTagQuery]);
+  }, [sidePanelOpen, sidePanelPinned, operadoraTab, quickTagQuery]);
 
   useEffect(() => {
     if (!datoMenu) return;
@@ -1442,6 +1760,51 @@ export function WhatsAppConversationsPanel({
     return { ...header, title: waPruebaTitulo(selected?.contact), subtitle: null };
   }, [pruebaMode, selected]);
 
+  const accionesPendientes = useMemo((): AccionPendiente[] => {
+    if (pruebaMode) return [];
+    const out: AccionPendiente[] = [];
+    for (const m of messages) {
+      if (m.isDeleted || m.direction !== "OUTBOUND") continue;
+      if (accionesHechas[m.id]) continue;
+      const text = String(m.text ?? "");
+      if (esMensajePedidoTurno(text)) {
+        out.push({
+          id: m.id,
+          kind: "busca_turno",
+          createdAt: m.createdAt,
+          title: "Buscar turno",
+          explanation:
+            "El paciente pidió un turno. Revisá los datos del pedido y abrí Busca Turno para ofrecerle horarios.",
+          details: detallesPedidoTurno(text, selected?.menuEstado, selected?.contact),
+          messageText: text,
+        });
+      } else if (esMensajeCancelacionTurno(text)) {
+        out.push({
+          id: m.id,
+          kind: "cancelar_turno",
+          createdAt: m.createdAt,
+          title: "Eliminar turno",
+          explanation:
+            "El paciente quiere cancelar un turno. Confirmá los datos y anulalo en Medexis.",
+          details: detallesCancelacionTurno(
+            text,
+            selected?.menuEstado?.dni?.trim() || selected?.contact?.dni || "",
+          ),
+          messageText: text,
+        });
+      }
+    }
+    return out;
+  }, [accionesHechas, messages, pruebaMode, selected?.contact, selected?.menuEstado]);
+
+  useEffect(() => {
+    setAccionesHechas({});
+    setAccionesOpen(false);
+    setHighlightMessageId(null);
+    setBuscaAccionMessageId(null);
+    setResueltaOpen(false);
+  }, [selectedId]);
+
   useEffect(() => {
     if (!selectedId) return;
     const fresh = conversations.find((item) => item.id === selectedId);
@@ -1451,22 +1814,43 @@ export function WhatsAppConversationsPanel({
       const sameResumen = (current.resumen ?? "") === (fresh.resumen ?? "");
       const sameContact = current.contact?.updatedAt === fresh.contact?.updatedAt;
       const sameTags = (current.tagIds ?? []).join() === (fresh.tagIds ?? []).join();
-      const sameAssignee =
-        (current.assigneeKind ?? "") === (fresh.assigneeKind ?? "") &&
-        (current.assigneeName ?? "") === (fresh.assigneeName ?? "");
-      if (sameResumen && sameContact && sameTags && sameAssignee) return current;
-      return { ...current, ...fresh, contact: fresh.contact ?? current.contact };
+      const sameAssignee = sameAssigneeFields(current, fresh);
+      const sameResolution =
+        (current.resolutionStatus ?? "open") === (fresh.resolutionStatus ?? "open") &&
+        Boolean(current.botPausedUntilInbound) === Boolean(fresh.botPausedUntilInbound);
+      const sameDx =
+        (current.motivoConsulta ?? "") === (fresh.motivoConsulta ?? "") &&
+        (current.diagnosticoIa ?? "") === (fresh.diagnosticoIa ?? "") &&
+        (current.diagnosticoHumano ?? "") === (fresh.diagnosticoHumano ?? "") &&
+        (current.diagnosticoHumanoByName ?? "") === (fresh.diagnosticoHumanoByName ?? "");
+      if (
+        sameResumen &&
+        sameContact &&
+        sameTags &&
+        sameAssignee &&
+        sameResolution &&
+        sameDx
+      ) {
+        return current;
+      }
+      return mergeConversationKeepAssignee(current, fresh, assigneeTouchRef.current);
     });
   }, [conversations, selectedId]);
 
-  function selectConversation(conversation: WaConversation) {
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+
+  const selectConversationById = useCallback((id: string) => {
+    if (pollState.current.selectedId === id) return;
+    const conversation = conversationsRef.current.find((item) => item.id === id);
+    if (!conversation) return;
     setSelectedId(conversation.id);
     setSelected(conversation);
     setDraft("");
     setAttachment(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     lastQuickReplyRef.current = null;
-  }
+  }, []);
 
   const openByContactId = useCallback(async (contactId: string) => {
     const id = contactId.trim();
@@ -1506,6 +1890,47 @@ export function WhatsAppConversationsPanel({
     () => tags.filter((tag) => (selected?.tagIds ?? []).includes(tag.id)),
     [tags, selected?.tagIds],
   );
+
+  const diagnosticoOpciones = useMemo(() => {
+    const grupo = tagGroups.find(
+      (g) =>
+        g.name
+          .normalize("NFD")
+          .replace(/\p{M}/gu, "")
+          .toLowerCase() === "diagnostico",
+    );
+    const delGrupo = grupo
+      ? tags.filter((tag) => tag.groupId === grupo.id).map((tag) => tag.name)
+      : [];
+    const set = new Set(delGrupo);
+    // Incluir valores ya guardados aunque no estén en el catálogo local.
+    for (const extra of [selected?.diagnosticoIa, selected?.diagnosticoHumano]) {
+      const t = String(extra ?? "").trim();
+      if (t) set.add(t);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [tagGroups, tags, selected?.diagnosticoIa, selected?.diagnosticoHumano]);
+
+  async function guardarDiagnosticoHumano(valor: string) {
+    if (!selectedId || diagnosticoSaving) return;
+    setDiagnosticoSaving(true);
+    try {
+      const updated = await setWaDiagnosticoPresuntivo(selectedId, valor);
+      setSelected((prev) =>
+        prev && prev.id === updated.id
+          ? { ...prev, ...updated, contact: updated.contact ?? prev.contact }
+          : prev,
+      );
+      setConversations((prev) =>
+        prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)),
+      );
+      toast.success(valor ? "Diagnóstico guardado" : "Diagnóstico quitado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el diagnóstico");
+    } finally {
+      setDiagnosticoSaving(false);
+    }
+  }
 
   const accesosListos = useRef(false);
   const accesosUserId = user?.id ?? "";
@@ -1618,12 +2043,21 @@ export function WhatsAppConversationsPanel({
 
   const quickTagResults = useMemo(() => {
     const q = quickTagQuery.trim().toLowerCase();
-    return tags.filter((tag) => {
-      if (!q) return true;
-      const groupName = tagGroups.find((group) => group.id === tag.groupId)?.name?.toLowerCase() ?? "";
-      return tag.name.toLowerCase().includes(q) || groupName.includes(q);
-    });
-  }, [tags, quickTagQuery, tagGroups]);
+    const assigned = new Set(selected?.tagIds ?? []);
+    return tags
+      .filter((tag) => {
+        if (!q) return true;
+        const groupName =
+          tagGroups.find((group) => group.id === tag.groupId)?.name?.toLowerCase() ?? "";
+        return tag.name.toLowerCase().includes(q) || groupName.includes(q);
+      })
+      .sort((a, b) => {
+        const aOn = assigned.has(a.id) ? 0 : 1;
+        const bOn = assigned.has(b.id) ? 0 : 1;
+        if (aOn !== bOn) return aOn - bOn;
+        return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
+      });
+  }, [tags, quickTagQuery, tagGroups, selected?.tagIds]);
   const usoPorModelo = useMemo(() => {
     return PASOS_BOT.map((paso) => {
       const items = uso.filter((item) => item.paso === paso.paso);
@@ -1746,18 +2180,57 @@ export function WhatsAppConversationsPanel({
     void applyTags(next);
   }
 
+  const operatorColorById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const op of operators) {
+      if (op.id && op.color) map.set(op.id, op.color);
+    }
+    return map;
+  }, [operators]);
+
+  const operatorColorByName = useMemo(() => {
+    return operators.map((op) => ({
+      color: op.color || "#94a3b8",
+      norm: op.nombre
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, ""),
+    }));
+  }, [operators]);
+
   function assigneeColor(conversation: {
     assigneeKind?: "none" | "bot" | "user" | null;
     assigneeUserId?: string | null;
+    assigneeName?: string | null;
   }): string {
     if (conversation.assigneeKind === "bot") return "#a61948";
-    if (conversation.assigneeKind === "user" && conversation.assigneeUserId) {
-      return (
-        operators.find((user) => user.id === conversation.assigneeUserId)?.color ?? "#94a3b8"
-      );
+    if (conversation.assigneeKind !== "user") return "#94a3b8";
+    if (conversation.assigneeUserId) {
+      const byId = operatorColorById.get(conversation.assigneeUserId);
+      if (byId) return byId;
+    }
+    const nombre = conversation.assigneeName?.trim().toLowerCase();
+    if (nombre) {
+      const tokens = nombre
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .split(/\s+/)
+        .filter((t) => t.length >= 3);
+      if (tokens.length) {
+        const byName = operatorColorByName.find((op) =>
+          tokens.every(
+            (t) =>
+              op.norm.includes(t) ||
+              (t.length >= 5 && op.norm.split(/\s+/).some((p) => p.startsWith(t.slice(0, 5)))),
+          ),
+        );
+        if (byName?.color) return byName.color;
+      }
     }
     return "#94a3b8";
   }
+
   const slashQuery = useMemo(() => extractSlashQuery(draft), [draft]);
   const slashSuggestions = useMemo(() => {
     if (slashQuery === null) return [];
@@ -1988,15 +2461,136 @@ export function WhatsAppConversationsPanel({
 
   async function applyAssignee(kind: "none" | "bot" | "user", userId?: string): Promise<boolean> {
     if (!selectedId || assigning) return false;
+    const conversationId = selectedId;
+    const optimisticName =
+      kind === "bot"
+        ? "Bot"
+        : kind === "user"
+          ? operators.find((op) => op.id === userId)?.nombre?.trim() || selected?.assigneeName || null
+          : null;
+    const optimisticUserId = kind === "user" ? userId ?? null : null;
+    const touch: AssigneeTouch = {
+      id: conversationId,
+      assigneeKind: kind,
+      assigneeUserId: optimisticUserId,
+      assigneeName: kind === "none" ? null : optimisticName,
+      at: Date.now(),
+    };
+    assigneeTouchRef.current = touch;
+    setSelected((prev) =>
+      prev && prev.id === conversationId
+        ? {
+            ...prev,
+            assigneeKind: kind,
+            assigneeUserId: optimisticUserId,
+            assigneeName: touch.assigneeName,
+          }
+        : prev,
+    );
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              assigneeKind: kind,
+              assigneeUserId: optimisticUserId,
+              assigneeName: touch.assigneeName,
+            }
+          : c,
+      ),
+    );
     setAssigning(true);
     try {
-      const updated = await assignWaConversation(selectedId, { kind, userId });
-      const merged = { ...selected, ...updated, contact: updated.contact ?? selected?.contact };
-      setSelected(merged);
+      const updated = await assignWaConversation(conversationId, { kind, userId });
+      assigneeTouchRef.current = {
+        id: updated.id,
+        assigneeKind:
+          updated.assigneeKind === "bot" || updated.assigneeKind === "user"
+            ? updated.assigneeKind
+            : "none",
+        assigneeUserId: updated.assigneeUserId ?? null,
+        assigneeName: updated.assigneeName ?? null,
+        at: Date.now(),
+      };
+      const merged = {
+        ...selected,
+        ...updated,
+        contact: updated.contact ?? selected?.contact,
+      };
+      setSelected((prev) => (prev && prev.id === updated.id ? { ...prev, ...merged } : prev));
       setConversations((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
       return true;
     } catch (error) {
+      assigneeTouchRef.current = null;
       toast.error(error instanceof Error ? error.message : "No se pudo asignar");
+      // Revertir optimista recargando la conversación actual desde la lista/servidor.
+      void loadThread(conversationId);
+      return false;
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function applyResolve(): Promise<boolean> {
+    if (!selectedId || assigning) return false;
+    const conversationId = selectedId;
+    const touch: AssigneeTouch = {
+      id: conversationId,
+      assigneeKind: "bot",
+      assigneeUserId: null,
+      assigneeName: "Bot",
+      at: Date.now(),
+    };
+    assigneeTouchRef.current = touch;
+    setSelected((prev) =>
+      prev && prev.id === conversationId
+        ? {
+            ...prev,
+            assigneeKind: "bot",
+            assigneeUserId: null,
+            assigneeName: "Bot",
+            resolutionStatus: "resolved",
+            botPausedUntilInbound: true,
+          }
+        : prev,
+    );
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              assigneeKind: "bot",
+              assigneeUserId: null,
+              assigneeName: "Bot",
+              resolutionStatus: "resolved",
+              botPausedUntilInbound: true,
+            }
+          : c,
+      ),
+    );
+    setAssigning(true);
+    try {
+      const updated = await resolveWaConversation(conversationId);
+      assigneeTouchRef.current = {
+        id: updated.id,
+        assigneeKind: "bot",
+        assigneeUserId: null,
+        assigneeName: updated.assigneeName ?? "Bot",
+        at: Date.now(),
+      };
+      setSelected((prev) =>
+        prev && prev.id === updated.id
+          ? { ...prev, ...updated, contact: updated.contact ?? prev.contact }
+          : prev,
+      );
+      setConversations((prev) =>
+        prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)),
+      );
+      return true;
+    } catch (error) {
+      assigneeTouchRef.current = null;
+      toast.error(error instanceof Error ? error.message : "No se pudo marcar como resuelta");
+      void loadThread(conversationId);
       return false;
     } finally {
       setAssigning(false);
@@ -2064,8 +2658,11 @@ export function WhatsAppConversationsPanel({
       setTagsModalQuery(text);
       setTagsModalOpen(true);
     } else {
+      setVistaOperadora(true);
+      setSidePanelPinned(true);
+      setSidePanelOpen(true);
+      setOperadoraTab("etiquetas");
       setQuickTagQuery(text);
-      setQuickPanelOpen(true);
       tagSearchFocus.current = true;
     }
     setDatoMenu(null);
@@ -2137,6 +2734,7 @@ export function WhatsAppConversationsPanel({
         lastName,
         cobertura: contact.cobertura ?? "",
         email,
+        fechaNacimiento: contact.fechaNacimiento ?? null,
         grupoEtario: contact.grupoEtario,
         consultaPara: contact.consultaPara,
         relacionFamiliar: contact.relacionFamiliar ?? "",
@@ -2195,6 +2793,141 @@ export function WhatsAppConversationsPanel({
     setProfileOpen(false);
     setTakeOverOpen(false);
     setPendingAssignee(null);
+    setAccionesOpen(false);
+    setHighlightMessageId(null);
+  }
+
+  function marcarAccionHecha(messageId: string) {
+    setAccionesHechas((prev) => ({ ...prev, [messageId]: true }));
+  }
+
+  function irAlMensajeAccion(messageId: string) {
+    setAccionesOpen(false);
+    window.requestAnimationFrame(() => {
+      const root = messagesBoxRef.current;
+      if (!root) return;
+      const el = root.querySelector(
+        `[data-message-id="${CSS.escape(messageId)}"]`,
+      ) as HTMLElement | null;
+      if (!el) {
+        toast.info("No encontré ese mensaje en la conversación");
+        return;
+      }
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightMessageId(messageId);
+      window.setTimeout(() => {
+        setHighlightMessageId((actual) => (actual === messageId ? null : actual));
+      }, 2200);
+    });
+  }
+
+  async function ejecutarBuscaTurnoDesdeMensaje(messageId: string) {
+    const m = messages.find((item) => item.id === messageId);
+    if (!m) return;
+    let estado = selected?.menuEstado;
+    if (selectedId) {
+      try {
+        const fresh = await fetchWaConversation(selectedId);
+        estado = fresh.menuEstado ?? estado;
+        setSelected((prev) =>
+          prev && prev.id === fresh.id
+            ? {
+                ...prev,
+                ...fresh,
+                contact: fresh.contact ?? prev.contact,
+              }
+            : prev,
+        );
+      } catch {
+        /* usamos el estado en memoria */
+      }
+    }
+    const delGlobo = parsePedidoTurnoBubble(String(m.text ?? ""));
+    const contact = selected?.contact;
+    const pick = (...vals: Array<string | null | undefined>) => {
+      for (const v of vals) {
+        const t = String(v ?? "").trim();
+        if (t) return t;
+      }
+      return "";
+    };
+    const dni = pick(estado?.dni, contact?.dni, delGlobo.dni).replace(/\D/g, "");
+    const sexoRaw = pick(estado?.sexo, contact?.sexo).toLowerCase();
+    const sexo =
+      sexoRaw === "masculino" || sexoRaw === "femenino"
+        ? (sexoRaw as "masculino" | "femenino")
+        : "";
+    setBuscaTurnoMounted(true);
+    setVistaOperadora(true);
+    setSidePanelPinned(true);
+    setSidePanelOpen(true);
+    setOperadoraTab("busca");
+    setBuscaPedidoSeed({
+      key: `${selectedId ?? ""}-${m.id}-${Date.now()}`,
+      prestacionCodigo: estado?.prestacionCodigo?.trim() || undefined,
+      prestacionNombre:
+        estado?.tratamientoCatalogo?.trim() || delGlobo.prestacion || undefined,
+      tratamiento:
+        estado?.tratamiento?.trim() ||
+        delGlobo.tratamiento ||
+        delGlobo.prestacion ||
+        undefined,
+      profesionalDoc: estado?.profesionalDoc?.trim() || undefined,
+      profesionalNombre:
+        estado?.profesionalCatalogo?.trim() ||
+        estado?.profesional?.trim() ||
+        delGlobo.profesional ||
+        undefined,
+      modalidad: estado?.modalidad || delGlobo.modalidad || "",
+      paciente: {
+        dni: dni || undefined,
+        fechaNacimiento:
+          pick(estado?.fechaNacimiento, contact?.fechaNacimiento, delGlobo.fechaNacimiento) ||
+          undefined,
+        nombre: pick(estado?.nombre, contact?.firstName) || undefined,
+        apellido: pick(estado?.apellido, contact?.lastName) || undefined,
+        email: pick(estado?.email, contact?.email) || undefined,
+        telefono:
+          pick(estado?.telefono, contact?.phoneNumber).replace(/\D/g, "") || undefined,
+        sexo: sexo || undefined,
+      },
+    });
+    setBuscaAccionMessageId(messageId);
+    setAccionesOpen(false);
+  }
+
+  async function pedirCancelarTurnoDesdeMensaje(messageId: string) {
+    const m = messages.find((item) => item.id === messageId);
+    if (!m) return;
+    let estado = selected?.menuEstado;
+    if (selectedId) {
+      try {
+        const fresh = await fetchWaConversation(selectedId);
+        estado = fresh.menuEstado ?? estado;
+        setSelected((prev) =>
+          prev && prev.id === fresh.id
+            ? {
+                ...prev,
+                ...fresh,
+                contact: fresh.contact ?? prev.contact,
+              }
+            : prev,
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    const pedido = parseCancelacionBubble(
+      String(m.text ?? ""),
+      estado?.dni?.trim() || selected?.contact?.dni || "",
+    );
+    if (!pedido) {
+      toast.error(
+        "Faltan DNI, profesional o fecha/hora en el pedido para anularlo automático.",
+      );
+      return;
+    }
+    setCancelTurnoPendiente({ ...pedido, messageId });
   }
 
   async function handleConnect() {
@@ -2508,6 +3241,12 @@ export function WhatsAppConversationsPanel({
     }
   }
 
+  const soyOperador = Boolean(user?.id && operators.some((op) => op.id === user.id));
+  const otrosOperadores = useMemo(
+    () => (user?.id ? operators.filter((op) => op.id !== user.id) : operators),
+    [operators, user?.id],
+  );
+
   if (!ready) {
     return (
       <div className="wa-inbox wa-inbox--loading">
@@ -2521,6 +3260,8 @@ export function WhatsAppConversationsPanel({
     selected?.assigneeKind === "user" &&
     Boolean(user?.id) &&
     selected.assigneeUserId === user?.id;
+  const puedeMarcarResuelta =
+    Boolean(assignedToMe) && (selected?.resolutionStatus ?? "open") !== "resolved";
   const pruebaCerrada =
     pruebaMode &&
     (selected?.pruebaResultado === "correcta" || selected?.pruebaResultado === "incorrecta");
@@ -2758,6 +3499,16 @@ export function WhatsAppConversationsPanel({
             aria-label="Buscar etiqueta"
             autoComplete="off"
           />
+          {quickTagQuery ? (
+            <button
+              type="button"
+              className="wa-tags-panel__clear"
+              aria-label="Borrar búsqueda"
+              onClick={() => setQuickTagQuery("")}
+            >
+              <IconX size={16} />
+            </button>
+          ) : null}
           {opts?.onTogglePin ? (
             <button
               type="button"
@@ -2773,16 +3524,6 @@ export function WhatsAppConversationsPanel({
               <IconPin size={15} filled={Boolean(opts.pinned)} />
             </button>
           ) : null}
-          {quickTagQuery ? (
-            <button
-              type="button"
-              className="wa-tags-panel__clear"
-              aria-label="Borrar búsqueda"
-              onClick={() => setQuickTagQuery("")}
-            >
-              <IconX size={16} />
-            </button>
-          ) : null}
         </div>
         <div className="wa-tags-panel__scroll">
           {quickTagQuery.trim() ? (
@@ -2792,7 +3533,18 @@ export function WhatsAppConversationsPanel({
               <p>Ninguna etiqueta coincide.</p>
             ) : (
               <div className="wa-tags-quick-list">
-                {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+                {quickTagResults.map((tag) =>
+                  renderQuickTag(
+                    tag,
+                    pinnedTagIds.includes(tag.id),
+                    undefined,
+                    false,
+                    false,
+                    (selected?.tagIds ?? []).includes(tag.id)
+                      ? tagColor(tag)
+                      : TAG_TODAS_NEUTRO,
+                  ),
+                )}
               </div>
             )
           ) : (
@@ -2958,7 +3710,18 @@ export function WhatsAppConversationsPanel({
                   <p>Ninguna etiqueta coincide.</p>
                 ) : (
                   <div className="wa-tags-quick-list">
-                    {quickTagResults.map((tag) => renderQuickTag(tag, pinnedTagIds.includes(tag.id)))}
+                    {quickTagResults.map((tag) =>
+                      renderQuickTag(
+                        tag,
+                        pinnedTagIds.includes(tag.id),
+                        undefined,
+                        false,
+                        false,
+                        (selected?.tagIds ?? []).includes(tag.id)
+                          ? tagColor(tag)
+                          : TAG_TODAS_NEUTRO,
+                      ),
+                    )}
                   </div>
                 )}
               </section>
@@ -2966,6 +3729,347 @@ export function WhatsAppConversationsPanel({
           )}
         </div>
       </>
+    );
+  }
+
+  function renderPacienteFicha(conv: WaConversation) {
+    const persona = (value: string | null | undefined) => formatNombrePersona(value ?? "");
+    return (
+      <>
+        <section>
+          <h3>Quien escribe</h3>
+          <dl>
+            {(
+              [
+                ["Nombre", persona(conv.contact?.contactoNombre)],
+                ["Apellido", persona(conv.contact?.contactoApellido)],
+                ["Relación con el paciente", persona(conv.contact?.relacionFamiliar)],
+                ["Teléfono", conv.contact?.phoneNumber],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd className={textoDato(value) === "vacío" ? "is-empty" : ""}>{textoDato(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+        <section>
+          <h3>Paciente</h3>
+          <dl>
+            {(
+              [
+                [
+                  "La consulta es para",
+                  conv.contact?.consultaPara === "propio"
+                    ? "Quien escribe"
+                    : conv.contact?.consultaPara === "tercero"
+                      ? "Otra persona"
+                      : "",
+                ],
+                ["Nombre", persona(conv.contact?.firstName)],
+                ["Apellido", persona(conv.contact?.lastName)],
+                [
+                  "Grupo etario",
+                  conv.contact?.grupoEtario === "infanto"
+                    ? "Infanto"
+                    : conv.contact?.grupoEtario === "adulto"
+                      ? "Adulto"
+                      : "",
+                ],
+                ["DNI", conv.contact?.dni],
+                ["Sexo", persona(conv.contact?.sexo)],
+                [
+                  "¿Es paciente?",
+                  conv.contact?.esPaciente === true
+                    ? "Sí"
+                    : conv.contact?.esPaciente === false
+                      ? "No"
+                      : "",
+                ],
+                ["Cobertura", persona(conv.contact?.cobertura)],
+                // Email sin Title Case.
+                ["Email", conv.contact?.email],
+                [
+                  "Fecha de nacimiento",
+                  conv.contact?.fechaNacimiento
+                    ? formatFechaYmd(conv.contact.fechaNacimiento) || conv.contact.fechaNacimiento
+                    : "",
+                ],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd className={textoDato(value) === "vacío" ? "is-empty" : ""}>{textoDato(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+        <section className="wa-side-panel__diagnostico">
+          <h3>Diagnóstico presuntivo</h3>
+          <dl>
+            <div>
+              <dt>Motivo</dt>
+              <dd
+                className={
+                  !(
+                    conv.motivoConsulta?.trim() ||
+                    conv.menuEstado?.motivoConsulta?.trim()
+                  )
+                    ? "is-empty"
+                    : undefined
+                }
+              >
+                {textoDato(
+                  conv.motivoConsulta?.trim() ||
+                    conv.menuEstado?.motivoConsulta?.trim() ||
+                    "",
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Según la IA</dt>
+              <dd className={!conv.diagnosticoIa?.trim() ? "is-empty" : undefined}>
+                {textoDato(conv.diagnosticoIa)}
+                {conv.diagnosticoIaAt ? (
+                  <small className="wa-side-panel__dx-meta">
+                    {" "}
+                    · {formatFechaHora(conv.diagnosticoIaAt)}
+                  </small>
+                ) : null}
+              </dd>
+            </div>
+            <div className="wa-side-panel__dx-equipo-row">
+              <dt>Equipo</dt>
+              <dd className="wa-side-panel__dx-equipo">
+                <input
+                  id={`wa-dx-${conv.id}`}
+                  key={`wa-dx-${conv.id}-${conv.diagnosticoHumano ?? ""}-${conv.diagnosticoHumanoAt ?? ""}`}
+                  className="wa-side-panel__dx-input"
+                  list={`wa-dx-list-${conv.id}`}
+                  defaultValue={conv.diagnosticoHumano?.trim() || ""}
+                  placeholder="Buscar…"
+                  disabled={diagnosticoSaving || !selectedId || selectedId !== conv.id}
+                  autoComplete="off"
+                  aria-label="Diagnóstico del equipo"
+                  onBlur={(event) => {
+                    const raw = event.target.value.trim();
+                    const actual = conv.diagnosticoHumano?.trim() || "";
+                    if (raw === actual) return;
+                    if (!raw) {
+                      void guardarDiagnosticoHumano("");
+                      return;
+                    }
+                    const exacto = diagnosticoOpciones.find(
+                      (nombre) => nombre.toLowerCase() === raw.toLowerCase(),
+                    );
+                    const parcial = diagnosticoOpciones.find((nombre) =>
+                      nombre.toLowerCase().includes(raw.toLowerCase()),
+                    );
+                    const elegido = exacto || parcial || "";
+                    if (!elegido) {
+                      event.target.value = actual;
+                      toast.error("Elegí un diagnóstico de la lista");
+                      return;
+                    }
+                    event.target.value = elegido;
+                    if (elegido !== actual) void guardarDiagnosticoHumano(elegido);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      (event.target as HTMLInputElement).blur();
+                    }
+                  }}
+                />
+                <datalist id={`wa-dx-list-${conv.id}`}>
+                  {diagnosticoOpciones.map((nombre) => (
+                    <option key={nombre} value={nombre} />
+                  ))}
+                </datalist>
+                {conv.diagnosticoHumanoByName?.trim() ? (
+                  <small className="wa-side-panel__dx-meta">
+                    {persona(conv.diagnosticoHumanoByName)}
+                    {conv.diagnosticoHumanoAt
+                      ? ` · ${formatFechaHora(conv.diagnosticoHumanoAt)}`
+                      : ""}
+                  </small>
+                ) : null}
+              </dd>
+            </div>
+          </dl>
+        </section>
+        <section>
+          <h3>Etiquetas</h3>
+          {assignedTags.length ? (
+            <div className="wa-prueba-tags">
+              {assignedTags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className={`wa-tag${freshTagIds.includes(tag.id) ? " is-new" : ""}`}
+                  style={{ "--tag": appliedTagColor(tag) } as CSSProperties}
+                  title={tagGroupLabel(tag)}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p>Todavía ninguna.</p>
+          )}
+        </section>
+        {(conv.resumen ?? "").trim() ? (
+          <section>
+            <h3>Resumen</h3>
+            <p className="wa-side-panel__resumen">{conv.resumen}</p>
+          </section>
+        ) : null}
+      </>
+    );
+  }
+
+  function renderOperadoraSidePanel(pinned: boolean) {
+    const open = pinned || sidePanelOpen;
+    return (
+      <aside
+        className={
+          pinned
+            ? "wa-side-panel wa-side-panel--docked"
+            : "wa-side-panel wa-side-panel--float"
+        }
+        aria-label="Panel operadora"
+        aria-hidden={!open}
+      >
+        <div className="wa-side-panel__tabs" role="tablist" aria-label="Panel lateral">
+          {(
+            [
+              ["paciente", "Paciente"],
+              ["etiquetas", "Etiquetas"],
+              ["busca", "Turnos"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={operadoraTab === id}
+              className={`wa-side-panel__tab${operadoraTab === id ? " is-active" : ""}`}
+              onClick={() => setOperadoraTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`wa-tags-panel__pin${pinned ? " is-on" : ""}`}
+            aria-label={pinned ? "Desfijar panel" : "Fijar panel"}
+            title={pinned ? "Desfijar panel" : "Fijar panel"}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setSidePanelPinned((on) => {
+                if (on) {
+                  if (operadoraTab === "busca") setBuscaPedidoSeed(null);
+                  setSidePanelOpen(false);
+                } else {
+                  setSidePanelOpen(false);
+                }
+                return !on;
+              });
+            }}
+          >
+            <IconPin size={15} filled={pinned} />
+          </button>
+        </div>
+        <div className="wa-side-panel__body">
+          <div
+            className={`wa-side-panel__pane wa-side-panel__pane--paciente${
+              operadoraTab === "paciente" ? " is-active" : ""
+            }`}
+            role="tabpanel"
+            hidden={operadoraTab !== "paciente"}
+          >
+            {!selected ? (
+              <p className="wa-inbox__empty">Elegí una conversación para ver la ficha.</p>
+            ) : (
+              renderPacienteFicha(selected)
+            )}
+          </div>
+          <div
+            className={`wa-side-panel__pane wa-side-panel__pane--etiquetas${
+              operadoraTab === "etiquetas" ? " is-active" : ""
+            }`}
+            role="tabpanel"
+            hidden={operadoraTab !== "etiquetas"}
+          >
+            {renderQuickTagsPanelBody({
+              withSearchRef: open && operadoraTab === "etiquetas",
+            })}
+          </div>
+          <div
+            className={`wa-side-panel__pane wa-side-panel__pane--busca${
+              operadoraTab === "busca" ? " is-active" : ""
+            }`}
+            role="tabpanel"
+            hidden={operadoraTab !== "busca"}
+          >
+            {buscaTurnoMounted ? (
+              <>
+                <div className="wa-busca-panel__head">
+                  <h3>Buscar turno</h3>
+                  <label
+                    className={`wa-busca-solo-libres${buscaSoloLibres ? " is-on" : ""}`}
+                  >
+                    <span className="wa-busca-solo-libres__label">Solo libres</span>
+                    <input
+                      type="checkbox"
+                      checked={buscaSoloLibres}
+                      onChange={(e) => setBuscaSoloLibres(e.target.checked)}
+                      aria-label="Solo libres"
+                    />
+                    <span className="wa-busca-solo-libres__track" aria-hidden>
+                      <span className="wa-busca-solo-libres__thumb" />
+                    </span>
+                  </label>
+                </div>
+                <div className="wa-busca-panel__body">
+                  <BuscaTurnoApp
+                    mode="compact"
+                    pedidoSeed={buscaPedidoSeed}
+                    onPedidoSeedClear={() => setBuscaPedidoSeed(null)}
+                    soloLibres={buscaSoloLibres}
+                    onSoloLibresChange={setBuscaSoloLibres}
+                    onUiLockChange={(locked) => {
+                      setSidePanelUiLocked(locked);
+                      if (locked) setSidePanelOpen(true);
+                    }}
+                    onTurnoAsignado={() => {
+                      if (!buscaAccionMessageId) return;
+                      marcarAccionHecha(buscaAccionMessageId);
+                      setBuscaAccionMessageId(null);
+                    }}
+                    onProponerTurnosLibres={(texto) => {
+                      const limpio = String(texto ?? "").trim();
+                      if (!limpio) return;
+                      if (selectedId) {
+                        setDraft(limpio);
+                        toast.success("Mensaje armado en el chat");
+                        return;
+                      }
+                      void navigator.clipboard
+                        ?.writeText(limpio)
+                        .then(() => toast.success("Copiado al portapapeles"))
+                        .catch(() => toast.info(limpio));
+                    }}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="wa-inbox__empty">Cargando Busca Turno…</p>
+            )}
+          </div>
+        </div>
+      </aside>
     );
   }
 
@@ -2983,9 +4087,12 @@ export function WhatsAppConversationsPanel({
                 onChange={(e) => patchFilters({ assignee: e.target.value })}
               >
                 <option value="">Todos</option>
+                {soyOperador && user?.id ? (
+                  <option value={user.id}>Asignado a mí</option>
+                ) : null}
                 <option value="none">Sin asignar</option>
                 <option value="bot">Bot</option>
-                {operators.map((op) => (
+                {otrosOperadores.map((op) => (
                   <option key={op.id} value={op.id}>
                     {op.nombre}
                   </option>
@@ -3153,7 +4260,12 @@ export function WhatsAppConversationsPanel({
               className={`btn btn-secondary btn-sm wa-inbox-bar__vista${vistaOperadora ? " is-on" : ""}`}
               aria-label={vistaOperadora ? "Vista normal" : "Vista operadora"}
               title={vistaOperadora ? "Vista normal" : "Vista operadora"}
-              onClick={() => setVistaOperadora((on) => !on)}
+              onClick={() =>
+                setVistaOperadora((on) => {
+                  if (!on) setOperadoraTab("paciente");
+                  return !on;
+                })
+              }
             >
               {vistaOperadora ? <IconCollapse size={16} /> : <IconExpand size={16} />}
             </button>
@@ -3165,95 +4277,6 @@ export function WhatsAppConversationsPanel({
           vistaOperadora ? " wa-inbox--operadora" : ""
         }${listaConversacionesVisible ? "" : " wa-inbox--lista-oculta"}`}
       >
-      {buscaTurnoMounted && !pruebaMode ? (
-        <div
-          className={
-            leftBuscaPinned
-              ? "wa-busca-dock"
-              : `wa-tags-hover wa-tags-hover--left${leftBuscaOpen ? " is-open" : ""}`
-          }
-          onMouseEnter={leftBuscaPinned ? undefined : () => setLeftBuscaOpen(true)}
-          onMouseLeave={
-            leftBuscaPinned || leftBuscaUiLocked
-              ? undefined
-              : () => setLeftBuscaOpen(false)
-          }
-        >
-          {leftBuscaPinned ? null : (
-            <span className="wa-tags-hover__tab" aria-hidden>
-              <IconChevronRight size={16} />
-            </span>
-          )}
-          <aside
-            className={
-              leftBuscaPinned
-                ? "wa-busca-panel wa-busca-panel--docked"
-                : "wa-tags-pop wa-busca-pop"
-            }
-            aria-label="Buscar turno"
-            aria-hidden={!(leftBuscaPinned || leftBuscaOpen)}
-          >
-            <div
-              className={
-                leftBuscaPinned
-                  ? "wa-busca-panel__inner"
-                  : "wa-busca-panel wa-busca-panel--float"
-              }
-            >
-              <div className="wa-busca-panel__head">
-                <h3>Buscar turno</h3>
-                <label
-                  className={`wa-busca-solo-libres${buscaSoloLibres ? " is-on" : ""}`}
-                  title={
-                    buscaSoloLibres
-                      ? "Solo turnos libres. Desactivá para ver también ocupados."
-                      : "Libres y ocupados. Activá para ver solo libres."
-                  }
-                >
-                  <span className="wa-busca-solo-libres__label">Solo libres</span>
-                  <input
-                    type="checkbox"
-                    checked={buscaSoloLibres}
-                    onChange={(e) => setBuscaSoloLibres(e.target.checked)}
-                    aria-label="Solo libres"
-                  />
-                  <span className="wa-busca-solo-libres__track" aria-hidden>
-                    <span className="wa-busca-solo-libres__thumb" />
-                  </span>
-                </label>
-                <button
-                  type="button"
-                  className={`wa-tags-panel__pin${leftBuscaPinned ? " is-on" : ""}`}
-                  aria-label={leftBuscaPinned ? "Desfijar panel" : "Fijar panel"}
-                  title={leftBuscaPinned ? "Desfijar panel" : "Fijar panel"}
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setLeftBuscaPinned((on) => {
-                      if (!on) setLeftBuscaOpen(false);
-                      return !on;
-                    });
-                  }}
-                >
-                  <IconPin size={15} filled={leftBuscaPinned} />
-                </button>
-              </div>
-              <div className="wa-busca-panel__body">
-                <BuscaTurnoApp
-                  mode="compact"
-                  pedidoSeed={buscaPedidoSeed}
-                  soloLibres={buscaSoloLibres}
-                  onSoloLibresChange={setBuscaSoloLibres}
-                  onUiLockChange={(locked) => {
-                    setLeftBuscaUiLocked(locked);
-                    if (locked) setLeftBuscaOpen(true);
-                  }}
-                />
-              </div>
-            </div>
-          </aside>
-        </div>
-      ) : null}
       <aside className="wa-inbox__list" aria-label="Conversaciones">
         <div
           className="wa-inbox__list-body"
@@ -3280,8 +4303,6 @@ export function WhatsAppConversationsPanel({
           ) : (
             <>
               {conversations.map((c) => {
-                const label = pruebaMode ? waPruebaTitulo(c.contact) : waContactLabel(c.contact);
-                const active = c.id === selectedId;
                 const color = pruebaMode
                   ? c.pruebaResultado === "incorrecta"
                     ? "#a61948"
@@ -3290,46 +4311,14 @@ export function WhatsAppConversationsPanel({
                       : "#94a3b8"
                   : assigneeColor(c);
                 return (
-                  <button
+                  <WaInboxListItem
                     key={c.id}
-                    type="button"
-                    className={`wa-inbox__item${active ? " is-active" : ""}`}
-                    style={{ "--assignee": color } as CSSProperties}
-                    onClick={() => selectConversation(c)}
-                  >
-                    <div className="wa-inbox__item-top">
-                      <strong className="wa-inbox__item-name" data-tooltip={label}>
-                        {label}
-                      </strong>
-                      {!pruebaMode && c.prueba ? (
-                        <span className="wa-inbox__prueba-pill" title="Prueba bot (paciente)">
-                          Prueba
-                        </span>
-                      ) : null}
-                      <span className="wa-inbox__item-time">
-                        {formatPreviewTime(c.lastMessageAt)}
-                      </span>
-                    </div>
-                    {pruebaMode ? null : (
-                    <div className="wa-inbox__item-bottom">
-                      <span
-                        className="wa-inbox__item-preview"
-                        data-tooltip={c.resumen || c.lastMessagePreview || "Sin mensajes"}
-                      >
-                        {c.resumen || c.lastMessagePreview || "Sin mensajes"}
-                      </span>
-                      <span
-                        className="wa-inbox__assignee"
-                        data-tooltip={waAssigneeLabel(c)}
-                      >
-                        {waAssigneeLabel(c)}
-                      </span>
-                      {c.unreadCount > 0 ? (
-                        <span className="wa-inbox__badge">{c.unreadCount}</span>
-                      ) : null}
-                    </div>
-                    )}
-                  </button>
+                    conversation={c}
+                    active={c.id === selectedId}
+                    color={color}
+                    pruebaMode={pruebaMode}
+                    onSelect={selectConversationById}
+                  />
                 );
               })}
               {loadingMore ? <p className="wa-inbox__empty wa-inbox__empty--more">Cargando más…</p> : null}
@@ -3437,77 +4426,70 @@ export function WhatsAppConversationsPanel({
                 ) : (
                   <>
                     <select
-                      className="ui-select"
+                      className="ui-select wa-inbox__assignee-select"
                       aria-label="Asignar operadora"
                       title={
                         selected?.assigneeKind === "bot"
                           ? "Bot"
-                          : selected?.assigneeKind === "user"
-                            ? selected.assigneeName || "Asignado"
-                            : "Sin asignar"
+                          : selected?.assigneeKind === "user" &&
+                              user?.id &&
+                              selected.assigneeUserId === user.id
+                            ? "Asignado a mí"
+                            : selected?.assigneeKind === "user"
+                              ? selected.assigneeName || "Asignado"
+                              : "Sin asignar"
                       }
-                      value={currentAssigneeSelectValue()}
+                      value={
+                        pendingAssignee !== null ? pendingAssignee : currentAssigneeSelectValue()
+                      }
                       disabled={assigning || pendingAssignee !== null}
                       onChange={(event) => {
                         requestAssigneeChange(event.target.value);
                       }}
                     >
+                      {soyOperador && user?.id ? (
+                        <option value={user.id}>Asignado a mí</option>
+                      ) : null}
                       <option value="">Sin asignar</option>
                       <option value="bot">Bot</option>
-                      {operators.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {user.nombre}
+                      {otrosOperadores.map((op) => (
+                        <option key={op.id} value={op.id}>
+                          {op.nombre}
                         </option>
                       ))}
                     </select>
                     <button
                       type="button"
-                      className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tarea"
-                      disabled={!selected?.contactId}
-                      aria-label="Tarea"
-                      onClick={() => {
-                        setFollowUpKind("tarea");
-                        setFollowUpOpen(true);
-                      }}
+                      className={`btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--acciones${accionesPendientes.length > 0 ? " has-pending" : ""}`}
+                      aria-label={
+                        accionesPendientes.length > 0
+                          ? `Acciones pendientes (${accionesPendientes.length})`
+                          : "Acciones pendientes"
+                      }
+                      data-tooltip={
+                        accionesPendientes.length > 0
+                          ? `${accionesPendientes.length} acción${accionesPendientes.length === 1 ? "" : "es"} pendiente${accionesPendientes.length === 1 ? "" : "s"}`
+                          : "Acciones pendientes"
+                      }
+                      onClick={() => setAccionesOpen(true)}
                     >
-                      <IconCheckSquare size={16} />
+                      <IconAlert size={16} />
+                      {accionesPendientes.length > 0 ? (
+                        <span className="wa-inbox__acciones-badge" aria-hidden>
+                          {accionesPendientes.length > 9 ? "9+" : accionesPendientes.length}
+                        </span>
+                      ) : null}
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--rec"
-                      disabled={!selected?.contactId}
-                      aria-label="Recordatorio"
-                      onClick={() => {
-                        setFollowUpKind("recordatorio");
-                        setFollowUpOpen(true);
-                      }}
-                    >
-                      <IconClock size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--nota"
-                      disabled={!selected?.contactId}
-                      aria-label="Notas"
-                      onClick={() => {
-                        setFollowUpKind("nota");
-                        setFollowUpOpen(true);
-                      }}
-                    >
-                      <IconNote size={16} />
-                    </button>
-                    {tags.length > 0 ? (
+                    {puedeMarcarResuelta ? (
                       <button
                         type="button"
-                        className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--tag"
-                        aria-label="Etiquetas"
-                        title="Etiquetas"
-                        onClick={() => {
-                          setTagsModalGroupId("");
-                          setTagsModalOpen(true);
-                        }}
+                        className="btn btn-secondary btn-sm wa-inbox__icon-btn wa-inbox__icon-btn--resuelta"
+                        aria-label="Marcar como resuelta"
+                        data-tooltip="Marcar como resuelta"
+                        disabled={assigning}
+                        onClick={() => setResueltaOpen(true)}
                       >
-                        <IconTag size={16} />
+                        <IconCheck size={16} />
                       </button>
                     ) : null}
                   </>
@@ -3523,27 +4505,6 @@ export function WhatsAppConversationsPanel({
                 </button>
               </div>
             </header>
-            {pruebaMode ? null : (
-            <div className="wa-inbox__tags">
-              {assignedTags.length > 0 ? (
-                assignedTags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    className="wa-tag"
-                    style={{ "--tag": appliedTagColor(tag) } as CSSProperties}
-                    title="Quitar etiqueta"
-                    onClick={() => toggleConversationTag(tag.id)}
-                  >
-                    {tag.name}
-                    <span aria-hidden>×</span>
-                  </button>
-                ))
-              ) : (
-                <p className="wa-inbox__tags-empty">Sin etiquetas asignadas</p>
-              )}
-            </div>
-            )}
             <div
               className="wa-inbox__messages"
               ref={messagesBoxRef}
@@ -3566,7 +4527,11 @@ export function WhatsAppConversationsPanel({
                   const comentario = selected?.pruebaAclaraciones?.find((item) => item.messageId === m.id);
                   const marcadaMal = Boolean(comentario?.texto) && selected?.pruebaResultado === "incorrecta";
                   return (
-                    <div key={m.id} className={marcadaMal ? "wa-bubble-pack is-mal" : "wa-bubble-pack"}>
+                    <div
+                      key={m.id}
+                      data-message-id={m.id}
+                      className={`wa-bubble-pack${marcadaMal ? " is-mal" : ""}${highlightMessageId === m.id ? " is-highlight" : ""}`}
+                    >
                     <div
                       className={`wa-bubble-row${outbound ? " is-out" : ""}${deIa ? " is-pick" : ""}`}
                     >
@@ -3648,108 +4613,6 @@ export function WhatsAppConversationsPanel({
                         <p className="wa-bubble__text">
                           {m.type === "TEXT" ? messageBody(m) : m.text}
                         </p>
-                      ) : null}
-                      {outbound &&
-                      !m.isDeleted &&
-                      /^Datos del pedido de turno:/i.test(String(m.text ?? "").trim()) ? (
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm wa-bubble__busca-turno"
-                          onClick={() => {
-                            void (async () => {
-                              let estado = selected?.menuEstado;
-                              if (selectedId) {
-                                try {
-                                  const fresh = await fetchWaConversation(selectedId);
-                                  estado = fresh.menuEstado ?? estado;
-                                  setSelected((prev) =>
-                                    prev && prev.id === fresh.id
-                                      ? {
-                                          ...prev,
-                                          ...fresh,
-                                          contact: fresh.contact ?? prev.contact,
-                                        }
-                                      : prev,
-                                  );
-                                } catch {
-                                  /* usamos el estado en memoria */
-                                }
-                              }
-                              const delGlobo = parsePedidoTurnoBubble(String(m.text ?? ""));
-                              setBuscaTurnoMounted(true);
-                              setLeftBuscaPinned(true);
-                              setLeftBuscaOpen(true);
-                              setVistaOperadora(true);
-                              setBuscaPedidoSeed({
-                                key: `${selectedId ?? ""}-${m.id}-${Date.now()}`,
-                                prestacionCodigo: estado?.prestacionCodigo?.trim() || undefined,
-                                prestacionNombre:
-                                  estado?.tratamientoCatalogo?.trim() ||
-                                  delGlobo.prestacion ||
-                                  undefined,
-                                tratamiento:
-                                  estado?.tratamiento?.trim() ||
-                                  delGlobo.tratamiento ||
-                                  delGlobo.prestacion ||
-                                  undefined,
-                                profesionalDoc: estado?.profesionalDoc?.trim() || undefined,
-                                profesionalNombre:
-                                  estado?.profesionalCatalogo?.trim() ||
-                                  estado?.profesional?.trim() ||
-                                  delGlobo.profesional ||
-                                  undefined,
-                                modalidad: estado?.modalidad || delGlobo.modalidad || "",
-                              });
-                            })();
-                          }}
-                        >
-                          Pasar a Busca Turno
-                        </button>
-                      ) : null}
-                      {outbound &&
-                      !m.isDeleted &&
-                      (/^Pedido de cancelación registrado/i.test(String(m.text ?? "").trim()) ||
-                        /^Perfecto, el turno será cancelado:/i.test(String(m.text ?? "").trim())) ? (
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm wa-bubble__busca-turno"
-                          disabled={cancelTurnoBusy}
-                          onClick={() => {
-                            void (async () => {
-                              let estado = selected?.menuEstado;
-                              if (selectedId) {
-                                try {
-                                  const fresh = await fetchWaConversation(selectedId);
-                                  estado = fresh.menuEstado ?? estado;
-                                  setSelected((prev) =>
-                                    prev && prev.id === fresh.id
-                                      ? {
-                                          ...prev,
-                                          ...fresh,
-                                          contact: fresh.contact ?? prev.contact,
-                                        }
-                                      : prev,
-                                  );
-                                } catch {
-                                  /* ignore */
-                                }
-                              }
-                              const pedido = parseCancelacionBubble(
-                                String(m.text ?? ""),
-                                estado?.dni?.trim() || "",
-                              );
-                              if (!pedido) {
-                                toast.error(
-                                  "Faltan DNI, profesional o fecha/hora en el pedido para anularlo automático.",
-                                );
-                                return;
-                              }
-                              setCancelTurnoPendiente(pedido);
-                            })();
-                          }}
-                        >
-                          Cancelar turno
-                        </button>
                       ) : null}
                       <span className="wa-bubble__meta">
                         {formatPreviewTime(m.createdAt)}
@@ -4074,91 +4937,7 @@ export function WhatsAppConversationsPanel({
                 </button>
               </div>
               <div className="wa-prueba-panel__body">
-              {pruebaTab === "paciente" ? (
-                <>
-                  <section>
-                    <h3>Quien escribe</h3>
-                    <dl>
-                      {(
-                        [
-                          ["Nombre", selected.contact?.contactoNombre],
-                          ["Apellido", selected.contact?.contactoApellido],
-                          ["Relación con el paciente", selected.contact?.relacionFamiliar],
-                          ["Teléfono", selected.contact?.phoneNumber],
-                        ] as const
-                      ).map(([label, value]) => (
-                        <div key={label}>
-                          <dt>{label}</dt>
-                          <dd className={textoDato(value) === "vacío" ? "is-empty" : ""}>{textoDato(value)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-                  <section>
-                    <h3>Paciente</h3>
-                    <dl>
-                      {(
-                        [
-                          [
-                            "La consulta es para",
-                            selected.contact?.consultaPara === "propio"
-                              ? "quien escribe"
-                              : selected.contact?.consultaPara === "tercero"
-                                ? "otra persona"
-                                : "",
-                          ],
-                          ["Nombre", selected.contact?.firstName],
-                          ["Apellido", selected.contact?.lastName],
-                          [
-                            "Grupo etario",
-                            selected.contact?.grupoEtario === "infanto"
-                              ? "infanto"
-                              : selected.contact?.grupoEtario === "adulto"
-                                ? "adulto"
-                                : "",
-                          ],
-                          ["DNI", selected.contact?.dni],
-                          ["Sexo", selected.contact?.sexo],
-                          [
-                            "¿Es paciente?",
-                            selected.contact?.esPaciente === true
-                              ? "sí"
-                              : selected.contact?.esPaciente === false
-                                ? "no"
-                                : "",
-                          ],
-                          ["Cobertura", selected.contact?.cobertura],
-                          ["Email", selected.contact?.email],
-                        ] as const
-                      ).map(([label, value]) => (
-                        <div key={label}>
-                          <dt>{label}</dt>
-                          <dd className={textoDato(value) === "vacío" ? "is-empty" : ""}>{textoDato(value)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-                  <section>
-                    <h3>Etiquetas</h3>
-                    {assignedTags.length ? (
-                      <div className="wa-prueba-tags">
-                        {assignedTags.map((tag) => (
-                          <span
-                            key={tag.id}
-                            className={`wa-tag${freshTagIds.includes(tag.id) ? " is-new" : ""}`}
-                            style={{ "--tag": appliedTagColor(tag) } as CSSProperties}
-                            title={tagGroupLabel(tag)}
-                          >
-                            {tag.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p>Todavía ninguna.</p>
-                    )}
-                  </section>
-                </>
-              ) : null}
+              {pruebaTab === "paciente" ? renderPacienteFicha(selected) : null}
               {pruebaTab === "modulo" ? (
                 <section>
                     <h3>Modelos</h3>
@@ -4310,38 +5089,20 @@ export function WhatsAppConversationsPanel({
             </>
           )}
         </aside>
-      ) : !vistaOperadora ? null : rightTagsPinned ? (
-        <aside
-          className="wa-tags-panel wa-tags-panel--docked wa-tags-panel--docked-right"
-          aria-label="Etiquetas rápidas"
-        >
-          {renderQuickTagsPanelBody({
-            withSearchRef: true,
-            pinned: true,
-            onTogglePin: () => setRightTagsPinned(false),
-          })}
-        </aside>
+      ) : !vistaOperadora ? null : sidePanelPinned ? (
+        renderOperadoraSidePanel(true)
       ) : (
         <div
-          className={`wa-tags-hover${quickPanelOpen ? " is-open" : ""}`}
-          onMouseEnter={() => setQuickPanelOpen(true)}
-          onMouseLeave={() => setQuickPanelOpen(false)}
+          className={`wa-tags-hover${sidePanelOpen ? " is-open" : ""}`}
+          onMouseEnter={() => setSidePanelOpen(true)}
+          onMouseLeave={sidePanelUiLocked ? undefined : () => setSidePanelOpen(false)}
         >
           <span className="wa-tags-hover__tab" aria-hidden>
             <IconChevronLeft size={16} />
           </span>
-          <aside className="wa-tags-pop" aria-label="Etiquetas rápidas">
-            <div className="wa-tags-panel wa-tags-panel--float">
-              {renderQuickTagsPanelBody({
-                withSearchRef: quickPanelOpen || !leftBuscaOpen,
-                pinned: false,
-                onTogglePin: () => {
-                  setRightTagsPinned(true);
-                  setQuickPanelOpen(false);
-                },
-              })}
-            </div>
-          </aside>
+          <div className="wa-tags-pop wa-side-pop" aria-hidden={!sidePanelOpen}>
+            {renderOperadoraSidePanel(false)}
+          </div>
         </div>
       )}
 
@@ -4616,6 +5377,7 @@ export function WhatsAppConversationsPanel({
         open={followUpOpen}
         contact={selected?.contact}
         phoneNumber={selected?.contact?.phoneNumber}
+        fechaNacimientoPedido={selected?.menuEstado?.fechaNacimiento}
         kind={followUpKind}
         onClose={() => setFollowUpOpen(false)}
         onContactSaved={(updated) => {
@@ -4656,6 +5418,7 @@ export function WhatsAppConversationsPanel({
         open={profileOpen && Boolean(selected)}
         contact={selected?.contact}
         phoneNumber={selected?.contact?.phoneNumber}
+        fechaNacimientoPedido={selected?.menuEstado?.fechaNacimiento}
         tagIds={selected?.tagIds ?? []}
         tags={tags}
         tagGroups={tagGroups}
@@ -4824,6 +5587,112 @@ export function WhatsAppConversationsPanel({
         </div>
       </Modal>
 
+      <Modal
+        open={accionesOpen}
+        title="Acciones pendientes"
+        className="fl-modal--wa-acciones"
+        onClose={() => setAccionesOpen(false)}
+        footer={
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setAccionesOpen(false)}
+          >
+            Cerrar
+          </button>
+        }
+      >
+        {accionesPendientes.length === 0 ? (
+          <p className="wa-acciones-empty">No hay acciones pendientes en esta conversación.</p>
+        ) : (
+          <ul className="wa-acciones-list">
+            {accionesPendientes.map((accion) => (
+              <li key={accion.id} className={`wa-acciones-card is-${accion.kind}`}>
+                <div className="wa-acciones-card__head">
+                  <strong>{accion.title}</strong>
+                  <span>{formatPreviewTime(accion.createdAt)}</span>
+                </div>
+                <p className="wa-acciones-card__explain">{accion.explanation}</p>
+                {accion.details.length > 0 ? (
+                  <dl className="wa-acciones-card__details">
+                    {accion.details.map((row) => (
+                      <div key={`${accion.id}-${row.label}`}>
+                        <dt>{row.label}</dt>
+                        <dd>{row.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <pre className="wa-acciones-card__raw">{accion.messageText}</pre>
+                )}
+                <div className="wa-acciones-card__actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm wa-acciones-card__quitar"
+                    title="Quitar de pendientes sin ejecutar"
+                    onClick={() => marcarAccionHecha(accion.id)}
+                  >
+                    Quitar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => irAlMensajeAccion(accion.id)}
+                  >
+                    Ir al mensaje
+                  </button>
+                  {accion.kind === "busca_turno" ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        void ejecutarBuscaTurnoDesdeMensaje(accion.id);
+                      }}
+                    >
+                      Pasar a Busca Turno
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={cancelTurnoBusy}
+                      onClick={() => {
+                        void pedirCancelarTurnoDesdeMensaje(accion.id);
+                      }}
+                    >
+                      Eliminar turno
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={resueltaOpen}
+        title="Marcar como resuelta"
+        message="Si la marcás como resuelta, la conversación pasa al bot. El bot no vuelve a responder hasta que la persona escriba de nuevo. ¿Confirmás?"
+        confirmLabel={assigning ? "Guardando…" : "Sí, marcar resuelta"}
+        cancelLabel="Volver"
+        confirmTone="primary"
+        onCancel={() => {
+          if (!assigning) setResueltaOpen(false);
+        }}
+        onConfirm={() => {
+          if (assigning) return;
+          void (async () => {
+            const ok = await applyResolve();
+            if (ok) {
+              setResueltaOpen(false);
+              setAccionesOpen(false);
+              toast.success("Conversación marcada como resuelta");
+            }
+          })();
+        }}
+      />
+
       <ConfirmDialog
         open={cancelTurnoPendiente !== null}
         title="Confirmar anulación"
@@ -4844,7 +5713,11 @@ export function WhatsAppConversationsPanel({
             try {
               const ok = await anularTurnoDesdePedido(cancelTurnoPendiente);
               toast.success(ok);
+              if (cancelTurnoPendiente.messageId) {
+                marcarAccionHecha(cancelTurnoPendiente.messageId);
+              }
               setCancelTurnoPendiente(null);
+              setAccionesOpen(false);
             } catch (error) {
               toast.error(error instanceof Error ? error.message : "No se pudo anular el turno");
             } finally {

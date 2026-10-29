@@ -14,14 +14,17 @@ export type WaCobertura = {
 
 const COBERTURAS_DOC = doc(firestore, "ordenes_config", "whatsapp_coberturas");
 
+/** Debe coincidir con las etiquetas del grupo «Coberturas». */
 const DEFAULT_SEED: Array<{
   nombre: string;
   gruposEtarios: WaCoberturaGrupoEtario[];
 }> = [
-  { nombre: "SMG", gruposEtarios: ["adulto"] },
-  { nombre: "Prevención Salud", gruposEtarios: ["adulto", "infanto"] },
   { nombre: "IOMA", gruposEtarios: ["adulto"] },
+  { nombre: "OS no soportada", gruposEtarios: ["adulto", "infanto"] },
   { nombre: "OSPIS", gruposEtarios: ["adulto", "infanto"] },
+  { nombre: "Particular", gruposEtarios: ["adulto", "infanto"] },
+  { nombre: "Prevención", gruposEtarios: ["adulto", "infanto"] },
+  { nombre: "Swiss Medical", gruposEtarios: ["adulto"] },
 ];
 
 function normalizeGrupos(raw: unknown): WaCoberturaGrupoEtario[] {
@@ -96,6 +99,58 @@ export async function listWhatsappCoberturas(grupoEtario?: string | null): Promi
   const grupo = String(grupoEtario ?? "").trim().toLowerCase();
   if (grupo !== "infanto" && grupo !== "adulto") return items;
   return items.filter((item) => item.gruposEtarios.includes(grupo));
+}
+
+function sinTildesCobertura(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Traduce texto libre / alias al nombre canónico de la ficha
+ * (alineado con etiquetas del grupo Coberturas).
+ */
+export async function resolverCoberturaParaFicha(texto: string): Promise<string> {
+  const crudo = String(texto ?? "").trim();
+  if (!crudo) return "";
+  const buscado = sinTildesCobertura(crudo);
+  const items = await readAll();
+  const pick = (...claves: string[]) =>
+    items.find((item) => claves.includes(sinTildesCobertura(item.nombre)))?.nombre || "";
+
+  if (
+    /\bparticular\b/.test(buscado) ||
+    buscado === "sin cobertura" ||
+    buscado === "sin obra social" ||
+    buscado === "sin prepaga"
+  ) {
+    return pick("particular") || "Particular";
+  }
+  if (
+    buscado === "os no soportada" ||
+    buscado === "no soportada" ||
+    buscado === "sin convenio"
+  ) {
+    return pick("os no soportada") || "OS no soportada";
+  }
+  const exacto = items.find((item) => sinTildesCobertura(item.nombre) === buscado);
+  if (exacto) return exacto.nombre;
+  if (/prevencion/.test(buscado)) {
+    return pick("prevencion") || crudo;
+  }
+  if (/swiss|\bsmg\b/.test(buscado)) {
+    return pick("swiss medical", "smg") || crudo;
+  }
+  const parcial = items
+    .filter((item) => {
+      const n = sinTildesCobertura(item.nombre);
+      return n.length >= 3 && (buscado.includes(n) || n.includes(buscado));
+    })
+    .sort((a, b) => b.nombre.length - a.nombre.length)[0];
+  return parcial?.nombre || crudo;
 }
 
 export async function createWhatsappCobertura(input: {

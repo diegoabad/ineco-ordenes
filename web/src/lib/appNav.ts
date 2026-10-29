@@ -24,6 +24,7 @@ export type WhatsappSection =
   | "flujos-bot"
   | "contactos"
   | "operadoras"
+  | "derivacion"
   | "etiquetas"
   | "respuestas-rapidas"
   | "config"
@@ -98,6 +99,7 @@ export const WHATSAPP_SECTIONS: { id: WhatsappSection; label: string }[] = [
   { id: "flujos-bot", label: "Flujos bot" },
   { id: "contactos", label: "Contactos" },
   { id: "operadoras", label: "Operadoras" },
+  { id: "derivacion", label: "Derivación" },
   { id: "etiquetas", label: "Etiquetas" },
   { id: "respuestas-rapidas", label: "Respuestas rápidas" },
   { id: "config", label: "Bot" },

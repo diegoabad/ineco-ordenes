@@ -6,6 +6,8 @@ type Props = {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** Por defecto danger (rojo). Usar primary para acciones positivas. */
+  confirmTone?: "danger" | "primary";
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -16,6 +18,7 @@ export function ConfirmDialog({
   message,
   confirmLabel = "Confirmar",
   cancelLabel = "Cancelar",
+  confirmTone = "danger",
   onConfirm,
   onCancel,
 }: Props) {
@@ -43,7 +46,11 @@ export function ConfirmDialog({
           <button type="button" className="btn btn-secondary" onClick={onCancel}>
             {cancelLabel}
           </button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm}>
+          <button
+            type="button"
+            className={`btn ${confirmTone === "primary" ? "btn-primary" : "btn-danger"}`}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </button>
         </div>

@@ -88,6 +88,15 @@ export function WhatsAppMetricasPanel() {
   const bot = filas.filter((fila) => fila.assigneeKind === "bot").length;
   const porOperadores = filas.filter((fila) => fila.assigneeKind === "user").length;
   const sinAsignar = filas.filter((fila) => fila.assigneeKind === "none").length;
+
+  const resoluciones = useMemo(
+    () => filas.flatMap((fila) => fila.resolucionesEnPeriodo ?? []),
+    [filas],
+  );
+  const episodiosResueltos = resoluciones.length;
+  const resueltasBot = resoluciones.filter((item) => item.byKind === "bot").length;
+  const resueltasHumano = resoluciones.filter((item) => item.byKind === "human").length;
+
   const operadores = useMemo(() => {
     const cuentas = new Map<string, number>();
     const nombres = new Map<string, string>();
@@ -116,6 +125,35 @@ export function WhatsAppMetricasPanel() {
     );
     return lista;
   }, [catalogoOperadores, filas]);
+
+  const resolucionesPorOperador = useMemo(() => {
+    const cuentas = new Map<string, number>();
+    const nombres = new Map<string, string>();
+    for (const item of resoluciones) {
+      if (item.byKind !== "human") continue;
+      const clave = item.byUserId || item.byName || "operador";
+      cuentas.set(clave, (cuentas.get(clave) ?? 0) + 1);
+      if (!nombres.has(clave)) nombres.set(clave, item.byName?.trim() || "Operador");
+    }
+    const vistos = new Set<string>();
+    const lista: { clave: string; nombre: string; cantidad: number }[] = [];
+    for (const op of catalogoOperadores) {
+      vistos.add(op.id);
+      lista.push({
+        clave: op.id,
+        nombre: op.nombre?.trim() || "Operador",
+        cantidad: cuentas.get(op.id) ?? 0,
+      });
+    }
+    for (const [clave, cantidad] of cuentas) {
+      if (vistos.has(clave)) continue;
+      lista.push({ clave, nombre: nombres.get(clave) || "Operador", cantidad });
+    }
+    lista.sort(
+      (a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre, "es"),
+    );
+    return lista;
+  }, [catalogoOperadores, resoluciones]);
 
   const conteoEtiqueta = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -218,17 +256,32 @@ export function WhatsAppMetricasPanel() {
         <LoadingBlock label="Cargando métricas…" />
       ) : (
         <>
-          <section className="wa-metricas__cards">
+          <section className="wa-metricas__cards" aria-label="Resoluciones del período">
             <article className="is-total">
-              <span>Conversaciones</span>
+              <span>Episodios resueltos</span>
+              <strong>{periodoListo ? episodiosResueltos : "—"}</strong>
+            </article>
+            <article className="is-bot">
+              <span>Resueltas por bot</span>
+              <strong>{periodoListo ? resueltasBot : "—"}</strong>
+            </article>
+            <article className="is-operadores">
+              <span>Resueltas por humano</span>
+              <strong>{periodoListo ? resueltasHumano : "—"}</strong>
+            </article>
+          </section>
+
+          <section className="wa-metricas__cards" aria-label="Asignación actual">
+            <article className="is-total">
+              <span>Conversaciones (actividad)</span>
               <strong>{periodoListo ? total : "—"}</strong>
             </article>
             <article className="is-bot">
-              <span>Bot</span>
+              <span>Asignación: bot</span>
               <strong>{periodoListo ? bot : "—"}</strong>
             </article>
             <article className="is-operadores">
-              <span>Operadores</span>
+              <span>Asignación: operadores</span>
               <strong>{periodoListo ? porOperadores : "—"}</strong>
             </article>
             <article className="is-libre">
@@ -261,7 +314,25 @@ export function WhatsAppMetricasPanel() {
           {vista === "general" ? (
           <div className="wa-metricas__columnas">
           <section className="fl-table-card">
-            <h2>Operadores</h2>
+            <h2>Resoluciones por operadora</h2>
+            {resolucionesPorOperador.length ? (
+              <ul className="wa-metricas__lista">
+                {resolucionesPorOperador.map((op) => (
+                      <li key={`res-${op.clave}`}>
+                        <span>{op.nombre}</span>
+                        <strong className={periodoListo && op.cantidad > 0 ? "is-valor" : undefined}>
+                          {periodoListo ? op.cantidad : "—"}
+                        </strong>
+                      </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="wa-metricas__vacio">No hay operadores cargados.</p>
+            )}
+          </section>
+
+          <section className="fl-table-card">
+            <h2>Asignación actual</h2>
             {operadores.length ? (
               <ul className="wa-metricas__lista">
                 {operadores.map((op) => (

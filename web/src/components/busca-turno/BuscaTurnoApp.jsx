@@ -143,6 +143,47 @@ function slotModalidadLabel(edificio) {
   return isSlotVirtual(edificio) ? 'Virtual' : 'Presencial';
 }
 
+function slotLibreKey(doc, s) {
+  const t =
+    s.fechaHora instanceof Date ? s.fechaHora.getTime() : new Date(s.fechaHora).getTime();
+  return `${String(doc)}|${t}|${String(s.edificio || '')}|${String(s.sector || '')}`;
+}
+
+/** Texto listo para WhatsApp con los libres elegidos. */
+function armarTextoTurnosLibres(items) {
+  if (!items.length) return '';
+  const docs = [...new Set(items.map((item) => String(item.doc ?? '')).filter(Boolean))];
+  const multiProf = docs.length > 1;
+  const nombreUnico = !multiProf
+    ? titleCase(String(items.find((item) => item.nombreProf)?.nombreProf || '').trim())
+    : '';
+  const intro = nombreUnico
+    ? `Tengo los siguientes turnos disponibles con ${nombreUnico}:`
+    : 'Tengo los siguientes turnos disponibles:';
+  const lineas = items
+    .slice()
+    .sort((a, b) => {
+      const ta = a.fechaHora instanceof Date ? a.fechaHora.getTime() : new Date(a.fechaHora).getTime();
+      const tb = b.fechaHora instanceof Date ? b.fechaHora.getTime() : new Date(b.fechaHora).getTime();
+      return ta - tb;
+    })
+    .map((item) => {
+      const dia = fmtDayLabelTitulo(item.fechaHora);
+      const hora = fmtTime(item.fechaHora);
+      const mod = slotModalidadLabel(item.edificio).toLowerCase();
+      const prof =
+        multiProf && item.nombreProf
+          ? ` · ${titleCase(String(item.nombreProf))}`
+          : '';
+      return `• ${dia} — ${hora} (${mod})${prof}`;
+    });
+  const cierre =
+    items.length === 1
+      ? 'Decime si te parece bien y te lo asigno.'
+      : 'Decime cuál te conviene y te lo asigno.';
+  return [intro, '', ...lineas, '', cierre].join('\n');
+}
+
 const DEFAULT_DURACION = 15;
 
 /** Cuántas peticiones PRESTADOR (por profesional) van en paralelo; el resto espera en cola por lotes. */
@@ -354,8 +395,15 @@ function addDays(d, n) {
   r.setDate(r.getDate() + n);
   return r;
 }
+function pad2Fecha(n) {
+  return String(n).padStart(2, '0');
+}
+
+/** Fecha local YYYY-MM-DD (no UTC: en AR un turno de la noche no debe pasar al día siguiente). */
 function fmtDate(d) {
-  return d.toISOString().split('T')[0];
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return '';
+  return `${dt.getFullYear()}-${pad2Fecha(dt.getMonth() + 1)}-${pad2Fecha(dt.getDate())}`;
 }
 
 async function correrEnParalelo(items, limite, fn) {
@@ -423,7 +471,7 @@ async function fetchDadosConTope(par) {
   }
 }
 function fmtDateKey(d) {
-  return d.toISOString().split('T')[0];
+  return fmtDate(d);
 }
 function fmtDisplay(d) {
   return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
@@ -590,6 +638,9 @@ function duracionesDePasos(pasos) {
   return [...out].sort((a, b) => a - b);
 }
 
+/** Si no hay huecos seguidos para detectar el paso, igual ofrecer duraciones típicas. */
+const DURACIONES_FALLBACK = [15, 30, 45, 60];
+
 function pasosDeAgendas(slots, ocupados) {
   const porDoc = new Map();
   const meter = (lista, clave) => {
@@ -642,8 +693,9 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
       byMin.set(min, s);
     }
     const encadenados = [];
+    const conservar = opts?.conservarSiNoEntra === true;
     for (const startMin of byMin.keys()) {
-      const paso = pasos.get(diaDeMinuto(startMin)) || fallback;
+      const paso = pasos.get(diaDeMinuto(startMin)) || fallback || PASO_MIN;
       const start = byMin.get(startMin);
       if (!paso || duracion % paso !== 0) continue;
       const needed = duracion / paso;
@@ -653,7 +705,12 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
         if (min <= startMin || !mismoDiaMinutos(startMin, min)) continue;
         if (siguienteOcupado == null || min < siguienteOcupado) siguienteOcupado = min;
       }
-      if (siguienteOcupado != null && siguienteOcupado - startMin < duracion) continue;
+      if (siguienteOcupado != null && siguienteOcupado - startMin < duracion) {
+        if (conservar && paso <= (siguienteOcupado - startMin)) {
+          encadenados.push({ ...start, modulos: [start], moduloMin: paso, duracionMin: paso });
+        }
+        continue;
+      }
       const modulos = [start];
       let ok = true;
       for (let i = 1; i < needed; i++) {
@@ -665,7 +722,12 @@ function armarOfertasPorDuracion(slots, duracionMin, opts) {
         }
         modulos.push(next);
       }
-      if (ok) encadenados.push({ ...start, modulos, moduloMin: paso });
+      if (ok) {
+        encadenados.push({ ...start, modulos, moduloMin: paso });
+      } else if (conservar) {
+        // Sin grilla completa: igual ofrecer el hueco suelto (1 módulo).
+        encadenados.push({ ...start, modulos: [start], moduloMin: paso, duracionMin: paso });
+      }
     }
     if (encadenados.length) ofertas.push(...encadenados);
   }
@@ -753,13 +815,51 @@ function formatTurnoFechaHoraMedexis(d) {
   return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())} ${p(x.getHours())}:${p(x.getMinutes())}:${p(x.getSeconds())}`;
 }
 
-/** Medexis exige PersonaFechaNacimiento; usamos la fecha del día (YYYY-MM-DD). */
+/** Medexis exige PersonaFechaNacimiento; fallback: fecha del día (YYYY-MM-DD). */
 function fechaNacimientoHoyParaApi() {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** Normaliza a YYYY-MM-DD si se puede. */
+function normalizarFechaNacimiento(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (dmy) {
+    const dd = dmy[1].padStart(2, '0');
+    const mm = dmy[2].padStart(2, '0');
+    let yyyy = dmy[3];
+    if (yyyy.length === 2) yyyy = `20${yyyy}`;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return '';
+}
+
+function sexoMedexisDeSeed(sexo) {
+  const s = String(sexo ?? '')
+    .trim()
+    .toLowerCase();
+  if (s === 'femenino' || s === 'f') return 'FEMENINO';
+  if (s === 'masculino' || s === 'm') return 'MASCULINO';
+  return '';
+}
+
+function pacienteSeedTieneDatos(paciente) {
+  if (!paciente || typeof paciente !== 'object') return false;
+  return Boolean(
+    String(paciente.dni ?? '').replace(/\D/g, '') ||
+      normalizarFechaNacimiento(paciente.fechaNacimiento) ||
+      String(paciente.nombre ?? '').trim() ||
+      String(paciente.apellido ?? '').trim() ||
+      String(paciente.email ?? '').trim() ||
+      String(paciente.telefono ?? '').replace(/\D/g, '')
+  );
 }
 
 function titleCase(s) {
@@ -916,11 +1016,16 @@ function App({
   mode = 'full',
   onUiLockChange,
   pedidoSeed = null,
+  onPedidoSeedClear,
   soloLibres: soloLibresProp,
   onSoloLibresChange,
+  onProponerTurnosLibres,
+  onTurnoAsignado,
 }) {
   const compact = mode === 'compact';
   const configView = !compact && section === 'config';
+  const puedeProponerTurnos =
+    compact && typeof onProponerTurnosLibres === 'function';
   const [profesionalesCatalog, setProfesionalesCatalog] = useState([]);
   const [prestaciones, setPrestaciones] = useState({});
   const [cacheLoaded, setCacheLoaded] = useState(false);
@@ -931,6 +1036,9 @@ function App({
   const [prestacionId, setPrestacionId] = useState('');
   const [modalidad, setModalidad] = useState('TODOS');
   const [duracionMin, setDuracionMin] = useState(30);
+  /** CRM compacto: marcar libres para armar mensaje WhatsApp. */
+  const [seleccionTurnosActiva, setSeleccionTurnosActiva] = useState(false);
+  const [slotsElegidos, setSlotsElegidos] = useState(() => new Map());
   /** true = solo huecos libres; false = libres + ocupados. */
   const [soloLibresLocal, setSoloLibresLocal] = useState(true);
   const soloLibresControlled = typeof soloLibresProp === 'boolean';
@@ -943,6 +1051,8 @@ function App({
   const lastPedidoSeedKey = useRef('');
   /** Profesional matcheado del pedido WA: al elegir prestación a mano, priorizarlo. */
   const preferredProfDocRef = useRef('');
+  /** Paciente del pedido WA (solo tras Pasar a Busca Turno; se limpia con Limpiar). */
+  const pacienteSeedRef = useRef(null);
   /** Tras Pasar a Busca Turno: buscar solo y ampliar si no hay huecos. */
   const pendingAutoBuscarKeyRef = useRef('');
   const [searching, setSearching] = useState(false);
@@ -993,11 +1103,33 @@ function App({
     });
   }, [cacheDot, cacheLabel, onCatalogStatus]);
 
-  // Prefill desde pedido de turno del CRM WhatsApp.
+  // Prefill desde pedido de turno del CRM WhatsApp (solo al tocar Pasar a Busca Turno).
   useEffect(() => {
-    if (!pedidoSeed?.key || !cacheLoaded) return;
+    if (!pedidoSeed?.key) {
+      // Padre soltó el seed (p. ej. limpiar): no arrastrar paciente a asignaciones futuras.
+      if (lastPedidoSeedKey.current) {
+        lastPedidoSeedKey.current = '';
+        pacienteSeedRef.current = null;
+        preferredProfDocRef.current = '';
+        pendingAutoBuscarKeyRef.current = '';
+      }
+      return;
+    }
+    if (!cacheLoaded) return;
     if (lastPedidoSeedKey.current === pedidoSeed.key) return;
     lastPedidoSeedKey.current = pedidoSeed.key;
+
+    pacienteSeedRef.current = pacienteSeedTieneDatos(pedidoSeed.paciente)
+      ? {
+          dni: String(pedidoSeed.paciente.dni ?? '').replace(/\D/g, ''),
+          fechaNacimiento: normalizarFechaNacimiento(pedidoSeed.paciente.fechaNacimiento),
+          nombre: String(pedidoSeed.paciente.nombre ?? '').trim(),
+          apellido: String(pedidoSeed.paciente.apellido ?? '').trim(),
+          email: String(pedidoSeed.paciente.email ?? '').trim(),
+          telefono: String(pedidoSeed.paciente.telefono ?? '').replace(/\D/g, ''),
+          sexo: String(pedidoSeed.paciente.sexo ?? '').trim().toLowerCase(),
+        }
+      : null;
 
     if (pedidoSeed.modalidad === 'virtual') setModalidad('VIRTUAL');
     else if (pedidoSeed.modalidad === 'presencial') setModalidad('PRESENCIAL');
@@ -1062,6 +1194,8 @@ function App({
       partes.push(pedidoSeed.profesionalNombre || `Doc ${docProf}`);
     }
     if (nombrePrest) partes.push(nombrePrest);
+    const dniSeed = pacienteSeedRef.current?.dni;
+    if (dniSeed) partes.push(`DNI ${dniSeed}`);
     if (partes.length) {
       toast.info(
         codigo
@@ -1228,10 +1362,18 @@ function App({
       if (modalidad === 'PRESENCIAL') return !isSlotVirtual(s.edificio);
       return true;
     };
-    return duracionesDePasos(pasosDeAgendas(slotsRaw.filter(mismaModalidad), dadosRaw.filter(mismaModalidad)));
+    const libres = slotsRaw.filter(mismaModalidad);
+    const dados = dadosRaw.filter(mismaModalidad);
+    const detected = duracionesDePasos(pasosDeAgendas(libres, dados));
+    if (detected.length) return detected;
+    // Llegaron huecos pero no hay dos seguidos para inferir el paso: no bloquear la UI.
+    if (libres.length > 0 || slotsRaw.length > 0) return DURACIONES_FALLBACK;
+    return [];
   }, [slotsRaw, dadosRaw, modalidad]);
 
-  const duracionAplicable = duracionesAgenda.includes(duracionMin) ? duracionMin : duracionesAgenda[0] || null;
+  const duracionAplicable = duracionesAgenda.includes(duracionMin)
+    ? duracionMin
+    : duracionesAgenda[0] || DEFAULT_DURACION;
 
   useEffect(() => {
     if (!duracionesAgenda.length) return;
@@ -1248,8 +1390,14 @@ function App({
     };
     const list = slotsRaw.filter(mismaModalidad);
     const dados = dadosRaw.filter(mismaModalidad);
-    if (!duracionAplicable) return [];
-    return armarOfertasConReglas(list, prestacionId, duracionAplicable, reglas, dados);
+    if (!list.length) return [];
+    return armarOfertasConReglas(
+      list,
+      prestacionId,
+      duracionAplicable || DEFAULT_DURACION,
+      reglas,
+      dados,
+    );
   }, [slotsRaw, dadosRaw, modalidad, duracionAplicable, prestacionId, reglas]);
 
   const enabledProfDocs = useMemo(
@@ -1288,6 +1436,15 @@ function App({
   const selectedDocs = prestacionId
     ? (selectedPrestadorDocsByPrestacion[prestacionId] ?? profesionalesForPrestacion.map((p) => p.doc))
     : [];
+  const unSoloProfSeleccionado = selectedDocs.length === 1;
+  const nombreProfSeleccionado = (() => {
+    if (!unSoloProfSeleccionado) return '';
+    const doc = String(selectedDocs[0] ?? '');
+    const deCatalogo = profesionalesForPrestacion.find((p) => String(p.doc) === doc);
+    if (deCatalogo?.nombre) return titleCase(deCatalogo.nombre);
+    const deSlot = slotsRaw.find((s) => String(s.profesionalDoc) === doc);
+    return deSlot?.profesional ? titleCase(String(deSlot.profesional)) : '';
+  })();
   const [prestadorFilter, setPrestadorFilter] = useState('');
   const [prestadoresModalOpen, setPrestadoresModalOpen] = useState(false);
   const [selectedSlotForAssign, setSelectedSlotForAssign] = useState(null);
@@ -1338,6 +1495,7 @@ function App({
   const [assignSexoManual, setAssignSexoManual] = useState('MASCULINO');
   const [assignEmailManual, setAssignEmailManual] = useState('');
   const [assignTelefonoManual, setAssignTelefonoManual] = useState('');
+  const [assignFechaNacManual, setAssignFechaNacManual] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState('');
 
@@ -2236,20 +2394,62 @@ function App({
     setAssignSexoManual('MASCULINO');
     setAssignEmailManual('');
     setAssignTelefonoManual('');
+    setAssignFechaNacManual('');
     setAssignError('');
   }, []);
 
   const openAssignModal = useCallback((slot) => {
+    const seed = pacienteSeedRef.current;
+    const dni = String(seed?.dni ?? '').replace(/\D/g, '');
+    const fechaNac = normalizarFechaNacimiento(seed?.fechaNacimiento);
+    const nombre = String(seed?.nombre ?? '').trim();
+    const apellido = String(seed?.apellido ?? '').trim();
+    const email = String(seed?.email ?? '').trim();
+    const telefono = String(seed?.telefono ?? '').replace(/\D/g, '');
+    const sexo = sexoMedexisDeSeed(seed?.sexo) || 'MASCULINO';
+
     setSelectedSlotForAssign(slot);
-    setAssignDni('');
+    setAssignDni(dni);
     setPersonaData(null);
     setAssignPacienteNoEncontrado(false);
-    setAssignNombreManual('');
-    setAssignApellidoManual('');
-    setAssignSexoManual('MASCULINO');
-    setAssignEmailManual('');
-    setAssignTelefonoManual('');
+    setAssignNombreManual(nombre);
+    setAssignApellidoManual(apellido);
+    setAssignSexoManual(sexo);
+    setAssignEmailManual(email);
+    setAssignTelefonoManual(telefono);
+    setAssignFechaNacManual(fechaNac);
     setAssignError('');
+
+    // Si vino de Pasar a Busca Turno con DNI, buscar ficha en Medexis al instante.
+    if (!dni) return;
+    setAssignLoading(true);
+    void (async () => {
+      try {
+        const data = await getPersona(dni);
+        const person = Array.isArray(data) ? data[0] : data;
+        if (!person || person.PersonaDocumento == null) {
+          setAssignPacienteNoEncontrado(true);
+          return;
+        }
+        const nacMedexis = normalizarFechaNacimiento(
+          person.PersonaFechaNacimiento || person.personaFechaNacimiento
+        );
+        setPersonaData({
+          ...person,
+          PersonaFechaNacimiento: nacMedexis || fechaNac || undefined,
+        });
+      } catch (e) {
+        setAssignPacienteNoEncontrado(true);
+        const raw = e?.message || 'Error al buscar el paciente.';
+        setAssignError(
+          /HTTP\s*5\d\d/i.test(raw) || /no se pudo conectar/i.test(raw)
+            ? 'No se pudo consultar el paciente en Medexis. Completá los datos manualmente.'
+            : raw
+        );
+      } finally {
+        setAssignLoading(false);
+      }
+    })();
   }, []);
 
   const limpiarBusqueda = useCallback(() => {
@@ -2268,21 +2468,36 @@ function App({
     setSelectedPrestadorDocsByPrestacion({});
     setModalidad('TODOS');
     setDuracionMin(30);
+    setSeleccionTurnosActiva(false);
+    setSlotsElegidos(new Map());
+    preferredProfDocRef.current = '';
+    pendingAutoBuscarKeyRef.current = '';
+    pacienteSeedRef.current = null;
+    lastPedidoSeedKey.current = '';
+    onPedidoSeedClear?.();
     clearStatus();
     closeAssignModal();
-  }, [clearStatus, closeAssignModal]);
+  }, [clearStatus, closeAssignModal, onPedidoSeedClear]);
 
   const handleBuscarPaciente = useCallback(async () => {
     const doc = assignDni.trim();
     if (!doc) return;
+    const seed = pacienteSeedRef.current;
+    const keepNombre = String(seed?.nombre ?? assignNombreManual).trim();
+    const keepApellido = String(seed?.apellido ?? assignApellidoManual).trim();
+    const keepEmail = String(seed?.email ?? assignEmailManual).trim();
+    const keepTel = String(seed?.telefono ?? assignTelefonoManual).replace(/\D/g, '');
+    const keepSexo = sexoMedexisDeSeed(seed?.sexo) || assignSexoManual || 'MASCULINO';
+    const keepFecha = normalizarFechaNacimiento(seed?.fechaNacimiento || assignFechaNacManual);
     setAssignError('');
     setPersonaData(null);
     setAssignPacienteNoEncontrado(false);
-    setAssignNombreManual('');
-    setAssignApellidoManual('');
-    setAssignSexoManual('MASCULINO');
-    setAssignEmailManual('');
-    setAssignTelefonoManual('');
+    setAssignNombreManual(keepNombre);
+    setAssignApellidoManual(keepApellido);
+    setAssignSexoManual(keepSexo);
+    setAssignEmailManual(keepEmail);
+    setAssignTelefonoManual(keepTel);
+    setAssignFechaNacManual(keepFecha);
     setAssignLoading(true);
     try {
       const data = await getPersona(doc);
@@ -2291,7 +2506,13 @@ function App({
         setAssignPacienteNoEncontrado(true);
         return;
       }
-      setPersonaData(person);
+      const nacMedexis = normalizarFechaNacimiento(
+        person.PersonaFechaNacimiento || person.personaFechaNacimiento
+      );
+      setPersonaData({
+        ...person,
+        PersonaFechaNacimiento: nacMedexis || keepFecha || undefined,
+      });
     } catch (e) {
       // Si Medexis falla (p. ej. 500), permitir completar datos a mano.
       setAssignPacienteNoEncontrado(true);
@@ -2304,7 +2525,15 @@ function App({
     } finally {
       setAssignLoading(false);
     }
-  }, [assignDni]);
+  }, [
+    assignDni,
+    assignNombreManual,
+    assignApellidoManual,
+    assignEmailManual,
+    assignTelefonoManual,
+    assignSexoManual,
+    assignFechaNacManual,
+  ]);
 
   const handleContinuarPacienteManual = useCallback(() => {
     const doc = assignDni.trim();
@@ -2312,6 +2541,7 @@ function App({
     const ape = assignApellidoManual.trim();
     const email = assignEmailManual.trim();
     const tel = assignTelefonoManual.replace(/\D/g, '');
+    const fechaNac = normalizarFechaNacimiento(assignFechaNacManual);
     if (!doc) {
       setAssignError('Ingresá el DNI.');
       return;
@@ -2322,6 +2552,10 @@ function App({
     }
     if (assignSexoManual !== 'MASCULINO' && assignSexoManual !== 'FEMENINO') {
       setAssignError('Elegí el sexo.');
+      return;
+    }
+    if (!fechaNac) {
+      setAssignError('Ingresá la fecha de nacimiento.');
       return;
     }
     if (!email) {
@@ -2344,6 +2578,7 @@ function App({
       PersonaEmail: email,
       PersonaTelefonoCel: tel,
       PersonaSexo: assignSexoManual,
+      PersonaFechaNacimiento: fechaNac,
       _manual: true,
     });
   }, [
@@ -2353,6 +2588,7 @@ function App({
     assignSexoManual,
     assignEmailManual,
     assignTelefonoManual,
+    assignFechaNacManual,
   ]);
 
   const handleAsignarTurno = useCallback(async () => {
@@ -2361,7 +2597,12 @@ function App({
     setAssignLoading(true);
     try {
       const slot = selectedSlotForAssign;
-      const fechaNac = fechaNacimientoHoyParaApi();
+      const fechaNac =
+        normalizarFechaNacimiento(
+          personaData.PersonaFechaNacimiento ||
+            assignFechaNacManual ||
+            pacienteSeedRef.current?.fechaNacimiento
+        ) || fechaNacimientoHoyParaApi();
       if (!slot.prestacionId) {
         setAssignError('Falta el código de la prestación.');
         setAssignLoading(false);
@@ -2445,12 +2686,20 @@ function App({
           ? `Se asignaron ${modulos.length} turnos (${textoModulos(modulos)}) al mismo paciente.`
           : 'Turno asignado correctamente.'
       );
+      if (typeof onTurnoAsignado === 'function') onTurnoAsignado();
     } catch (e) {
       setAssignError(e.message || 'Error al asignar el turno.');
     } finally {
       setAssignLoading(false);
     }
-  }, [selectedSlotForAssign, personaData, assignDni, closeAssignModal]);
+  }, [
+    selectedSlotForAssign,
+    personaData,
+    assignDni,
+    assignFechaNacManual,
+    closeAssignModal,
+    onTurnoAsignado,
+  ]);
 
   const prestacionList = useMemo(() => {
     return Object.entries(prestaciones)
@@ -2486,9 +2735,22 @@ function App({
   const byDay = {};
   slotsFiltered.forEach((s) => {
     const key = fmtDateKey(s.fechaHora);
+    if (!key) return;
     if (!byDay[key]) byDay[key] = [];
     byDay[key].push(s);
   });
+  // Con ocupados visibles: incluir días que solo tienen dados (sin libres).
+  if (!soloLibres) {
+    const docsSel = new Set(selectedDocs.map((d) => String(d)));
+    for (const d of dadosRaw) {
+      if (docsSel.size && !docsSel.has(String(d.profesionalDoc))) continue;
+      if (modalidad === 'VIRTUAL' && !isSlotVirtual(d.edificio)) continue;
+      if (modalidad === 'PRESENCIAL' && isSlotVirtual(d.edificio)) continue;
+      const key = fmtDateKey(d.fechaHora);
+      if (!key) continue;
+      if (!byDay[key]) byDay[key] = [];
+    }
+  }
   const dayEntries = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b));
 
   const prestadoresModalFiltered = useMemo(() => {
@@ -2824,8 +3086,15 @@ function App({
                 {prestacionOptions.find((o) => o.value === prestacionId)?.label ||
                   'Prestación'}
               </strong>
-              <span>
-                {MODALIDADES.find((m) => m.value === modalidad)?.label || modalidad}
+              <span className="busca-filtros-acordeon__meta">
+                {nombreProfSeleccionado ? (
+                  <span className="busca-filtros-acordeon__prof">{nombreProfSeleccionado}</span>
+                ) : (
+                  <span className="busca-filtros-acordeon__prof is-empty">Profesional</span>
+                )}
+                <span className="busca-filtros-acordeon__mod">
+                  {MODALIDADES.find((m) => m.value === modalidad)?.label || modalidad}
+                </span>
               </span>
             </span>
             <span className="busca-filtros-acordeon__chevron" aria-hidden>
@@ -2954,10 +3223,9 @@ function App({
             {(slotsRaw.length > 0 || searchReturnedEmpty) ? (
               <button
                 type="button"
-                className="btn btn-limpiar"
+                className="btn btn-secondary btn-limpiar"
                 onClick={limpiarBusqueda}
                 disabled={searching}
-                title="Quitar prestación, resultados y volver al estado inicial"
               >
                 Limpiar
               </button>
@@ -2972,10 +3240,9 @@ function App({
             ) : null}
             <button
               type="button"
-              className="btn btn-limpiar"
+              className="btn btn-secondary btn-limpiar"
               onClick={limpiarBusqueda}
               disabled={searching}
-              title="Quitar prestación, resultados y volver al estado inicial"
             >
               Limpiar
             </button>
@@ -3081,12 +3348,16 @@ function App({
       )}
 
       <div className="busca-turno-results">
-      {searching ? (
+      {searching && slotsRaw.length === 0 ? (
         <LoadingBlock
           label={status.text?.trim() || 'Buscando turnos...'}
           size={compact ? 34 : 56}
           className={compact ? 'ineco-loading--busca ineco-loading--busca-compact' : 'ineco-loading--busca'}
         />
+      ) : searching && slotsRaw.length > 0 ? (
+        <div className="busca-loading-inline" role="status" aria-live="polite">
+          {status.text?.trim() || 'Buscando más fechas...'}
+        </div>
       ) : status.visible ? (
         <div className={`status-bar visible ${status.error ? 'error' : ''}`}>{status.text}</div>
       ) : null}
@@ -3120,20 +3391,16 @@ function App({
           <p className="empty-state-text">
             {reglasDeBusqueda.length > 0
               ? 'No hay turnos que cumplan la duración. Si el profesional tiene una regla, esa manda sobre la duración general.'
-              : !duracionesAgenda.length
-                ? 'Llegaron turnos, pero no hay dos seguidos para calcular cuánto dura cada slot.'
-                : `No hay ${labelDuracion(duracionAplicable)} seguidos libres${
-                  modalidad === 'VIRTUAL'
-                    ? ' en modalidad virtual'
-                    : modalidad === 'PRESENCIAL'
-                      ? ' en modalidad presencial'
-                      : ''
-                }.`}
+              : modalidad === 'VIRTUAL'
+                ? 'No hay turnos libres en modalidad virtual con estos filtros.'
+                : modalidad === 'PRESENCIAL'
+                  ? 'No hay turnos libres en modalidad presencial con estos filtros.'
+                  : 'No hay turnos libres con la duración elegida y estos filtros.'}
           </p>
           <p className="empty-state-hint">
             {reglasDeBusqueda.length > 0
               ? 'La regla pide huecos consecutivos del mismo profesional y la misma modalidad.'
-              : 'La duración tiene que ser 1, 2, 3 o 4 slots de la agenda. Si el turno es de una hora, no se puede pedir una hora y media.'}
+              : 'Probá otra duración, modalidad o ampliá la búsqueda.'}
           </p>
         </div>
       )}
@@ -3171,12 +3438,13 @@ function App({
               if (modalidad === 'PRESENCIAL') return !isSlotVirtual(edificio);
               return true;
             };
+            const docsDia = new Set(selectedDocs.map((d) => String(d)));
             const ocupadosDelDia = soloLibres
               ? []
               : dadosRaw.filter((d) => {
                   const cuando = d.fechaHora instanceof Date ? d.fechaHora : new Date(d.fechaHora);
                   if (fmtDateKey(cuando) !== key) return false;
-                  if (!byProf.has(String(d.profesionalDoc))) return false;
+                  if (docsDia.size && !docsDia.has(String(d.profesionalDoc))) return false;
                   if (!entraModalidad(d.edificio)) return false;
                   const min = minutoSlot(d);
                   return min == null || !minutosLibres.has(`${d.profesionalDoc}|${min}`);
@@ -3190,11 +3458,31 @@ function App({
             for (const [id, lista] of gruposPorProf) {
               gruposPorProf.set(id, agruparOcupadosMismoPaciente(lista));
             }
+            // Profesionales con solo ocupados ese día (sin libres).
+            if (!soloLibres) {
+              for (const [docOcup, grupos] of gruposPorProf) {
+                if (byProf.has(docOcup)) continue;
+                const primero = grupos[0]?.turnos?.[0];
+                byProf.set(docOcup, {
+                  nombre: primero?.profesional || docOcup,
+                  slots: [],
+                });
+              }
+            }
+            const profBlocksConOcupados = soloLibres
+              ? profBlocks
+              : sortProfesionalesAlfabetico(
+                  [...byProf.entries()].map(([doc, g]) => ({
+                    doc,
+                    nombre: g.nombre,
+                    slots: g.slots.sort((a, b) => a.fechaHora - b.fechaHora),
+                  })),
+                );
             let bloquesOcupados = 0;
             for (const lista of gruposPorProf.values()) bloquesOcupados += lista.length;
             const libresDia = sorted.length;
             const pasoPorProf = new Map();
-            for (const block of profBlocks) {
+            for (const block of profBlocksConOcupados) {
               const mins = [];
               for (const s of block.slots) {
                 const mods = s.modulos?.length ? s.modulos : [s];
@@ -3234,46 +3522,50 @@ function App({
                     </span>
                     <span className="day-header-label">{fmtDayLabel(fecha)}</span>
                   </span>
-                  <span className="day-counts">
-                    <span className="day-count">
-                      {libresDia} libre{libresDia !== 1 ? 's' : ''}
-                    </span>
-                    {!soloLibres ? (
-                      <span className="day-count day-count--ocupado">
-                        {bloquesOcupados} ocupado{bloquesOcupados !== 1 ? 's' : ''}
+                  {compact ? null : (
+                    <span className="day-counts">
+                      <span className="day-count">
+                        {libresDia} libre{libresDia !== 1 ? 's' : ''}
                       </span>
-                    ) : null}
-                  </span>
+                      {!soloLibres ? (
+                        <span className="day-count day-count--ocupado">
+                          {bloquesOcupados} ocupado{bloquesOcupados !== 1 ? 's' : ''}
+                        </span>
+                      ) : null}
+                    </span>
+                  )}
                 </button>
                 {!dayCollapsed && (
                   <div className="day-prof-list">
-                    {profBlocks.map(({ doc, nombre, slots: profSlots }) => {
+                    {profBlocksConOcupados.map(({ doc, nombre, slots: profSlots }) => {
                       const ocupadosProf = gruposPorProf.get(String(doc)) || [];
                       const libresProf = profSlots.length;
+                      const ocultarCabeceraProf =
+                        compact &&
+                        (unSoloProfSeleccionado || profBlocksConOcupados.length === 1);
                       return (
-                      <div key={doc} className="day-prof-block">
+                      <div
+                        key={doc}
+                        className={`day-prof-block${ocultarCabeceraProf ? ' day-prof-block--solo' : ''}`}
+                      >
+                        {ocultarCabeceraProf ? null : (
                         <div className="day-prof-header">
                           <span className="day-prof-name">
                             {compact ? titleCase(nombre || '') : profLabelConDoc(nombre, doc)}
                           </span>
-                          {compact ? (
+                          {compact && !soloLibres ? (
                             <span
                               className="day-prof-counts"
-                              aria-label={
-                                soloLibres
-                                  ? `${libresProf} libres`
-                                  : `${libresProf} libres, ${ocupadosProf.length} ocupados`
-                              }
+                              aria-label={`${libresProf} libres, ${ocupadosProf.length} ocupados`}
                             >
                               <span className="day-count">{libresProf} libre{libresProf !== 1 ? 's' : ''}</span>
-                              {!soloLibres ? (
-                                <span className="day-count day-count--ocupado">
-                                  {ocupadosProf.length} ocupado{ocupadosProf.length !== 1 ? 's' : ''}
-                                </span>
-                              ) : null}
+                              <span className="day-count day-count--ocupado">
+                                {ocupadosProf.length} ocupado{ocupadosProf.length !== 1 ? 's' : ''}
+                              </span>
                             </span>
                           ) : null}
                         </div>
+                        )}
                         <div className="slot-grid slot-grid-by-prof">
                           {[
                             ...profSlots.map((s) => ({ tipo: 'libre', item: s, orden: s.fechaHora })),
@@ -3373,21 +3665,53 @@ function App({
                             const reglaTxt = s.porRegla ? 'Regla' : '';
                             const detalle = [durTxt, ocupa, reglaTxt].filter(Boolean).join(' · ');
                             if (compact) {
+                              const keyLibre = slotLibreKey(doc, s);
+                              const elegido = slotsElegidos.has(keyLibre);
                               return (
                                 <button
                                   key={`${doc}-${new Date(s.fechaHora).getTime()}-${i}`}
                                   type="button"
-                                  className={`slot-card slot-card-compact slot-card--libre${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}`}
-                                  onClick={() => openAssignModal(s)}
+                                  className={`slot-card slot-card-compact slot-card--libre${virtual ? ' slot-card--virtual' : ' slot-card--presencial'}${seleccionTurnosActiva ? ' slot-card--selectable' : ''}${elegido ? ' is-checked' : ''}`}
+                                  onClick={() => {
+                                    if (!seleccionTurnosActiva) {
+                                      openAssignModal(s);
+                                      return;
+                                    }
+                                    setSlotsElegidos((prev) => {
+                                      const next = new Map(prev);
+                                      if (next.has(keyLibre)) next.delete(keyLibre);
+                                      else {
+                                        next.set(keyLibre, {
+                                          doc: String(doc),
+                                          nombreProf: nombre || '',
+                                          fechaHora: s.fechaHora,
+                                          edificio: s.edificio || '',
+                                        });
+                                      }
+                                      return next;
+                                    });
+                                  }}
                                   title={sedeTxt || undefined}
-                                  aria-label={`Asignar turno ${rangoLibre}. ${tooltip}${detalle ? `. ${detalle}` : ''}`}
+                                  aria-pressed={seleccionTurnosActiva ? elegido : undefined}
+                                  aria-label={
+                                    seleccionTurnosActiva
+                                      ? `${elegido ? 'Quitar' : 'Elegir'} turno ${rangoLibre}. ${tooltip}`
+                                      : `Asignar turno ${rangoLibre}. ${tooltip}${detalle ? `. ${detalle}` : ''}`
+                                  }
                                 >
+                                  {seleccionTurnosActiva ? (
+                                    <span
+                                      className={`slot-check${elegido ? ' is-on' : ''}`}
+                                      aria-hidden
+                                    >
+                                      {elegido ? '✓' : ''}
+                                    </span>
+                                  ) : null}
                                   <span className="slot-mod-icon" aria-hidden>
                                     {virtual ? <IconMonitor size={13} /> : <IconBuilding size={13} />}
                                   </span>
                                   <span className="slot-time">{rangoLibre}</span>
                                   {durMin ? <span className="slot-meta">{durMin} min</span> : null}
-                                  <span className="slot-estado slot-estado--libre">Libre</span>
                                 </button>
                               );
                             }
@@ -3427,7 +3751,50 @@ function App({
       )}
 
       {slotsRaw.length > 0 && (
-        <div className="load-more-wrap">
+        <div className={`load-more-wrap${puedeProponerTurnos ? ' load-more-wrap--crm' : ''}`}>
+          {puedeProponerTurnos && !seleccionTurnosActiva ? (
+            <button
+              type="button"
+              className="btn load-more-btn load-more-btn--proponer"
+              onClick={() => {
+                setSlotsElegidos(new Map());
+                setSeleccionTurnosActiva(true);
+              }}
+            >
+              Enviar turnos libres
+            </button>
+          ) : null}
+          {puedeProponerTurnos && seleccionTurnosActiva ? (
+            <div className="busca-proponer-bar" role="group" aria-label="Armar mensaje de turnos">
+              <button
+                type="button"
+                className="btn load-more-btn load-more-btn--ghost"
+                onClick={() => {
+                  setSeleccionTurnosActiva(false);
+                  setSlotsElegidos(new Map());
+                }}
+              >
+                Cancelar
+              </button>
+              <span className="busca-proponer-bar__count">
+                {slotsElegidos.size} seleccionado{slotsElegidos.size === 1 ? '' : 's'}
+              </span>
+              <button
+                type="button"
+                className="btn load-more-btn load-more-btn--proponer"
+                disabled={slotsElegidos.size === 0}
+                onClick={() => {
+                  const texto = armarTextoTurnosLibres([...slotsElegidos.values()]);
+                  if (!texto.trim()) return;
+                  onProponerTurnosLibres(texto);
+                  setSeleccionTurnosActiva(false);
+                  setSlotsElegidos(new Map());
+                }}
+              >
+                Armar mensaje
+              </button>
+            </div>
+          ) : null}
           <button
             type="button"
             className="btn load-more-btn"
@@ -3768,6 +4135,15 @@ function App({
                           disabled={assignLoading}
                         />
                       </label>
+                      <label className="modal-field">
+                        <span>Fecha de nacimiento</span>
+                        <input
+                          type="date"
+                          value={assignFechaNacManual}
+                          onChange={(e) => setAssignFechaNacManual(e.target.value)}
+                          disabled={assignLoading}
+                        />
+                      </label>
                       <div className="modal-field modal-field-sexo">
                         <span className="modal-field-label-block">Sexo</span>
                         <div className="modal-sexo-options" role="radiogroup" aria-label="Sexo">
@@ -3832,6 +4208,7 @@ function App({
                         {titleCase(personaData.PersonaNombre)} {titleCase(personaData.PersonaApellido || '')}
                       </strong>
                     </p>
+                    <p>DNI {formatDocumentoMiles(personaData.PersonaDocumento ?? assignDni)}</p>
                     {(personaData.PersonaEmail || personaData._manual) && (
                       <p>{personaData.PersonaEmail || '—'}</p>
                     )}
@@ -3866,6 +4243,7 @@ function App({
                       (assignPacienteNoEncontrado &&
                         (!assignNombreManual.trim() ||
                           !assignApellidoManual.trim() ||
+                          !normalizarFechaNacimiento(assignFechaNacManual) ||
                           !assignEmailManual.trim() ||
                           assignTelefonoManual.replace(/\D/g, '').length < 6))
                     }
@@ -3883,13 +4261,18 @@ function App({
                     type="button"
                     className="btn btn-secondary"
                     onClick={() => {
+                      const seed = pacienteSeedRef.current;
                       setPersonaData(null);
                       setAssignPacienteNoEncontrado(false);
-                      setAssignNombreManual('');
-                      setAssignApellidoManual('');
-                      setAssignSexoManual('MASCULINO');
-                      setAssignEmailManual('');
-                      setAssignTelefonoManual('');
+                      setAssignNombreManual(String(seed?.nombre ?? '').trim());
+                      setAssignApellidoManual(String(seed?.apellido ?? '').trim());
+                      setAssignSexoManual(sexoMedexisDeSeed(seed?.sexo) || 'MASCULINO');
+                      setAssignEmailManual(String(seed?.email ?? '').trim());
+                      setAssignTelefonoManual(String(seed?.telefono ?? '').replace(/\D/g, ''));
+                      setAssignFechaNacManual(
+                        normalizarFechaNacimiento(seed?.fechaNacimiento || '')
+                      );
+                      setAssignDni(String(seed?.dni ?? assignDni).replace(/\D/g, ''));
                       setAssignError('');
                     }}
                   >

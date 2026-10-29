@@ -27,7 +27,7 @@ import {
   IconProfesional,
   IconPresupuesto,
   IconUsers,
-  IconWhatsapp,
+  IconConversations,
 } from "./Icons";
 
 export type AppModule = AppModuleId;
@@ -211,7 +211,7 @@ export function AppSidebar({
           <AccordionGroup
             id="whatsapp"
             label="CRM"
-            Icon={IconWhatsapp}
+            Icon={IconConversations}
             open={expanded === "whatsapp"}
             active={module === "whatsapp"}
             onToggle={() => toggleGroup("whatsapp")}

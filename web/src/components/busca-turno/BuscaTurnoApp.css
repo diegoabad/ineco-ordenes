@@ -173,6 +173,18 @@
   padding-bottom: 0;
 }
 
+.busca-loading-inline {
+  margin: 0 0 0.55rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, #fff);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, #e2d4d9);
+  border-radius: 8px;
+  text-align: center;
+}
+
 .search-row {
   display: grid;
   grid-template-columns: minmax(240px, 2fr) minmax(130px, 0.8fr) minmax(110px, 0.6fr) auto;
@@ -2117,11 +2129,13 @@ button.slot-card.slot-card-compact:focus-visible {
 }
 
 .busca-turno--compact .search-panel {
-  padding: 0.5rem 0.65rem 0.45rem;
+  padding: 0.55rem 0.65rem 0.55rem;
   border-radius: 0;
   box-shadow: none;
   border: none;
-  border-bottom: 1px solid var(--color-border);
+  /* Franja fría distinta a los días (rosa Ineco) para separar filtros de resultados. */
+  border-bottom: 1px solid #cfd6de;
+  background: linear-gradient(180deg, #eef2f6 0%, #e4eaf0 100%);
 }
 
 .busca-turno--compact .busca-filtros-acordeon {
@@ -2132,30 +2146,31 @@ button.slot-card.slot-card-compact:focus-visible {
   width: 100%;
   margin: 0 0 0.4rem;
   padding: 0.45rem 0.5rem;
-  border: 1px solid var(--color-border);
+  border: 1px solid #c8d0d8;
   border-radius: var(--radius-sm);
-  background: var(--color-bg);
+  background: #fff;
   color: var(--color-text);
   text-align: left;
   cursor: pointer;
   font: inherit;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
 .busca-turno--compact .busca-filtros-acordeon:hover {
-  border-color: var(--color-border-strong);
+  border-color: #aeb8c3;
   background: #fff;
 }
 
 .busca-turno--compact .busca-filtros-acordeon__text {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.18rem;
   min-width: 0;
   flex: 1 1 auto;
 }
 
 .busca-turno--compact .busca-filtros-acordeon__text strong {
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   font-weight: 700;
   line-height: 1.25;
   overflow: hidden;
@@ -2163,10 +2178,40 @@ button.slot-card.slot-card-compact:focus-visible {
   white-space: nowrap;
 }
 
-.busca-turno--compact .busca-filtros-acordeon__text span {
-  font-size: 0.68rem;
+.busca-turno--compact .busca-filtros-acordeon__meta {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.busca-turno--compact .busca-filtros-acordeon__prof {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--color-text);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.busca-turno--compact .busca-filtros-acordeon__prof.is-empty {
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.busca-turno--compact .busca-filtros-acordeon__mod {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 650;
   color: var(--color-text-muted);
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .busca-turno--compact .busca-filtros-acordeon__chevron {
@@ -2194,16 +2239,16 @@ button.slot-card.slot-card-compact:focus-visible {
 }
 
 .busca-turno--compact .field label {
-  font-size: 0.7rem;
+  font-size: 0.82rem;
   line-height: 1.2;
 }
 
 .busca-turno--compact .field select,
 .busca-turno--compact .searchable-select-input {
   width: 100%;
-  height: 2rem;
-  min-height: 2rem;
-  font-size: 0.8rem;
+  height: 2.15rem;
+  min-height: 2.15rem;
+  font-size: 0.9rem;
 }
 
 .busca-turno--compact .searchable-select-field {
@@ -2239,7 +2284,7 @@ button.slot-card.slot-card-compact:focus-visible {
   gap: 0.4rem;
   margin-top: 0.45rem;
   padding-top: 0.45rem;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid #cfd6de;
 }
 
 .busca-turno--compact .busca-compact-fuera .field {
@@ -2248,11 +2293,27 @@ button.slot-card.slot-card-compact:focus-visible {
 }
 
 .busca-turno--compact .busca-compact-fuera .btn-limpiar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   margin-left: 0;
-  height: 1.9rem;
-  padding: 0 0.65rem;
-  font-size: 0.75rem;
+  height: 2.1rem;
+  padding: 0 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid #b8c2cc;
+  background: #fff;
+  color: var(--color-text, #333);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  cursor: pointer;
+}
+
+.busca-turno--compact .busca-compact-fuera .btn-limpiar:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: var(--color-text, #1a1a1a);
 }
 
 .busca-turno--compact .results-summary-row {
@@ -2294,6 +2355,18 @@ button.slot-card.slot-card-compact:focus-visible {
   justify-content: center;
 }
 
+.busca-turno--compact .busca-loading-inline {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, #fff);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 22%, #e2d4d9);
+  text-align: center;
+}
+
 .busca-turno--compact #results-container {
   flex: 1 1 auto;
   min-height: 0;
@@ -2321,7 +2394,7 @@ button.slot-card.slot-card-compact:focus-visible {
 .busca-turno--compact .day-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
   margin: 0;
   padding: 0;
   border: none;
@@ -2342,11 +2415,12 @@ button.slot-card.slot-card-compact:focus-visible {
   justify-content: space-between;
   gap: 0.35rem 0.45rem;
   margin: 0;
-  padding: 0.45rem 0.5rem;
+  padding: 0.35rem 0.15rem 0.4rem;
   font-size: 0.78rem;
-  border-radius: 8px;
-  border: 1px solid #e4d2d8;
-  background: linear-gradient(180deg, #fbf6f8 0%, #f5eef1 100%);
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid #e6dce0;
+  background: transparent;
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -2358,9 +2432,10 @@ button.slot-card.slot-card-compact:focus-visible {
 
 .busca-turno--compact .day-header-label {
   font-size: 0.78rem;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.01em;
   text-transform: capitalize;
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2402,6 +2477,20 @@ button.slot-card.slot-card-compact:focus-visible {
   border-left: 3px solid var(--color-primary);
   background: #fff;
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+/* Un solo dr: sin cabecera repetida; los slots cuelgan del día. */
+.busca-turno--compact .day-prof-block--solo {
+  padding: 0.35rem 0.35rem 0.3rem;
+  border: none;
+  border-left: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.busca-turno--compact .day-prof-block--solo:nth-child(even) {
+  background: transparent;
 }
 
 .busca-turno--compact .day-prof-block:nth-child(even),
@@ -2658,6 +2747,12 @@ button.slot-card.slot-card-compact:focus-visible {
   text-align: center;
 }
 
+.busca-turno--compact .load-more-wrap--crm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
 .busca-turno--compact .btn.load-more-btn {
   width: 100%;
   min-width: 0;
@@ -2666,6 +2761,84 @@ button.slot-card.slot-card-compact:focus-visible {
   padding: 0 0.75rem;
   font-size: 0.78rem;
   border-radius: var(--radius-sm);
+}
+
+.busca-turno--compact .btn.load-more-btn--proponer {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.busca-turno--compact .btn.load-more-btn--proponer:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: #fff;
+}
+
+.busca-turno--compact .btn.load-more-btn--proponer:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: #fff;
+}
+
+.busca-turno--compact .btn.load-more-btn--ghost {
+  background: #fff;
+  border-color: color-mix(in srgb, var(--color-border) 90%, #999);
+  color: var(--color-text-muted, #666);
+  font-weight: 600;
+}
+
+.busca-turno--compact .busca-proponer-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.busca-turno--compact .busca-proponer-bar .btn {
+  width: auto;
+  min-width: 0;
+  padding: 0 0.55rem;
+  white-space: nowrap;
+}
+
+.busca-turno--compact .busca-proponer-bar__count {
+  font-size: 0.7rem;
+  font-weight: 650;
+  color: var(--color-text-muted, #666);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.busca-turno--compact .slot-card--selectable {
+  gap: 0.28rem;
+}
+
+.busca-turno--compact .slot-check {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 0.2rem;
+  border: 1.5px solid color-mix(in srgb, #1f8a5b 45%, #ccc);
+  background: #fff;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 0.95rem;
+  text-align: center;
+}
+
+.busca-turno--compact .slot-check.is-on {
+  background: #1f8a5b;
+  border-color: #1f8a5b;
+}
+
+.busca-turno--compact .slot-card-compact.slot-card--libre.is-checked {
+  background: color-mix(in srgb, #1f8a5b 16%, #fff);
+  border-color: color-mix(in srgb, #1f8a5b 48%, #e2d4d9);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #1f8a5b 35%, transparent);
 }
 
 .busca-turno--compact .empty-state,

@@ -128,6 +128,20 @@ export function AppTooltipHost() {
       }
       if (activeRef.current === el) {
         clearHide();
+        // Si el data-tooltip cambió (badge, contadores), refrescar el texto.
+        setTip((prev) => {
+          if (prev?.text === text) return prev;
+          const rect = el.getBoundingClientRect();
+          const wrap = shouldWrapTip(text);
+          const placement = pickPlacement(rect, wrap);
+          return {
+            text,
+            x: rect.left + rect.width / 2,
+            y: placement === "top" ? rect.top - GAP : rect.bottom + GAP,
+            placement,
+            wrap,
+          };
+        });
         return;
       }
       place(el, text);
@@ -146,8 +160,19 @@ export function AppTooltipHost() {
       scheduleHide();
     }
 
-    function onScrollOrResize() {
+    function onScrollOrResize(e: Event) {
       if (!activeRef.current) return;
+      const target = e.target;
+      // Scroll interno del inbox: ocultar tip, no recalcular en cada frame.
+      if (
+        target instanceof Element &&
+        target.closest(
+          ".wa-inbox__list, .wa-inbox__list-body, .wa-inbox__messages, .wa-inbox__thread",
+        )
+      ) {
+        hide();
+        return;
+      }
       const text = readTipText(activeRef.current);
       if (!text) {
         hide();

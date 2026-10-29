@@ -74,7 +74,7 @@ const PASOS: Paso[] = [
         clave: "2",
         titulo: "Primera vez en INECO",
         accion:
-          "Etiquetar No paciente → pedir en un mensaje edad, motivo, cobertura, nombre/apellido/mail/celular → IA ubica → Adulto/Infanto (+18) → deriva a asesor (fin del bot)",
+          "Etiquetar Oportunidad → pedir datos + motivo → IA interpreta y cataloga diagnóstico/síntomas (Alzheimer, TDAH, migraña, etc.) → etiqueta → si falta dato, pide lo pendiente → Adulto/Infanto → deriva a asesor",
         siguiente: "Asesor humano",
       },
       {

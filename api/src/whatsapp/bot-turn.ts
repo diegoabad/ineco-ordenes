@@ -28,7 +28,7 @@ import {
 import {
   botDaTurnos,
   getWhatsappBotConfig,
-  TEXTO_TURNO_DATOS_LISTOS,
+  textoTurnoDatosListos,
   TEXTO_TURNO_SIN_ASIGNAR,
 } from "./bot-config.js";
 import { getWhatsappConocimiento } from "./conocimiento.js";
@@ -43,6 +43,7 @@ import {
   setConversationResumen,
   setConversationTags,
   appendConversationAuditoria,
+  resolveConversation,
 } from "./firestore-store.js";
 import {
   asegurarCasos,
@@ -1357,6 +1358,8 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   if (!conversation || conversation.status !== "OPEN") return;
   if (conversation.assigneeKind === "user") return;
   if (conversation.contact?.isBlocked) return;
+  // Resuelta: no hablar hasta que el paciente escriba (reopen en inbound).
+  if (conversation.botPausedUntilInbound || conversation.resolutionStatus === "resolved") return;
 
   const messages = await listMessages(conversationId, 40);
   let lastOutbound = -1;
@@ -1480,7 +1483,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
       "etiquetas: nombres exactos del catálogo, solo las concretas. No inventes etiquetas ni diagnósticos. No uses Pedido de info: es demasiado genérica. Pedido de turno sí, cuando pide sacar, consultar, cancelar o reprogramar un turno.",
       "Si el mensaje nombra una sede, un programa, una cobertura o un profesional del catálogo, esa etiqueta va sí o sí. Si no nombra sede, la sucursal es CABA: este canal es el de la sede central. ADOS sin aclarar adultos o infanto: las dos. Si dice insomnio, poné Programa de Sueño. Si nombra una obra social o prepaga que no está en el catálogo, poné OS no soportada. Una edad nueva reemplaza la banda anterior: no dejes Infanto, Adolescente y Adulto juntas.",
       "Si nombra una sede, un programa, una evaluación, una cobertura o un profesional que está en las etiquetas, poné esa. Si pregunta por todas las sedes y todavía no elige una, no etiquetes una sede.",
-      "Paciente solo si dice que ya es paciente de INECO. No paciente si dice que no lo es. Primera vez si dice que es la primera vez. Decir el nombre no es ser paciente. Que le hayan cancelado un turno, o que pida uno, tampoco. No pongas Paciente junto con No paciente ni con Primera vez.",
+      "Paciente solo si dice que ya es paciente de INECO. Oportunidad si dice que no es paciente o que es la primera vez. Decir el nombre no es ser paciente. Que le hayan cancelado un turno, o que pida uno, tampoco. No pongas Paciente junto con Oportunidad ni con Primera vez.",
       "Si nombra una obra social, prepaga o certificado que está en las etiquetas, poné esa etiqueta sí o sí, con el nombre exacto del catálogo. No pongas una cobertura que no nombró.",
       "preguntaAclaracion dejala vacía. La pregunta por datos faltantes la arma el otro paso, solo si el campo no está en la ficha.",
       "datos: completá solo lo que este mensaje dice sobre el caso activo. Si hay varias personas, datos es solo de esa persona: no pongas ahí el nombre, el apellido ni la edad de otra. Si corrige un dato que ya estaba, poné el valor nuevo. Si este mensaje no habla de ese campo, dejalo vacío. No inventes. El teléfono ya viene de WhatsApp: no lo pidas ni lo cambies.",
@@ -1913,6 +1916,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   const nextTagIds = new Set(conversation.tagIds);
   if (
     wantedNames.has("no paciente") ||
+    wantedNames.has("oportunidad") ||
     wantedNames.has("primera vez") ||
     fichaActual.esPaciente === "no"
   ) {
@@ -1925,8 +1929,23 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
   }
   if (wantedNames.has("paciente")) {
     wantedNames.delete("no paciente");
+    wantedNames.delete("oportunidad");
     const noPaciente = tagsByName.get("no paciente");
     if (noPaciente) nextTagIds.delete(noPaciente.id);
+    const oportunidad = tagsByName.get("oportunidad");
+    if (oportunidad) nextTagIds.delete(oportunidad.id);
+  }
+  // Primera vez / no paciente → etiqueta comercial Oportunidad.
+  if (
+    wantedNames.has("no paciente") ||
+    wantedNames.has("primera vez") ||
+    fichaActual.esPaciente === "no"
+  ) {
+    wantedNames.delete("no paciente");
+    wantedNames.delete("primera vez");
+    const oportunidad = tagsByName.get("oportunidad");
+    if (oportunidad) wantedNames.add(oportunidad.name.toLowerCase());
+    else wantedNames.add("oportunidad");
   }
   const banda = bandaEtaria(textoLote);
   if (banda) {
@@ -2100,7 +2119,11 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     });
     await anotar(previa || null, true);
     await send(conversationId, pasaAlEquipo ? AVISO_EQUIPO : charla.cierre);
-    if (pasaAlEquipo) await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+    if (pasaAlEquipo) {
+      await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+    } else {
+      await resolveConversation(conversationId, { byKind: "bot", motivo: "cierre_bot" });
+    }
     return;
   }
   if (
@@ -2136,7 +2159,11 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     });
     await anotar(previa || null, true);
     await send(conversationId, pasaAlEquipo ? AVISO_EQUIPO : charla.cierre);
-    if (pasaAlEquipo) await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+    if (pasaAlEquipo) {
+      await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
+    } else {
+      await resolveConversation(conversationId, { byKind: "bot", motivo: "cierre_bot" });
+    }
     return;
   }
 
@@ -2552,7 +2579,7 @@ export async function runBotTurn(conversationId: string, io?: BotTurnIO): Promis
     await anotar("TURNOS", true);
     if (fase === "inicio" && charla.saludo) await send(conversationId, charla.saludo);
     if (!yaAvisoTurnoSinAsignar(messages)) await send(conversationId, TEXTO_TURNO_SIN_ASIGNAR);
-    await send(conversationId, TEXTO_TURNO_DATOS_LISTOS);
+    await send(conversationId, textoTurnoDatosListos());
     await send(conversationId, AVISO_EQUIPO);
     await saveAssignee(conversationId, { kind: "user", name: "Equipo" });
     return;
@@ -3169,6 +3196,15 @@ function minutosInactividadDeConfig(bot: Record<string, unknown>): number {
   return Math.max(5, Math.min(24 * 60, Math.round(n)));
 }
 
+/** Horas sin actividad para marcar episodio resuelto por bot (default 6). */
+function horasAutoResolucionDeConfig(bot: Record<string, unknown>): number {
+  const cierre =
+    bot.cierre && typeof bot.cierre === "object" ? (bot.cierre as Record<string, unknown>) : {};
+  const n = Number(cierre.horasAutoResolucion ?? 6);
+  if (!Number.isFinite(n)) return 6;
+  return Math.max(1, Math.min(72, Math.round(n)));
+}
+
 /**
  * Si el bot habló último y la persona no respondió en X minutos,
  * se despide y cierra la intención.
@@ -3181,6 +3217,10 @@ export async function cerrarPorInactividad(
   if (!conversation || conversation.status !== "OPEN") return false;
   if (conversation.assigneeKind === "user") return false;
   if (conversation.contact?.isBlocked) return false;
+  if (conversation.botPausedUntilInbound || conversation.resolutionStatus === "resolved") {
+    return false;
+  }
+  if (conversation.derivacionPendiente) return false;
 
   const messages = await listRecentMessagesByConversation(conversationId, 30);
   const last = messages[messages.length - 1];
@@ -3221,6 +3261,28 @@ export async function cerrarPorInactividad(
     ultimoResultado: conversation.ultimoResultado ?? null,
     pausa: null,
   });
+  await resolveConversation(conversationId, { byKind: "bot", motivo: "timeout" });
+  return true;
+}
+
+/** Episodio abierto del bot sin derivar y sin actividad por horas → resuelto + pausa. */
+async function autoResolverPorTimeout(conversationId: string): Promise<boolean> {
+  const conversation = await getConversation(conversationId);
+  if (!conversation || conversation.status !== "OPEN") return false;
+  if (conversation.assigneeKind === "user") return false;
+  if (conversation.contact?.isBlocked) return false;
+  if (conversation.botPausedUntilInbound || conversation.resolutionStatus === "resolved") {
+    return false;
+  }
+  if (conversation.derivacionPendiente) return false;
+
+  const botDoc = await getWhatsappBotConfig();
+  const bot = botDoc?.data ?? {};
+  const horas = horasAutoResolucionDeConfig(bot);
+  const lastAt = conversation.lastMessageAt ? Date.parse(conversation.lastMessageAt) : NaN;
+  if (!Number.isFinite(lastAt) || Date.now() - lastAt < horas * 3_600_000) return false;
+
+  await resolveConversation(conversationId, { byKind: "bot", motivo: "timeout" });
   return true;
 }
 
@@ -3233,8 +3295,13 @@ export async function barrerInactividad(): Promise<number> {
   let cerradas = 0;
   for (const conv of [...pruebas.items, ...reales.items]) {
     if (conv.assigneeKind === "user") continue;
+    if (conv.botPausedUntilInbound || conv.resolutionStatus === "resolved") continue;
     try {
-      if (await cerrarPorInactividad(conv.id)) cerradas += 1;
+      if (await cerrarPorInactividad(conv.id)) {
+        cerradas += 1;
+        continue;
+      }
+      if (await autoResolverPorTimeout(conv.id)) cerradas += 1;
     } catch (error) {
       console.warn("[whatsapp] cierre por inactividad", conv.id, error);
     }

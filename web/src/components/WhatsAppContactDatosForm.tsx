@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "react-toastify";
+import { fechaHoyIso } from "../lib/fechas";
 import { fetchWaCoberturas, updateWaContact } from "../services/whatsappCrmService";
 import type {
   WaCobertura,
@@ -8,6 +9,7 @@ import type {
   WaContactGrupoEtario,
   WaContactSexo,
 } from "../types/whatsappCrm";
+import { DatePicker } from "./DatePicker";
 
 const RELACION_FAMILIAR_OPTIONS = [
   "Padre",
@@ -29,7 +31,9 @@ const RELACION_FAMILIAR_OPTIONS = [
   "Otro",
 ] as const;
 
+/** Alias legado; en ficha/etiquetas el canónico es «Particular». */
 const SIN_COBERTURA = "SIN COBERTURA";
+const COBERTURA_PARTICULAR = "Particular";
 
 function editableContactNames(contact: WaContact | null | undefined): {
   firstName: string;
@@ -53,6 +57,8 @@ type Props = {
   formId: string;
   contact: WaContact | null | undefined;
   phoneNumber?: string | null;
+  /** Fecha del pedido de turno si aún no está en la ficha. */
+  fechaNacimientoPedido?: string | null;
   /** Reinicia el formulario cuando cambia (p. ej. al abrir modal / tab). */
   active: boolean;
   onSaved?: (contact: WaContact) => void;
@@ -60,10 +66,19 @@ type Props = {
   onCanSubmitChange?: (canSubmit: boolean) => void;
 };
 
+function isoFechaNacimiento(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const dmy = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!dmy) return "";
+  return `${dmy[3]}-${dmy[2]!.padStart(2, "0")}-${dmy[1]!.padStart(2, "0")}`;
+}
+
 export function WhatsAppContactDatosForm({
   formId,
   contact,
   phoneNumber,
+  fechaNacimientoPedido,
   active,
   onSaved,
   onSavingChange,
@@ -80,6 +95,7 @@ export function WhatsAppContactDatosForm({
   const [agendaContactoNombre, setAgendaContactoNombre] = useState("");
   const [agendaContactoApellido, setAgendaContactoApellido] = useState("");
   const [agendaDni, setAgendaDni] = useState("");
+  const [agendaFechaNacimiento, setAgendaFechaNacimiento] = useState("");
   const [agendaSexo, setAgendaSexo] = useState<WaContactSexo | "">("");
   const [agendaEsPaciente, setAgendaEsPaciente] = useState<"" | "si" | "no">("");
   const [coberturas, setCoberturas] = useState<WaCobertura[]>([]);
@@ -112,7 +128,10 @@ export function WhatsAppContactDatosForm({
     setAgendaCobertura(() => {
       const raw = contact?.cobertura?.trim() || "";
       if (!raw) return "";
-      return raw.toUpperCase() === SIN_COBERTURA ? SIN_COBERTURA : raw;
+      if (raw.toUpperCase() === SIN_COBERTURA || /^particular$/i.test(raw)) {
+        return COBERTURA_PARTICULAR;
+      }
+      return raw;
     });
     setAgendaEmail(contact?.email?.trim() || "");
     setAgendaGrupoEtario(contact?.grupoEtario ?? "");
@@ -121,31 +140,74 @@ export function WhatsAppContactDatosForm({
     setAgendaContactoNombre(contact?.contactoNombre?.trim() || "");
     setAgendaContactoApellido(contact?.contactoApellido?.trim() || "");
     setAgendaDni(contact?.dni?.trim() || "");
+    setAgendaFechaNacimiento(() => {
+      return (
+        isoFechaNacimiento(contact?.fechaNacimiento) ||
+        isoFechaNacimiento(fechaNacimientoPedido) ||
+        ""
+      );
+    });
     setAgendaSexo(contact?.sexo ?? "");
     setAgendaEsPaciente(
       contact?.esPaciente === true ? "si" : contact?.esPaciente === false ? "no" : "",
     );
-  }, [active, contact?.id]);
+  }, [
+    active,
+    contact?.id,
+    contact?.cobertura,
+    contact?.email,
+    contact?.fechaNacimiento,
+    fechaNacimientoPedido,
+    contact?.grupoEtario,
+    contact?.consultaPara,
+    contact?.dni,
+    contact?.sexo,
+    contact?.esPaciente,
+    contact?.firstName,
+    contact?.lastName,
+    contact?.updatedAt,
+  ]);
 
   const coberturasDisponibles = useMemo(() => {
     if (agendaGrupoEtario !== "infanto" && agendaGrupoEtario !== "adulto") {
       return [] as WaCobertura[];
     }
-    return coberturas.filter(
-      (item) =>
-        item.gruposEtarios.includes(agendaGrupoEtario) &&
-        item.nombre.trim().toUpperCase() !== SIN_COBERTURA,
-    );
+    return coberturas.filter((item) => item.gruposEtarios.includes(agendaGrupoEtario));
   }, [coberturas, agendaGrupoEtario]);
 
+  // Alias legado / etiqueta bot → nombre del combo (igual que etiquetas Coberturas).
   useEffect(() => {
     if (!agendaCobertura || !agendaGrupoEtario) return;
     if (coberturas.length === 0) return;
-    if (agendaCobertura.trim().toUpperCase() === SIN_COBERTURA) return;
-    const stillValid = coberturasDisponibles.some(
-      (item) => item.nombre === agendaCobertura,
-    );
-    if (!stillValid) setAgendaCobertura("");
+    if (agendaCobertura.trim().toUpperCase() === SIN_COBERTURA) {
+      const particular = coberturasDisponibles.find(
+        (item) => item.nombre.trim().toLowerCase() === "particular",
+      );
+      if (particular) setAgendaCobertura(particular.nombre);
+      return;
+    }
+    if (coberturasDisponibles.some((item) => item.nombre === agendaCobertura)) return;
+    const buscado = agendaCobertura
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .trim();
+    const alias = coberturasDisponibles.find((item) => {
+      const n = item.nombre
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .toLowerCase();
+      if (n === buscado) return true;
+      if (/prevencion/.test(buscado) && /prevencion/.test(n)) return true;
+      if ((/swiss/.test(buscado) || buscado === "smg") && (n === "smg" || /swiss/.test(n))) {
+        return true;
+      }
+      if ((buscado === "sin cobertura" || buscado === "particular") && n === "particular") {
+        return true;
+      }
+      return n.length >= 3 && (buscado.includes(n) || n.includes(buscado));
+    });
+    if (alias) setAgendaCobertura(alias.nombre);
   }, [agendaGrupoEtario, coberturas, coberturasDisponibles, agendaCobertura]);
 
   const canSubmit = (() => {
@@ -197,6 +259,7 @@ export function WhatsAppContactDatosForm({
         lastName,
         cobertura,
         email,
+        fechaNacimiento: agendaFechaNacimiento.trim() || null,
         grupoEtario: agendaGrupoEtario || null,
         consultaPara: agendaConsultaPara || null,
         relacionFamiliar:
@@ -357,6 +420,17 @@ export function WhatsAppContactDatosForm({
         />
       </div>
       <div className="form-group">
+        <label htmlFor={`${idPrefix}-nacimiento`}>Fecha de nacimiento</label>
+        <DatePicker
+          id={`${idPrefix}-nacimiento`}
+          value={agendaFechaNacimiento}
+          onChange={setAgendaFechaNacimiento}
+          clearable
+          max={fechaHoyIso()}
+          aria-label="Fecha de nacimiento"
+        />
+      </div>
+      <div className="form-group">
         <label htmlFor={`${idPrefix}-sexo`}>Sexo</label>
         <select
           id={`${idPrefix}-sexo`}
@@ -409,16 +483,12 @@ export function WhatsAppContactDatosForm({
           <option value="">
             {!agendaGrupoEtario ? "Primero elegí Infanto / Adulto" : "Elegir…"}
           </option>
-          {agendaGrupoEtario ? (
-            <option value={SIN_COBERTURA}>{SIN_COBERTURA}</option>
-          ) : null}
           {coberturasDisponibles.map((item) => (
             <option key={item.id} value={item.nombre}>
               {item.nombre}
             </option>
           ))}
           {agendaCobertura &&
-          agendaCobertura.trim().toUpperCase() !== SIN_COBERTURA &&
           !coberturasDisponibles.some((item) => item.nombre === agendaCobertura) ? (
             <option value={agendaCobertura}>{agendaCobertura}</option>
           ) : null}

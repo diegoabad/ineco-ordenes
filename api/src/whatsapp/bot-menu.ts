@@ -15,7 +15,7 @@ import type { BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional } fr
 import {
   botDaTurnos,
   getWhatsappBotConfig,
-  TEXTO_TURNO_DATOS_LISTOS,
+  textoTurnoDatosListos,
   TEXTO_TURNO_SIN_ASIGNAR,
 } from "./bot-config.js";
 import { getWhatsappConocimiento } from "./conocimiento.js";
@@ -28,9 +28,23 @@ import {
   setConversationAssignee,
   setConversationMenu,
   setConversationTags,
+  setDiagnosticoPresuntivoIa,
 } from "./firestore-store.js";
 import { completeStructured } from "./openai-client.js";
 import { listWhatsappOperators } from "./operators.js";
+import {
+  DERIVACION_DEFAULT_RECEPCIONISTA,
+  getDerivacionTurnoConfig,
+  profesionalNombreParaTexto,
+  recepcionistaParaProfesional,
+} from "./derivacion-turno.js";
+import { resolverCoberturaParaFicha } from "./coberturas.js";
+import {
+  matchMotivoCatalogoExplicito,
+  nombresMotivosCatalogo,
+  resolverNombreMotivoCatalogo,
+  textoMotivosCatalogoParaPrompt,
+} from "./motivos-catalogo.js";
 import { ensureWhatsappTagsByName, listWhatsappTagCatalog } from "./tags.js";
 import { isLocalPruebaId, isQuotaError, localTagIdForName } from "./prueba-local-store.js";
 import { listUsersByStatus } from "../services/users.service.js";
@@ -308,6 +322,43 @@ function numerar(lineas: string[], separar = false): string {
   return unidos.join(separar ? "\n\n" : "\n");
 }
 
+/** Nombres fijos en español (sin depender de ICU/locales del servidor). */
+const DIAS_ES = [
+  "Domingo",
+  "Lunes",
+  "Martes",
+  "Miércoles",
+  "Jueves",
+  "Viernes",
+  "Sábado",
+] as const;
+const MESES_ES = [
+  "enero",
+  "febrero",
+  "marzo",
+  "abril",
+  "mayo",
+  "junio",
+  "julio",
+  "agosto",
+  "septiembre",
+  "octubre",
+  "noviembre",
+  "diciembre",
+] as const;
+
+/** Día de la semana en español para una fecha `YYYY-MM-DD` (mediodía AR). */
+function diaSemanaEs(y: string, mes: string, dia: string): string {
+  const cuando = new Date(`${y}-${mes}-${dia}T12:00:00-03:00`);
+  if (Number.isNaN(cuando.getTime())) return "";
+  return DIAS_ES[cuando.getUTCDay()] ?? "";
+}
+
+function mesNombreEs(mes: string): string {
+  const i = Number(mes) - 1;
+  return MESES_ES[i] ?? "";
+}
+
 /** Horarios agrupados por día, con número para elegir. */
 function formatearHorariosMenu(lineas: string[]): string {
   const bloques: string[] = ["Tengo los siguientes turnos libres:"];
@@ -320,19 +371,9 @@ function formatearHorariosMenu(lineas: string[]): string {
     const claveDia = `${y}-${mes}-${dia}`;
     if (claveDia !== diaActual) {
       diaActual = claveDia;
-      const cuando = new Date(`${claveDia}T12:00:00-03:00`);
-      const weekday = new Intl.DateTimeFormat("es-AR", {
-        weekday: "long",
-        timeZone: "America/Argentina/Buenos_Aires",
-      }).format(cuando);
-      const mesNombre = new Intl.DateTimeFormat("es-AR", {
-        month: "long",
-        timeZone: "America/Argentina/Buenos_Aires",
-      }).format(cuando);
-      bloques.push(
-        "",
-        `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dia} de ${mesNombre}`,
-      );
+      const weekday = diaSemanaEs(y!, mes!, dia!);
+      const mesNombre = mesNombreEs(mes!);
+      bloques.push("", `${weekday} ${dia} de ${mesNombre}`);
     }
     n += 1;
     bloques.push(`${n}. ${hh}:${mm}`);
@@ -435,12 +476,7 @@ function etiquetaFuturo(linea: string): string {
       .join(" · ") || crudo;
   }
   const [, y, mes, dia, hh, mm] = fecha;
-  const cuando = new Date(`${y}-${mes}-${dia}T12:00:00-03:00`);
-  const weekdayRaw = new Intl.DateTimeFormat("es-AR", {
-    weekday: "long",
-    timeZone: "America/Argentina/Buenos_Aires",
-  }).format(cuando);
-  const weekday = weekdayRaw.charAt(0).toUpperCase() + weekdayRaw.slice(1);
+  const weekday = diaSemanaEs(y!, mes!, dia!);
   const anioCorto = String(y).slice(-2);
   const lineas = [`${weekday} ${dia}/${mes}/${anioCorto} ${hh}:${mm}`];
   if (profesional) lineas.push(`Prof.: ${profesional}`);
@@ -575,8 +611,8 @@ async function etiquetarNombres(
 
   const quitar = new Set(
     pedidos.flatMap((nombre) => {
-      if (nombre === "paciente") return ["no paciente"];
-      if (nombre === "no paciente") return ["paciente"];
+      if (nombre === "paciente") return ["no paciente", "oportunidad"];
+      if (nombre === "no paciente" || nombre === "oportunidad") return ["paciente"];
       if (nombre === "adulto") return ["infanto", "adolescente", "+60"];
       if (nombre === "infanto") return ["adulto", "adolescente", "+60"];
       return [];
@@ -605,22 +641,68 @@ async function etiquetarSede(conversation: WaConversation, sede: string): Promis
   await etiquetarNombres(conversation, [sede], true);
 }
 
-const ASESOR_DEFAULT_NOMBRE = "Diego Abad";
+const ASESOR_DEFAULT_NOMBRE = DERIVACION_DEFAULT_RECEPCIONISTA;
 
-/** Cuando el bot deja de atender: asignar a Diego Abad (operador o usuario). */
-async function derivarAAsesor(conversation: WaConversation): Promise<void> {
-  const esDiego = (nombre: string) => {
-    const n = sinTildes(nombre);
-    return n.includes("diego") && n.includes("abad");
-  };
+function tokenCercano(haystack: string, token: string): boolean {
+  if (haystack.includes(token)) return true;
+  // Cardozo/Cardoso y similares: prefijo compartido de 5+ letras.
+  if (token.length < 5) return false;
+  return haystack
+    .split(/\s+/)
+    .some((parte) => parte.length >= 5 && (parte.startsWith(token.slice(0, 5)) || token.startsWith(parte.slice(0, 5))));
+}
+
+function coincideNombrePersona(haystack: string, preferido: string): boolean {
+  const n = sinTildes(haystack);
+  const tokens = sinTildes(preferido)
+    .split(/\s+/)
+    .filter((t) => t.length >= 3);
+  return tokens.length > 0 && tokens.every((t) => tokenCercano(n, t));
+}
+
+function textoProfesionalPedido(estado: MenuEstado): string {
+  return [estado.profesionalCatalogo, estado.profesional].filter(Boolean).join(" ");
+}
+
+async function etiquetarProfesionalDerivado(
+  conversation: WaConversation,
+  estado: MenuEstado,
+): Promise<void> {
+  try {
+    const config = await getDerivacionTurnoConfig();
+    const etiqueta = profesionalNombreParaTexto(config, textoProfesionalPedido(estado));
+    if (etiqueta) await etiquetarNombres(conversation, [etiqueta]);
+  } catch (error) {
+    console.warn(
+      "[bot-menu] etiqueta profesional",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+async function asesorParaPedidoTurno(estado: MenuEstado): Promise<string> {
+  try {
+    const config = await getDerivacionTurnoConfig();
+    return recepcionistaParaProfesional(config, textoProfesionalPedido(estado));
+  } catch {
+    return ASESOR_DEFAULT_NOMBRE;
+  }
+}
+
+/** Cuando el bot deja de atender: asignar al asesor indicado (default: Florencia Sosa). */
+async function derivarAAsesor(
+  conversation: WaConversation,
+  preferidoNombre = ASESOR_DEFAULT_NOMBRE,
+): Promise<void> {
+  const preferido = preferidoNombre.trim() || ASESOR_DEFAULT_NOMBRE;
   let userId: string | null = null;
-  let nombre = ASESOR_DEFAULT_NOMBRE;
+  let nombre = preferido;
   try {
     const ops = await listWhatsappOperators();
-    const op = ops.find((item) => esDiego(item.nombre));
+    const op = ops.find((item) => coincideNombrePersona(item.nombre, preferido));
     if (op) {
       userId = op.id;
-      nombre = op.nombre.trim() || ASESOR_DEFAULT_NOMBRE;
+      nombre = op.nombre.trim() || preferido;
     }
   } catch {
     /* sin operadores */
@@ -628,15 +710,20 @@ async function derivarAAsesor(conversation: WaConversation): Promise<void> {
   if (!userId) {
     try {
       const users = await listUsersByStatus("approved");
-      const u = users.find((item) => esDiego(item.nombre) || esDiego(item.email));
+      const u = users.find(
+        (item) =>
+          coincideNombrePersona(item.nombre, preferido) ||
+          coincideNombrePersona(item.email, preferido),
+      );
       if (u) {
         userId = u.id;
-        nombre = u.nombre.trim() || ASESOR_DEFAULT_NOMBRE;
+        nombre = u.nombre.trim() || preferido;
       }
     } catch {
       /* sin usuarios */
     }
   }
+  // Si no hay userId (nombre aún no vinculado), igual asigna por nombre visible en el CRM.
   if (!memoria) {
     await setConversationAssignee(conversation.id, {
       kind: "user",
@@ -722,27 +809,37 @@ async function etiquetarCobertura(
     conversation.tagIds = (conversation.tagIds ?? []).filter((id) => !idsGrupo.has(id));
   }
   await etiquetarNombres(conversation, [nombreTag]);
-  // Ficha del contacto: guardar la cobertura (no solo la etiqueta).
-  if (!memoria) {
-    const updated = await fillEmptyContactFields(conversation.contactId, {
-      cobertura: nombreTag,
-    });
-    if (updated) conversation.contact = updated;
+  // Ficha del contacto: mismo nombre que la etiqueta de Coberturas.
+  const coberturaFicha = (await resolverCoberturaParaFicha(nombreTag)) || nombreTag;
+  const updated = await fillEmptyContactFields(conversation.contactId, {
+    cobertura: coberturaFicha,
+  });
+  if (updated) {
+    conversation.contact = updated;
+    if (memoria?.conversation?.id === conversation.id) {
+      memoria.conversation.contact = updated;
+    }
   } else if (conversation.contact) {
-    conversation.contact.cobertura = nombreTag;
+    conversation.contact.cobertura = coberturaFicha;
   }
 }
 
 async function etiquetarParecido(conversation: WaConversation, texto: string): Promise<void> {
   const catalogo = memoria?.catalogo ?? (await listWhatsappTagCatalog());
   const grupoSedes = catalogo.groups.find((group) => sinTildes(group.name) === "sedes");
+  const grupoDiag = catalogo.groups.find((group) => sinTildes(group.name) === "diagnostico");
   const buscado = sinTildes(texto);
+  if (buscado.length < 4) return;
   const nombres = catalogo.items
     .filter((item) => item.groupId !== grupoSedes?.id)
+    .filter((item) => item.groupId !== grupoDiag?.id)
+    // Nunca auto-etiquetar diagnósticos clínicos por substring (Parkinson / pánico, etc.).
+    .filter((item) => !resolverNombreMotivoCatalogo(item.name))
     .map((item) => item.name)
     .filter((nombre) => {
       const limpio = sinTildes(nombre);
-      return limpio.length >= 5 && (buscado.includes(limpio) || limpio.includes(buscado));
+      // Solo si el texto contiene el nombre de la etiqueta (no al revés: "temblor" ≠ Parkinson).
+      return limpio.length >= 5 && buscado.includes(limpio);
     });
   if (nombres.length) await etiquetarNombres(conversation, nombres);
 }
@@ -991,15 +1088,6 @@ function lineaDato(etiqueta: string, valor: string): string {
   return `• ${etiqueta}: ${valor.trim() || "a completar"}`;
 }
 
-function lineaMatchCatalogo(etiqueta: string, dicho: string, catalogo: string): string {
-  const d = dicho.trim();
-  const c = catalogo.trim();
-  if (c && d && sinTildes(c) !== sinTildes(d)) {
-    return `• ${etiqueta}: ${c} (dijo: ${d})`;
-  }
-  return lineaDato(etiqueta, c || d);
-}
-
 function labelModalidadPedido(valor: MenuEstado["modalidad"]): string {
   if (valor === "presencial") return "Presencial";
   if (valor === "virtual") return "Virtual";
@@ -1009,28 +1097,21 @@ function labelModalidadPedido(valor: MenuEstado["modalidad"]): string {
 
 function resumenPedidoTurno(estado: MenuEstado): string {
   const quien = [estado.nombre, estado.apellido].filter(Boolean).join(" ");
-  const grupo = grupoEtarioDeEstado(estado);
   const nac = estado.fechaNacimiento ? fechaNacimientoLegible(estado.fechaNacimiento) : "";
-  const sexo =
-    estado.sexo === "femenino" ? "Femenino" : estado.sexo === "masculino" ? "Masculino" : "";
   return [
     "Datos del pedido de turno:",
     "",
     lineaDato("DNI", estado.dni),
     lineaDato("Nombre y apellido", quien),
-    lineaDato("Sexo", sexo),
     lineaDato("Mail", estado.email),
     lineaDato("Teléfono", estado.telefono),
-    // Profesional: solo lo que dijo el paciente (el match queda interno para el equipo).
+    // Profesional / prestación: solo lo que dijo el paciente (el match queda interno para Busca Turno).
     lineaDato("Profesional", estado.profesional),
-    lineaMatchCatalogo("Prestación / motivo", estado.tratamiento, estado.tratamientoCatalogo),
+    lineaDato("Prestación / motivo", estado.tratamiento),
     lineaDato("Modalidad", labelModalidadPedido(estado.modalidad)),
     lineaDato("Cobertura", estado.cobertura),
     lineaDato("N° de afiliado", estado.nAfiliado),
     lineaDato("Fecha de nacimiento", nac),
-    lineaDato("Edad", estado.edad),
-    lineaDato("Grupo etario", grupo === "adulto" ? "Adulto" : grupo === "infanto" ? "Infanto" : ""),
-    lineaDato("Paciente INECO", estado.esPaciente === "si" ? "Sí" : estado.esPaciente === "no" ? "No" : ""),
   ].join("\n");
 }
 
@@ -1350,15 +1431,87 @@ function grupoEtarioDeEstado(estado: MenuEstado): "" | "infanto" | "adulto" {
 }
 
 const TEXTO_PRIMERA_VEZ_PEDIR = [
-  "Para darle orientación personalizada sobre atención en INECO Clínica Sede Central CABA (Marcelo T. de Alvear 1652), envíanos en un solo mensaje:",
-  "• Edad de la persona",
-  "• Motivo de la consulta",
+  "Para darte una orientación personalizada sobre atención en INECO Clínica Sede Central CABA (Marcelo T. de Alvear 1652), envianos en un solo mensaje:",
+  "",
+  "• Nombre y apellido",
+  "• Mail",
+  "• Fecha de nacimiento",
   "• Cobertura",
-  "• Nombre y apellido, mail y celular",
+  "• Motivo de la consulta (síntomas, si te derivaron o tenés un diagnóstico). Cuanto más detalles nos des, más sencillo será para nosotros orientarte.",
+  "",
+  "Escribí 0 para volver atrás.",
 ].join("\n");
 
-const TEXTO_PRIMERA_VEZ_CIERRE =
-  "Gracias. Un asesor continuará la conversación a la brevedad.";
+function textoCierrePrimeraVez(estado: MenuEstado): string {
+  const nombre = estado.nombre.trim();
+  if (nombre) {
+    return `Muchas gracias, ${nombre}. Un asesor se comunica con vos lo antes posible.`;
+  }
+  return "Muchas gracias. Un asesor se comunica con vos lo antes posible.";
+}
+
+type CampoPrimeraVez =
+  | "nombre"
+  | "apellido"
+  | "sexo"
+  | "email"
+  | "telefono"
+  | "fechaNacimiento"
+  | "cobertura"
+  | "motivoConsulta";
+
+const ETIQUETA_CAMPO_PRIMERA_VEZ: Record<CampoPrimeraVez, string> = {
+  nombre: "Nombre",
+  apellido: "Apellido",
+  sexo: "Sexo (femenino / masculino)",
+  email: "Mail",
+  telefono: "Celular",
+  fechaNacimiento: "Fecha de nacimiento",
+  cobertura: "Cobertura",
+  motivoConsulta: "Motivo de la consulta",
+};
+
+function camposFaltantesPrimeraVez(estado: MenuEstado): CampoPrimeraVez[] {
+  const faltan: CampoPrimeraVez[] = [];
+  if (!estado.nombre.trim()) faltan.push("nombre");
+  if (!estado.apellido.trim()) faltan.push("apellido");
+  if (!estado.email.trim()) faltan.push("email");
+  if (!estado.fechaNacimiento.trim()) faltan.push("fechaNacimiento");
+  if (!estado.cobertura.trim()) faltan.push("cobertura");
+  if (!estado.motivoConsulta.trim()) faltan.push("motivoConsulta");
+  return faltan;
+}
+
+function etiquetaListaPrimeraVez(campos: CampoPrimeraVez[]): string[] {
+  const set = new Set(campos);
+  const out: string[] = [];
+  if (set.has("nombre") && set.has("apellido")) out.push("• Nombre y apellido");
+  else {
+    if (set.has("nombre")) out.push(`• ${ETIQUETA_CAMPO_PRIMERA_VEZ.nombre}`);
+    if (set.has("apellido")) out.push(`• ${ETIQUETA_CAMPO_PRIMERA_VEZ.apellido}`);
+  }
+  if (set.has("email")) out.push(`• ${ETIQUETA_CAMPO_PRIMERA_VEZ.email}`);
+  if (set.has("fechaNacimiento")) out.push(`• ${ETIQUETA_CAMPO_PRIMERA_VEZ.fechaNacimiento}`);
+  if (set.has("cobertura")) out.push(`• ${ETIQUETA_CAMPO_PRIMERA_VEZ.cobertura}`);
+  if (set.has("motivoConsulta")) {
+    out.push(
+      "• Motivo de la consulta (síntomas, derivación o diagnóstico). Cuanto más detalles nos des, más sencillo será para nosotros orientarte.",
+    );
+  }
+  return out;
+}
+
+function mensajePedirFaltantesPrimeraVez(faltan: CampoPrimeraVez[]): string {
+  return [
+    "Gracias. Todavía nos faltan estos datos para orientarte mejor:",
+    "",
+    ...etiquetaListaPrimeraVez(faltan),
+    "",
+    "Podés enviarlos en un solo mensaje.",
+    "",
+    "Escribí 0 para volver atrás.",
+  ].join("\n");
+}
 
 async function sincronizarPacienteYEdad(
   conversation: WaConversation,
@@ -1367,31 +1520,43 @@ async function sincronizarPacienteYEdad(
   const grupo = grupoEtarioDeEstado(estado);
   const tags: string[] = [];
   if (estado.esPaciente === "si") tags.push("Paciente");
-  if (estado.esPaciente === "no") tags.push("No paciente");
+  if (estado.esPaciente === "no") tags.push("Oportunidad");
   if (grupo === "adulto") tags.push("Adulto");
   if (grupo === "infanto") tags.push("Infanto");
   if (tags.length) await etiquetarNombres(conversation, tags);
   // Si no hay edad/fecha confiable, sacar Infanto/Adulto que hayan quedado de antes.
   if (!grupo) await quitarEtiquetasEdad(conversation);
 
-  if (!memoria) {
-    const updated = await fillEmptyContactFields(conversation.contactId, {
-      esPaciente: estado.esPaciente === "si" || estado.esPaciente === "no" ? estado.esPaciente : "",
-      grupoEtario: grupo || "",
-      pacienteNombre: estado.nombre || undefined,
-      pacienteApellido: estado.apellido || undefined,
-      dni: estado.dni || undefined,
-      sexo: estado.sexo || undefined,
-      email: estado.email || undefined,
-      cobertura: estado.cobertura || undefined,
-    });
-    if (updated) conversation.contact = updated;
+  const coberturaFicha = estado.cobertura.trim()
+    ? (await resolverCoberturaParaFicha(estado.cobertura)) || estado.cobertura.trim()
+    : "";
+  // Siempre persistir en ficha (Firestore o prueba local). Con `memoria` de scripts
+  // unitarios fillEmpty no encuentra el contacto y no rompe; el mirror in-memory sigue abajo.
+  const updated = await fillEmptyContactFields(conversation.contactId, {
+    esPaciente: estado.esPaciente === "si" || estado.esPaciente === "no" ? estado.esPaciente : "",
+    grupoEtario: grupo || "",
+    pacienteNombre: estado.nombre || undefined,
+    pacienteApellido: estado.apellido || undefined,
+    dni: estado.dni || undefined,
+    sexo: estado.sexo || undefined,
+    email: estado.email || undefined,
+    cobertura: coberturaFicha || undefined,
+    fechaNacimiento: estado.fechaNacimiento.trim() || undefined,
+  });
+  if (updated) {
+    conversation.contact = updated;
+    if (memoria?.conversation?.id === conversation.id) {
+      memoria.conversation.contact = updated;
+    }
   } else if (conversation.contact) {
     if (estado.esPaciente === "si") conversation.contact.esPaciente = true;
     if (estado.esPaciente === "no") conversation.contact.esPaciente = false;
     if (grupo) conversation.contact.grupoEtario = grupo;
     if (estado.sexo) conversation.contact.sexo = estado.sexo;
-    if (estado.cobertura.trim()) conversation.contact.cobertura = estado.cobertura.trim();
+    if (coberturaFicha) conversation.contact.cobertura = coberturaFicha;
+    if (estado.fechaNacimiento.trim()) {
+      conversation.contact.fechaNacimiento = estado.fechaNacimiento.trim();
+    }
   }
 }
 
@@ -1436,7 +1601,42 @@ async function botMenuDaTurnos(): Promise<boolean> {
   return botDaTurnos(bot?.data ?? {});
 }
 
-async function cerrarTurnoParaOperador(conversation: WaConversation, estado: MenuEstado): Promise<void> {
+const CAMPOS_PEDIDO_TODOS: CampoPedido[] = [
+  "dni",
+  "nombre",
+  "apellido",
+  "email",
+  "telefono",
+  "fechaNacimiento",
+  "profesional",
+  "tratamiento",
+  "modalidad",
+  "cobertura",
+  "nAfiliado",
+];
+
+const TEXTO_CONFIRMAR_PEDIDO = [
+  "¿Confirmás que estos datos están bien?",
+  "",
+  "1. Sí, están correctos",
+  "2. No, quiero corregir algo",
+].join("\n");
+
+const TEXTO_CORREGIR_PEDIDO = [
+  "Decime qué dato querés cambiar y el valor nuevo.",
+  "",
+  "Por ejemplo:",
+  "• Mail: nuevo@correo.com",
+  "• Fecha de nacimiento: 15/03/1990",
+  "• Profesional: cetkovich",
+  "",
+  "Si son varios, mandalos juntos en el mismo mensaje.",
+].join("\n");
+
+async function prepararPedidoCierre(
+  conversation: WaConversation,
+  estado: MenuEstado,
+): Promise<void> {
   await asegurarTelefono(conversation, estado);
   // Completar edad desde fecha si el paciente no la escribió.
   if (!estado.edad.trim() && estado.fechaNacimiento.trim()) {
@@ -1447,18 +1647,35 @@ async function cerrarTurnoParaOperador(conversation: WaConversation, estado: Men
   completarSexoDesdeNombre(estado);
   await matchearPedidoConCatalogo(estado);
   await sincronizarPacienteYEdad(conversation, estado);
-  // Derivación ya hecha: etiquetas + asignación al equipo. Un solo cierre; el menú sigue.
+}
+
+/** Muestra el resumen y pide confirmación (aún sin derivar: el bot debe leer el sí/no). */
+async function cerrarTurnoParaOperador(conversation: WaConversation, estado: MenuEstado): Promise<void> {
+  await prepararPedidoCierre(conversation, estado);
+  estado.paso = "confirmarPedido";
+  estado.opciones = [];
+  estado.pendiente = "";
+  await guardar(conversation.id, estado);
+  await decir(conversation.id, conversation.contactId, resumenPedidoTurno(estado));
+  await preguntar(conversation, TEXTO_CONFIRMAR_PEDIDO);
+}
+
+/** Tras el sí: etiquetas, deriva al equipo y cierra con el mensaje final. */
+async function finalizarPedidoConfirmado(
+  conversation: WaConversation,
+  estado: MenuEstado,
+): Promise<void> {
+  await prepararPedidoCierre(conversation, estado);
   await etiquetarNombres(conversation, ["Derivado a asesor", "pedir-turno", "turnos"]);
   await etiquetarCobertura(conversation, estado.cobertura);
+  await etiquetarProfesionalDerivado(conversation, estado);
   await etiquetarParecido(
     conversation,
     [estado.profesionalCatalogo || estado.profesional, estado.tratamientoCatalogo || estado.tratamiento]
       .filter(Boolean)
       .join(" "),
   );
-  await derivarAAsesor(conversation);
-  await decir(conversation.id, conversation.contactId, resumenPedidoTurno(estado));
-  // Cierre final: sin menú “¿algo más?”.
+  await derivarAAsesor(conversation, await asesorParaPedidoTurno(estado));
   await guardar(
     conversation.id,
     vacio("sede", {
@@ -1469,7 +1686,68 @@ async function cerrarTurnoParaOperador(conversation: WaConversation, estado: Men
       pila: [],
     }),
   );
-  await decir(conversation.id, conversation.contactId, TEXTO_TURNO_DATOS_LISTOS);
+  await decir(conversation.id, conversation.contactId, textoTurnoDatosListos());
+}
+
+async function recibirConfirmacionPedido(
+  conversation: WaConversation,
+  estado: MenuEstado,
+  texto: string,
+): Promise<void> {
+  const t = sinTildes(texto).trim();
+  if (t === "1" || pideAfirmacion(texto)) {
+    await finalizarPedidoConfirmado(conversation, estado);
+    return;
+  }
+  if (t === "2" || pideNegacion(texto)) {
+    estado.paso = "corregirPedido";
+    estado.opciones = [];
+    await guardar(conversation.id, estado);
+    await preguntar(conversation, TEXTO_CORREGIR_PEDIDO);
+    return;
+  }
+  await preguntar(conversation, noValida(TEXTO_CONFIRMAR_PEDIDO));
+}
+
+async function recibirCorreccionPedido(
+  conversation: WaConversation,
+  estado: MenuEstado,
+  texto: string,
+): Promise<void> {
+  const limpio = texto.replace(/\s+/g, " ").trim();
+  if (limpio.length < 2) {
+    await preguntar(conversation, TEXTO_CORREGIR_PEDIDO);
+    return;
+  }
+  try {
+    const extraido = await parsearPedidoDatosConIa(conversation.id, texto, CAMPOS_PEDIDO_TODOS);
+    aplicarPedidoExtraido(estado, extraido, CAMPOS_PEDIDO_TODOS, true);
+    // Rematch limpio desde lo dicho (no arrastrar catálogo viejo).
+    estado.profesionalCatalogo = "";
+    estado.profesionalDoc = "";
+    estado.tratamientoCatalogo = "";
+    estado.prestacionCodigo = "";
+    await prepararPedidoCierre(conversation, estado);
+  } catch (error) {
+    console.warn(
+      "[bot-menu] corregir pedido",
+      error instanceof Error ? error.message : error,
+    );
+    await preguntar(
+      conversation,
+      [
+        "No pude leer bien la corrección. Probá de nuevo, por ejemplo:",
+        "• Mail: nuevo@correo.com",
+        "• DNI: 30123456",
+      ].join("\n"),
+    );
+    return;
+  }
+  estado.paso = "confirmarPedido";
+  estado.opciones = [];
+  await guardar(conversation.id, estado);
+  await decir(conversation.id, conversation.contactId, resumenPedidoTurno(estado));
+  await preguntar(conversation, TEXTO_CONFIRMAR_PEDIDO);
 }
 
 function camposFaltantesPedido(estado: MenuEstado): CampoPedido[] {
@@ -1830,8 +2108,14 @@ async function parsearPedidoDatosConIa(
   }
 }
 
-function aplicarPedidoExtraido(estado: MenuEstado, extraido: PedidoExtraido, faltan: CampoPedido[]): void {
-  const puede = (clave: CampoPedido) => faltan.includes(clave) || !String(estado[clave] ?? "").trim();
+function aplicarPedidoExtraido(
+  estado: MenuEstado,
+  extraido: PedidoExtraido,
+  faltan: CampoPedido[],
+  forzar = false,
+): void {
+  const puede = (clave: CampoPedido) =>
+    forzar || faltan.includes(clave) || !String(estado[clave] ?? "").trim();
 
   if (puede("dni")) {
     const dni = documentoDePersona(extraido.dni) || extraido.dni.replace(/\D/g, "").trim();
@@ -1858,7 +2142,7 @@ function aplicarPedidoExtraido(estado: MenuEstado, extraido: PedidoExtraido, fal
   if (extraido.prestacionCatalogo?.trim()) {
     estado.tratamientoCatalogo = extraido.prestacionCatalogo.trim();
   }
-  if (!estado.modalidad) {
+  if (puede("modalidad") || !estado.modalidad) {
     const mod = modalidadDePedido(extraido.modalidad);
     if (mod) estado.modalidad = mod;
   }
@@ -1885,14 +2169,15 @@ function aplicarPedidoExtraido(estado: MenuEstado, extraido: PedidoExtraido, fal
   }
 
   // Sexo desde IA o por nombre de pila.
-  if (!estado.sexo) {
+  if (forzar || !estado.sexo) {
     const dicho = sexoDe(extraido.sexo || "");
     const delSchema =
       extraido.sexo === "masculino" || extraido.sexo === "femenino" ? extraido.sexo : dicho;
-    estado.sexo =
+    const siguiente =
       delSchema ||
       sexoDesdeNombre(estado.nombre) ||
       sexoDesdeNombre(`${estado.nombre} ${estado.apellido}`);
+    if (siguiente) estado.sexo = siguiente;
   }
 }
 
@@ -2549,6 +2834,15 @@ async function mostrarPaso(conversation: WaConversation, estado: MenuEstado): Pr
     );
     return;
   }
+  if (estado.paso === "confirmarPedido") {
+    await decir(conversation.id, conversation.contactId, resumenPedidoTurno(estado));
+    await preguntar(conversation, TEXTO_CONFIRMAR_PEDIDO);
+    return;
+  }
+  if (estado.paso === "corregirPedido") {
+    await preguntar(conversation, TEXTO_CORREGIR_PEDIDO);
+    return;
+  }
   if (estado.paso === "fechaNacimiento") {
     await preguntar(conversation, "¿Cuál es la fecha de nacimiento? (día/mes/año)");
     return;
@@ -3003,6 +3297,16 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
     return;
   }
 
+  if (estado.paso === "confirmarPedido") {
+    await recibirConfirmacionPedido(conversation, estado, texto);
+    return;
+  }
+
+  if (estado.paso === "corregirPedido") {
+    await recibirCorreccionPedido(conversation, estado, texto);
+    return;
+  }
+
   if (estado.paso === "fechaNacimiento") {
     const fecha = fechaNacimientoDe(texto);
     if (!fecha) {
@@ -3010,6 +3314,7 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
       return;
     }
     estado.fechaNacimiento = fecha;
+    await sincronizarPacienteYEdad(conversation, estado);
     await pedirSiguienteDato(conversation, estado);
     return;
   }
@@ -3166,6 +3471,7 @@ export async function runMenuTurn(conversationId: string): Promise<void> {
   const conversation = memoria?.conversation ?? (await getConversation(conversationId));
   if (!conversation?.contactId || conversation.pruebaMotor !== "menu") return;
   if (conversation.assigneeKind === "user") return;
+  if (conversation.botPausedUntilInbound || conversation.resolutionStatus === "resolved") return;
   const messages = memoria?.messages ?? (await listRecentMessagesByConversation(conversationId, 8));
   const last = messages[messages.length - 1];
   if (!last || last.direction !== "INBOUND" || !last.text.trim()) return;
@@ -3186,6 +3492,8 @@ export async function runMenuTurn(conversationId: string): Promise<void> {
         "motivoCancelacion",
         "fechaNacimiento",
         "pedidoDatos",
+        "confirmarPedido",
+        "corregirPedido",
         "cobertura",
         "afiliado",
         "email",
@@ -3325,7 +3633,7 @@ async function responderPacienteTipo(
     estado.esPaciente = "no";
     estado.pendiente = "";
     estado.modo = "";
-    await etiquetarNombres(conversation, ["No paciente"]);
+    await etiquetarNombres(conversation, ["Oportunidad"]);
     await iniciarPrimeraVez(conversation, estado);
     return;
   }
@@ -3372,13 +3680,17 @@ async function iniciarPrimeraVez(conversation: WaConversation, estado: MenuEstad
 }
 
 type PrimeraVezExtraido = {
+  fechaNacimiento: string;
   edad: string;
   motivoConsulta: string;
   cobertura: string;
   nombre: string;
   apellido: string;
+  sexo: "" | "masculino" | "femenino";
   email: string;
   telefono: string;
+  diagnosticoCatalogo: string;
+  etiquetasSugeridas: string[];
 };
 
 async function parsearPrimeraVezConIa(conversationId: string, texto: string): Promise<PrimeraVezExtraido> {
@@ -3389,6 +3701,7 @@ async function parsearPrimeraVezConIa(conversationId: string, texto: string): Pr
       : undefined;
   const modelo =
     (typeof rawModelos?.detectar === "string" && rawModelos.detectar.trim()) || MODELO_PEDIDO_DATOS;
+  const nombresDiag = nombresMotivosCatalogo();
 
   return completeStructured<PrimeraVezExtraido>({
     conversacionId: conversationId,
@@ -3399,52 +3712,141 @@ async function parsearPrimeraVezConIa(conversationId: string, texto: string): Pr
     schema: {
       type: "object",
       additionalProperties: false,
-      required: ["edad", "motivoConsulta", "cobertura", "nombre", "apellido", "email", "telefono"],
+      required: [
+        "fechaNacimiento",
+        "edad",
+        "motivoConsulta",
+        "cobertura",
+        "nombre",
+        "apellido",
+        "sexo",
+        "email",
+        "telefono",
+        "diagnosticoCatalogo",
+        "etiquetasSugeridas",
+      ],
       properties: {
+        fechaNacimiento: { type: "string" },
         edad: { type: "string" },
         motivoConsulta: { type: "string" },
         cobertura: { type: "string" },
         nombre: { type: "string" },
         apellido: { type: "string" },
+        sexo: { type: "string", enum: ["", "masculino", "femenino"] },
         email: { type: "string" },
         telefono: { type: "string" },
+        diagnosticoCatalogo: { type: "string" },
+        etiquetasSugeridas: { type: "array", items: { type: "string" } },
       },
     },
     instructions: [
       "Extraé datos de un mensaje de WhatsApp de alguien que consulta por primera vez en INECO (Argentina).",
-      "Devolvé solo JSON. Si un dato no está, string vacío.",
-      "edad: número de años de la persona a atender (solo dígitos si podés).",
-      "motivoConsulta: por qué consulta / qué necesita.",
-      "Separá nombre y apellido si vienen juntos. email y telefono/celular si figuran.",
+      "Devolvé solo JSON. Si un dato no está, string vacío (o array vacío en etiquetasSugeridas).",
       "No inventes datos.",
+      "nombre y apellido: separalos si vienen juntos (ej. 'Juan Pérez' → nombre Juan, apellido Pérez).",
+      "sexo: masculino o femenino solo si lo dice (hombre/mujer/masculino/femenino) o si el nombre de pila lo deja claro. Si es ambiguo, vacío.",
+      "email: solo si hay un mail válido.",
+      "telefono: celular o teléfono; dejá dígitos/espacios/guiones como vino, sin inventar.",
+      "fechaNacimiento: preferí YYYY-MM-DD si podés normalizar (aceptá dd/mm/aaaa). Si solo dan edad, dejá fecha vacía y llená edad.",
+      "edad: solo dígitos de años si la dicen o se deduce con claridad; si no, vacío.",
+      "cobertura: obra social, prepaga o 'particular' / sin cobertura.",
+      "motivoConsulta: reuní en un solo texto el motivo, síntomas, si lo derivaron, diagnóstico o lo que explique por qué consulta. No hace falta que estén todos esos ítems; capturá lo que diga.",
+      "diagnosticoCatalogo: elegí EL nombre exacto de UN solo ítem del catálogo que mejor coincida. Si nombran un diagnóstico (ej. Parkinson), ese. No elijas otro por un síntoma aislado compartido. Si no encaja, vacío.",
+      "Catálogo clínico (nombre → pistas):",
+      textoMotivosCatalogoParaPrompt(),
+      `Nombres válidos exactos: ${nombresDiag.join(" | ")}`,
+      "etiquetasSugeridas: solo 0 a 2 extras NO clínicas (ej. 'derivado'). Nunca inventes otros diagnósticos ni repitas diagnosticoCatalogo.",
     ].join("\n"),
     content: `Mensaje:\n${texto}`,
   });
 }
 
+/**
+ * Una sola orientación clínica.
+ * Prioriza lo que dijo la IA; si vino vacío, solo mención explícita (Parkinson, TDAH…).
+ * Nunca etiquetar por síntomas sueltos (temblor + nervios → Parkinson/pánico).
+ */
+function diagnosticosDesdeMotivo(
+  motivo: string,
+  diagnosticoIa = "",
+): string[] {
+  const deIa = resolverNombreMotivoCatalogo(diagnosticoIa);
+  if (deIa) return [deIa];
+  const hit = matchMotivoCatalogoExplicito(motivo);
+  return hit ? [hit.nombre] : [];
+}
+
+async function etiquetarPrimeraVez(
+  conversation: WaConversation,
+  estado: MenuEstado,
+  sugeridas: string[] = [],
+  diagnosticoIa = "",
+): Promise<string[]> {
+  await etiquetarNombres(conversation, ["Oportunidad"]);
+  if (estado.cobertura.trim()) {
+    try {
+      await etiquetarCobertura(conversation, estado.cobertura);
+    } catch {
+      /* no bloquea */
+    }
+  }
+  const diagnosticos = diagnosticosDesdeMotivo(estado.motivoConsulta, diagnosticoIa);
+  // Un solo diagnóstico clínico, nombre exacto del catálogo.
+  if (diagnosticos.length) {
+    try {
+      await etiquetarNombres(conversation, [diagnosticos[0]!]);
+    } catch {
+      /* catálogo / cuota */
+    }
+  }
+  try {
+    await setDiagnosticoPresuntivoIa(conversation.id, {
+      diagnostico: diagnosticos[0] ?? null,
+      motivoConsulta: estado.motivoConsulta.trim() || null,
+    });
+  } catch {
+    /* no bloquea el flujo */
+  }
+  // No correr etiquetarParecido sobre el motivo: genera etiquetas clínicas duplicadas / erróneas.
+  const limpias = sugeridas
+    .map((t) => String(t || "").trim())
+    .filter((t) => t.length >= 3 && t.length <= 40)
+    .filter((t) => !/parkinson|panico|alzheimer|demencia|tdah|autismo|epilepsia/i.test(t))
+    .filter((t) => !diagnosticos.some((d) => sinTildes(d) === sinTildes(t)))
+    .filter((t) => !resolverNombreMotivoCatalogo(t))
+    .slice(0, 2);
+  if (limpias.length) {
+    try {
+      await etiquetarNombres(conversation, limpias);
+    } catch {
+      /* catálogo / cuota */
+    }
+  }
+  return diagnosticos;
+}
+
 async function cerrarPrimeraVezConAsesor(
   conversation: WaConversation,
   estado: MenuEstado,
+  etiquetasSugeridas: string[] = [],
+  diagnosticoIa = "",
 ): Promise<void> {
+  if (!estado.edad.trim() && estado.fechaNacimiento.trim()) {
+    const anios = edadAniosDeFecha(estado.fechaNacimiento);
+    if (anios != null) estado.edad = String(anios);
+  }
+  completarSexoDesdeNombre(estado);
   await sincronizarPacienteYEdad(conversation, estado);
-  await etiquetarNombres(conversation, ["No paciente", "Derivado a asesor"]);
-  const quien = [estado.nombre, estado.apellido].filter(Boolean).join(" ");
-  const grupo = grupoEtarioDeEstado(estado);
-  await decir(
-    conversation.id,
-    conversation.contactId,
-    [
-      "Orientación primera vez (derivado a asesor)",
-      lineaDato("Nombre y apellido", quien),
-      lineaDato("Edad", estado.edad),
-      lineaDato("Grupo etario", grupo === "adulto" ? "Adulto" : grupo === "infanto" ? "Infanto" : ""),
-      lineaDato("Motivo", estado.motivoConsulta),
-      lineaDato("Cobertura", estado.cobertura),
-      lineaDato("Mail", estado.email),
-      lineaDato("Celular", estado.telefono),
-    ].join("\n"),
+  // Diagnóstico/síntomas del catálogo: solo etiquetas internas, nunca al paciente.
+  await etiquetarPrimeraVez(
+    conversation,
+    estado,
+    etiquetasSugeridas,
+    diagnosticoIa,
   );
-  await decir(conversation.id, conversation.contactId, TEXTO_PRIMERA_VEZ_CIERRE);
+  await etiquetarNombres(conversation, ["Derivado a asesor"]);
+  // Al paciente: cierre corto. Los datos quedan en ficha/etiquetas para el equipo.
+  await decir(conversation.id, conversation.contactId, textoCierrePrimeraVez(estado));
   await derivarAAsesor(conversation);
   await guardar(conversation.id, vacio("menu", { ...estado, esPaciente: "no" }));
 }
@@ -3454,16 +3856,45 @@ async function recibirPrimeraVezDatos(
   estado: MenuEstado,
   texto: string,
 ): Promise<void> {
+  let etiquetasSugeridas: string[] = [];
+  let diagnosticoIa = "";
   try {
     const extraido = await parsearPrimeraVezConIa(conversation.id, texto);
-    if (extraido.edad.trim()) estado.edad = extraido.edad.replace(/\D/g, "") || extraido.edad.trim();
-    if (extraido.motivoConsulta.trim()) estado.motivoConsulta = extraido.motivoConsulta.trim();
-    if (extraido.cobertura.trim()) estado.cobertura = extraido.cobertura.trim();
     if (extraido.nombre.trim()) estado.nombre = extraido.nombre.trim();
     if (extraido.apellido.trim()) estado.apellido = extraido.apellido.trim();
+    const sexoDicho = sexoDe(extraido.sexo || "");
+    if (extraido.sexo === "masculino" || extraido.sexo === "femenino") {
+      estado.sexo = extraido.sexo;
+    } else if (sexoDicho) {
+      estado.sexo = sexoDicho;
+    }
     const mail = emailDe(extraido.email);
     if (mail) estado.email = mail;
     if (extraido.telefono.trim()) estado.telefono = extraido.telefono.trim();
+    const fecha =
+      fechaNacimientoDe(extraido.fechaNacimiento.trim()) ||
+      fechaNacimientoDe(extraido.fechaNacimiento.replace(/\s+/g, "")) ||
+      "";
+    if (fecha) {
+      estado.fechaNacimiento = fecha;
+      const anios = edadAniosDeFecha(fecha);
+      if (anios != null) estado.edad = String(anios);
+    } else if (extraido.edad.trim()) {
+      estado.edad = extraido.edad.replace(/\D/g, "") || extraido.edad.trim();
+    }
+    if (extraido.cobertura.trim()) estado.cobertura = extraido.cobertura.trim();
+    if (extraido.motivoConsulta.trim()) {
+      const motivo = extraido.motivoConsulta.trim();
+      estado.motivoConsulta = estado.motivoConsulta.trim()
+        ? `${estado.motivoConsulta.trim()}\n${motivo}`
+        : motivo;
+    }
+    if (Array.isArray(extraido.etiquetasSugeridas)) {
+      etiquetasSugeridas = extraido.etiquetasSugeridas;
+    }
+    if (extraido.diagnosticoCatalogo?.trim()) {
+      diagnosticoIa = extraido.diagnosticoCatalogo.trim();
+    }
     if (!estado.apellido.trim() && estado.nombre.includes(" ")) {
       const partes = estado.nombre.trim().split(/\s+/);
       if (partes.length >= 2) {
@@ -3472,11 +3903,30 @@ async function recibirPrimeraVezDatos(
       }
     }
   } catch {
-    // Igual derivamos: el mensaje queda en el chat para el asesor.
+    // Si falla la IA, pedimos de nuevo o derivamos con lo que haya.
+  }
+  // Respuesta corta solo con el sexo (ej. "femenino" / "1").
+  if (estado.sexo !== "femenino" && estado.sexo !== "masculino") {
+    const soloSexo = sexoDe(texto);
+    if (soloSexo) estado.sexo = soloSexo;
   }
   if (!estado.telefono.trim()) await asegurarTelefono(conversation, estado);
-  // Cualquier respuesta pasa a un humano (fin del bot).
-  await cerrarPrimeraVezConAsesor(conversation, estado);
+  completarSexoDesdeNombre(estado);
+
+  const faltan = camposFaltantesPrimeraVez(estado);
+  if (faltan.length) {
+    await guardar(conversation.id, estado);
+    // Etiquetar lo que ya se pudo interpretar, sin cerrar todavía.
+    try {
+      await etiquetarPrimeraVez(conversation, estado, etiquetasSugeridas, diagnosticoIa);
+    } catch {
+      /* ignore */
+    }
+    await preguntar(conversation, mensajePedirFaltantesPrimeraVez(faltan));
+    return;
+  }
+
+  await cerrarPrimeraVezConAsesor(conversation, estado, etiquetasSugeridas, diagnosticoIa);
 }
 
 async function responderMenu(conversation: WaConversation, estado: MenuEstado, texto: string): Promise<void> {

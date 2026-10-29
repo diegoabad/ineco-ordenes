@@ -9,6 +9,10 @@ import {
   removeWhatsappOperator,
 } from "../whatsapp/operators.js";
 import {
+  getDerivacionTurnoConfig,
+  saveDerivacionTurnoConfig,
+} from "../whatsapp/derivacion-turno.js";
+import {
   createQuickReply,
   deleteQuickReply,
   listQuickReplies,
@@ -38,9 +42,12 @@ import {
 import {
   deleteAllPruebaConversations,
   listConversacionesMetricas,
+  resolveConversation,
+  setDiagnosticoPresuntivoHumano,
   setPruebaNota,
   updateContact,
 } from "../whatsapp/firestore-store.js";
+import { nombresMotivosCatalogo, resolverNombreMotivoCatalogo } from "../whatsapp/motivos-catalogo.js";
 import { listLlmUsageByConversation } from "../whatsapp/llm-usage.js";
 import { getAccesosRapidos, saveAccesosRapidos } from "../whatsapp/accesos-rapidos.js";
 import { getMetricaTablero, saveMetricaTablero } from "../whatsapp/metricas-tablero.js";
@@ -50,6 +57,7 @@ import {
   deleteWhatsappTag,
   deleteWhatsappTagGroup,
   listWhatsappTagCatalog,
+  ensureDiagnosticoTagsFromCatalog,
   listWhatsappTags,
   updateWhatsappTag,
   updateWhatsappTagGroup,
@@ -154,6 +162,27 @@ router.get("/operators", async (_req, res) => {
     res.json({ ok: true, data });
   } catch (error) {
     sendError(res, error, "No se pudieron listar las operadoras");
+  }
+});
+
+router.get("/derivacion-turno", async (_req, res) => {
+  try {
+    const data = await getDerivacionTurnoConfig();
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo cargar la derivación de turnos");
+  }
+});
+
+router.put("/derivacion-turno", async (req, res) => {
+  try {
+    const data = await saveDerivacionTurnoConfig({
+      defaultRecepcionista: req.body?.defaultRecepcionista,
+      reglas: req.body?.reglas,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar la derivación de turnos");
   }
 });
 
@@ -396,6 +425,20 @@ router.put("/accesos-rapidos", async (req: AuthedRequest, res) => {
 
 router.get("/tags", async (_req, res) => {
   try {
+    // Semilla idempotente: grupo Diagnóstico + catálogo clínico (Parkinson, TDAH, etc.).
+    try {
+      await ensureDiagnosticoTagsFromCatalog();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!/RESOURCE_EXHAUSTED|Quota exceeded|resource-exhausted/i.test(msg)) throw error;
+    }
+    // Etiquetas de los profesionales de derivación, en el grupo que corresponda.
+    try {
+      await getDerivacionTurnoConfig();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!/RESOURCE_EXHAUSTED|Quota exceeded|resource-exhausted/i.test(msg)) throw error;
+    }
     const data = await listWhatsappTagCatalog();
     res.json({ ok: true, data });
   } catch (error) {
@@ -489,6 +532,8 @@ router.patch("/contacts/:id", async (req, res) => {
     const cobertura =
       typeof req.body?.cobertura === "string" ? req.body.cobertura : "";
     const email = typeof req.body?.email === "string" ? req.body.email : "";
+    const fechaNacimiento =
+      typeof req.body?.fechaNacimiento === "string" ? req.body.fechaNacimiento.trim() : "";
     const grupoEtario =
       typeof req.body?.grupoEtario === "string" ? req.body.grupoEtario.trim() : "";
     const consultaPara =
@@ -521,6 +566,7 @@ router.patch("/contacts/:id", async (req, res) => {
       lastName,
       cobertura,
       email,
+      fechaNacimiento: fechaNacimiento || null,
       grupoEtario: grupoEtario || null,
       consultaPara: consultaPara || null,
       relacionFamiliar,
@@ -540,6 +586,7 @@ router.patch("/contacts/:id", async (req, res) => {
     const status =
       message.includes("obligatorio") ||
       message.includes("email") ||
+      message.includes("fecha de nacimiento") ||
       message.includes("Infanto") ||
       message.includes("tercero") ||
       message.includes("relación familiar") ||
@@ -795,6 +842,116 @@ router.patch("/conversations/:id/assignee", async (req, res) => {
   }
 });
 
+/** Diagnóstico presuntivo corregido/confirmado por una persona del equipo. */
+router.patch("/conversations/:id/diagnostico", async (req: AuthedRequest, res) => {
+  try {
+    const user = req.user;
+    if (!user?.id) {
+      res.status(401).json({ ok: false, message: "No autenticado" });
+      return;
+    }
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const conversation = await getConversation(id);
+    if (!conversation) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    const raw = String(req.body?.diagnostico ?? "").trim();
+    let diagnostico = "";
+    if (raw) {
+      diagnostico = resolverNombreMotivoCatalogo(raw) || raw;
+      const validos = new Set(nombresMotivosCatalogo().map((n) => n.toLowerCase()));
+      if (!validos.has(diagnostico.toLowerCase())) {
+        res.status(400).json({
+          ok: false,
+          message: "Elegí un diagnóstico de la lista",
+        });
+        return;
+      }
+    }
+    const data = await setDiagnosticoPresuntivoHumano(id, {
+      diagnostico,
+      byUserId: user.id,
+      byName: user.nombre?.trim() || user.email || "Operador",
+    });
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    // Sincronizar etiqueta del grupo Diagnóstico si hay valor.
+    if (diagnostico) {
+      try {
+        const catalogo = await listWhatsappTagCatalog();
+        const grupo = catalogo.groups.find(
+          (g) => g.name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase() === "diagnostico",
+        );
+        const diagIds = new Set(
+          catalogo.items
+            .filter((item) => (grupo ? item.groupId === grupo.id : false))
+            .map((item) => item.id),
+        );
+        const tag = catalogo.items.find(
+          (item) =>
+            item.name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase() ===
+            diagnostico.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase(),
+        );
+        const sinDiag = (conversation.tagIds ?? []).filter((tid) => !diagIds.has(tid));
+        const next = tag ? [...new Set([...sinDiag, tag.id])] : sinDiag;
+        await setConversationTags(id, next);
+        const fresh = await getConversation(id);
+        res.json({ ok: true, data: fresh ?? data });
+        return;
+      } catch {
+        /* si falla el tag, igual quedó el diagnóstico */
+      }
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo guardar el diagnóstico");
+  }
+});
+
+/** Marca episodio como resuelto por humano → bot + pausa hasta próximo inbound. */
+router.post("/conversations/:id/resolve", async (req: AuthedRequest, res) => {
+  try {
+    const user = req.user;
+    if (!user?.id) {
+      res.status(401).json({ ok: false, message: "No autenticado" });
+      return;
+    }
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const conversation = await getConversation(id);
+    if (!conversation) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    if (conversation.assigneeKind !== "user" || conversation.assigneeUserId !== user.id) {
+      res.status(403).json({
+        ok: false,
+        message: "Solo podés marcar como resuelta una conversación asignada a vos",
+      });
+      return;
+    }
+    if (conversation.resolutionStatus === "resolved") {
+      res.status(400).json({ ok: false, message: "Esta conversación ya está resuelta" });
+      return;
+    }
+    const data = await resolveConversation(id, {
+      byKind: "human",
+      byUserId: user.id,
+      byName: user.nombre?.trim() || user.email,
+      motivo: "manual",
+    });
+    if (!data) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, "No se pudo marcar como resuelta");
+  }
+});
+
 router.patch("/conversations/:id/tags", async (req, res) => {
   try {
     const rawList: unknown[] = Array.isArray(req.body?.tagIds) ? req.body.tagIds : [];
@@ -805,12 +962,22 @@ router.patch("/conversations/:id/tags", async (req, res) => {
     const catalog = await listWhatsappTags();
     const allowed = new Set(catalog.map((tag) => tag.id));
     const tagIds = [...new Set(rawList.map((id) => String(id ?? "").trim()).filter((id) => id.length > 0))];
-    if (tagIds.some((id) => !allowed.has(id))) {
+    // Solo rechazar altas de ids desconocidos. Si ya estaban (huérfanas del bot/cuota),
+    // se limpian al guardar para no bloquear quitar/agregar etiquetas reales.
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const current = await getConversation(String(id ?? ""));
+    if (!current) {
+      res.status(404).json({ ok: false, message: "Conversación no encontrada" });
+      return;
+    }
+    const prev = new Set((current.tagIds ?? []).map(String));
+    const altasInvalidas = tagIds.filter((tagId) => !allowed.has(tagId) && !prev.has(tagId));
+    if (altasInvalidas.length) {
       res.status(400).json({ ok: false, message: "Hay una etiqueta que no existe" });
       return;
     }
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const data = await setConversationTags(String(id ?? ""), tagIds);
+    const cleaned = tagIds.filter((tagId) => allowed.has(tagId));
+    const data = await setConversationTags(String(id ?? ""), cleaned);
     if (!data) {
       res.status(404).json({ ok: false, message: "Conversación no encontrada" });
       return;

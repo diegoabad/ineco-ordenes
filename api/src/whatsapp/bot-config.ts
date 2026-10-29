@@ -103,8 +103,27 @@ export function botDaTurnos(bot: Record<string, unknown> | null | undefined): bo
 export const TEXTO_TURNO_SIN_ASIGNAR =
   "Por este canal no puedo asignarte el turno ahora: lo va a dar una persona del equipo lo antes posible. Mientras tanto te voy a pedir unos datos para que sea más rápido.";
 
-export const TEXTO_TURNO_DATOS_LISTOS =
-  "Listo, con estos datos alguien del equipo te va a asignar el turno lo antes posible.\n\nMuchas gracias por comunicarte.";
+function despedidaHorario(now = new Date()): string {
+  const hora = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      hour: "numeric",
+      hourCycle: "h23",
+    }).format(now),
+  );
+  if (hora >= 6 && hora < 12) return "¡Que tengas un buen día!";
+  if (hora >= 12 && hora < 20) return "¡Que tengas buenas tardes!";
+  return "¡Que tengas buenas noches!";
+}
+
+/** Cierre tras confirmar el pedido de turno (despedida según horario AR). */
+export function textoTurnoDatosListos(now = new Date()): string {
+  return [
+    "Perfecto. A la brevedad, alguien del equipo de INECO se va a comunicar con vos para comentarte las opciones de turnos disponibles y coordinarlo.",
+    "",
+    despedidaHorario(now),
+  ].join("\n");
+}
 
 export async function saveWhatsappBotConfig(input: {
   data?: Record<string, unknown>;

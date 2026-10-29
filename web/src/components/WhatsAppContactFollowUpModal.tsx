@@ -22,6 +22,8 @@ type Props = {
   open: boolean;
   contact: WaContact | null | undefined;
   phoneNumber?: string | null;
+  /** Fecha del pedido de turno (menuEstado) si la ficha aún no la tiene. */
+  fechaNacimientoPedido?: string | null;
   kind: WaFollowUpKind;
   onClose: () => void;
   onContactSaved?: (contact: WaContact) => void;
@@ -68,6 +70,7 @@ export function WhatsAppContactFollowUpModal({
   open,
   contact,
   phoneNumber,
+  fechaNacimientoPedido,
   kind,
   onClose,
   onContactSaved,
@@ -485,6 +488,7 @@ export function WhatsAppContactFollowUpModal({
           formId="wa-followup-agendar"
           contact={contact}
           phoneNumber={phoneNumber}
+          fechaNacimientoPedido={fechaNacimientoPedido}
           active={open && kind === "agendar"}
           onSaved={(updated) => {
             onContactSaved?.(updated);

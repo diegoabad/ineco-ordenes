@@ -26,6 +26,20 @@ export type WaMessageType =
 export type WaMessageStatus = "RECEIVED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
 export type WaConversationStatus = "OPEN" | "ARCHIVED";
 
+export type WaResolutionStatus = "open" | "resolved";
+export type WaResolucionByKind = "human" | "bot";
+export type WaResolucionMotivo = "manual" | "timeout" | "cierre_bot";
+
+/** Episodio cerrado de una conversación (misma persona puede tener varios). */
+export type WaResolucion = {
+  id: string;
+  at: string;
+  byKind: WaResolucionByKind;
+  byUserId: string | null;
+  byName: string | null;
+  motivo?: WaResolucionMotivo;
+};
+
 export type WaContactGrupoEtario = "infanto" | "adulto";
 export type WaContactConsultaPara = "propio" | "tercero";
 export type WaContactSexo = "masculino" | "femenino";
@@ -39,6 +53,8 @@ export type WaContact = {
   whatsappName: string | null;
   cobertura: string | null;
   email: string | null;
+  /** YYYY-MM-DD */
+  fechaNacimiento: string | null;
   grupoEtario: WaContactGrupoEtario | null;
   consultaPara: WaContactConsultaPara | null;
   /** Quien escribe por WhatsApp cuando no es el paciente. */
@@ -92,6 +108,8 @@ export type MenuPaso =
   | "email"
   | "fechaNacimiento"
   | "pedidoDatos"
+  | "confirmarPedido"
+  | "corregirPedido"
   | "profesional"
   | "tratamiento"
   | "cobertura"
@@ -163,6 +181,26 @@ export type WaConversation = {
   assigneeUserId: string | null;
   assigneeName: string | null;
   tagIds: string[];
+  /** Episodio actual: open hasta que humano o bot lo cierren. */
+  resolutionStatus: WaResolutionStatus;
+  resolvedAt: string | null;
+  resolvedByKind: WaResolucionByKind | null;
+  resolvedByUserId: string | null;
+  resolvedByName: string | null;
+  /** Tras resuelta: el bot no responde hasta el próximo inbound. */
+  botPausedUntilInbound: boolean;
+  /** Historial de episodios resueltos (métricas). */
+  resoluciones: WaResolucion[];
+  /** Motivo libre de primera vez / oportunidad (texto del paciente / IA). */
+  motivoConsulta: string | null;
+  /** Diagnóstico del catálogo sugerido por la IA. */
+  diagnosticoIa: string | null;
+  diagnosticoIaAt: string | null;
+  /** Diagnóstico corregido/confirmado por una persona del equipo. */
+  diagnosticoHumano: string | null;
+  diagnosticoHumanoByUserId: string | null;
+  diagnosticoHumanoByName: string | null;
+  diagnosticoHumanoAt: string | null;
   /** Rastro corto de la charla, para el equipo y para el próximo mensaje. */
   resumen: string | null;
   /** Intención en curso. No es un saludo: la conversación puede seguir con otra. */

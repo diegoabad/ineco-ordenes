@@ -20,6 +20,8 @@ type Props = {
   open: boolean;
   contact: WaContact | null | undefined;
   phoneNumber?: string | null;
+  /** Fecha del pedido de turno (menuEstado) si la ficha aún no la tiene. */
+  fechaNacimientoPedido?: string | null;
   tagIds: string[];
   tags: WaTag[];
   tagGroups: WaTagGroup[];
@@ -50,6 +52,7 @@ export function WhatsAppContactProfileModal({
   open,
   contact,
   phoneNumber,
+  fechaNacimientoPedido,
   tagIds,
   tags,
   tagGroups,
@@ -243,6 +246,7 @@ export function WhatsAppContactProfileModal({
                 formId="wa-profile-datos"
                 contact={contact}
                 phoneNumber={phoneNumber ?? phone}
+                fechaNacimientoPedido={fechaNacimientoPedido}
                 active={open && tab === "datos"}
                 onSaved={(updated) => {
                   onContactSaved?.(updated);
