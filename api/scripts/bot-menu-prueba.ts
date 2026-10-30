@@ -617,7 +617,7 @@ async function main(): Promise<void> {
     await s.decir("1");
     await s.decir("33333333");
     await s.decir("0");
-    esperar("0 cancela a turnos", /Listo, cancelé esto|Sacar un turno/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
+    esperar("0 vuelve a turnos", /Próximos turnos|Pedir turno/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
     esperar("sin cancelar proceso", !/Cancelé este proceso|00\./i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));
     await s.decir("0");
     esperar("0 desde turnos al menú", /Turnos|Información|Tratamientos|Quejas/i.test(ultimo(s.messages)), ultimo(s.messages).slice(0, 160));

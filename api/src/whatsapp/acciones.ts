@@ -1,4 +1,5 @@
 import { nombreDiaSemana, nombreDiaSemanaCorto, nombreMes, partesBuenosAires } from "../lib/fechaEs.js";
+import { formatNombrePersona } from "../lib/nombrePersona.js";
 import { getBuscaTurnoConfig } from "../services/db.service.js";
 import type { BuscaTurnoConfig, BuscaTurnoPrestacion, BuscaTurnoProfesional } from "../types.js";
 import { documentoDePersona } from "./estado-dialogo.js";
@@ -1420,7 +1421,18 @@ function textoFilasParaElegir(
     .join("\n");
 }
 
-/** Próximos turnos desde hoy, ordenados y agrupados por día/hora. */
+/** Si Medexis manda todo en mayúsculas, lo pasa a título. Conserva (A), (B), etc. */
+function presentarTextoTurno(texto: string): string {
+  const limpio = texto.trim();
+  if (!limpio) return "";
+  const letras = limpio.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, "");
+  const esMayus =
+    letras.length > 0 && letras === letras.toLocaleUpperCase("es-AR");
+  const base = esMayus ? formatNombrePersona(limpio) : limpio;
+  return base.replace(/\(([a-z])\)/g, (_, letra: string) => `(${letra.toLocaleUpperCase("es-AR")})`);
+}
+
+/** Próximos turnos desde hoy, ordenados y agrupados por día. */
 function textoProximosAgrupados(
   lista: Record<string, unknown>[],
   config?: BuscaTurnoConfig | null,
@@ -1433,9 +1445,8 @@ function textoProximosAgrupados(
       if (!cuando || cuando.getTime() < inicioHoy) return null;
       return {
         cuando,
-        crudo,
-        profesional: nombreProfesionalTurno(row, config),
-        prestacion: nombrePrestacionTurno(row, config),
+        profesional: presentarTextoTurno(nombreProfesionalTurno(row, config)),
+        prestacion: presentarTextoTurno(nombrePrestacionTurno(row, config)) || "Sin dato",
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
@@ -1446,22 +1457,43 @@ function textoProximosAgrupados(
     return "No tenés turnos próximos en los próximos 6 meses.";
   }
 
-  const bloques: string[] = ["Estos son tus próximos turnos:"];
-  let diaActual = "";
+  const grupos: {
+    clave: string;
+    titulo: string;
+    items: { hora: string; profesional: string; prestacion: string }[];
+  }[] = [];
   for (const fila of filas) {
     const p = partesBuenosAires(fila.cuando);
-    const claveDia = `${p.anio}-${String(p.mes).padStart(2, "0")}-${String(p.dia).padStart(2, "0")}`;
-    if (claveDia !== diaActual) {
-      diaActual = claveDia;
-      bloques.push(
-        "",
-        `${nombreDiaSemana(p.anio, p.mes, p.dia)} ${p.dia} de ${nombreMes(p.mes)}`,
-      );
-    }
+    const clave = `${p.anio}-${String(p.mes).padStart(2, "0")}-${String(p.dia).padStart(2, "0")}`;
+    const titulo = `${nombreDiaSemana(p.anio, p.mes, p.dia)} ${p.dia} de ${nombreMes(p.mes)}`;
     const hora = `${p.hora}:${p.minuto}`;
-    bloques.push(`• ${hora}`);
-    if (fila.profesional) bloques.push(`  Profesional: ${fila.profesional}`);
-    bloques.push(`  Prestación: ${fila.prestacion || "sin dato"}`);
+    const ultimo = grupos[grupos.length - 1];
+    if (!ultimo || ultimo.clave !== clave) {
+      grupos.push({ clave, titulo, items: [] });
+    }
+    grupos[grupos.length - 1]!.items.push({
+      hora,
+      profesional: fila.profesional,
+      prestacion: fila.prestacion,
+    });
+  }
+
+  const bloques: string[] = ["Estos son tus próximos turnos:"];
+  for (const grupo of grupos) {
+    bloques.push("");
+    if (grupo.items.length === 1) {
+      const item = grupo.items[0]!;
+      bloques.push(`${grupo.titulo} · ${item.hora}`);
+      if (item.profesional) bloques.push(item.profesional);
+      bloques.push(item.prestacion);
+      continue;
+    }
+    bloques.push(grupo.titulo);
+    grupo.items.forEach((item, indice) => {
+      if (indice > 0) bloques.push("");
+      bloques.push(item.profesional ? `${item.hora} · ${item.profesional}` : item.hora);
+      bloques.push(item.prestacion);
+    });
   }
   return bloques.join("\n");
 }

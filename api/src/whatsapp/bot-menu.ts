@@ -232,6 +232,15 @@ function sinTildes(texto: string): string {
   return texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 }
 
+/** Saludo suelto, sin otro pedido. No es una opción del menú. */
+function esSaludo(texto: string): boolean {
+  const t = sinTildes(texto)
+    .replace(/[!¡¿?.,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(hola+|holis|hey|hi|hello|buenas|buen dia|buenos dias|buenas tardes|buenas noches|que tal)$/.test(t);
+}
+
 function vacio(paso: MenuPaso, prev?: Partial<MenuEstado> | null): MenuEstado {
   return {
     paso,
@@ -414,9 +423,13 @@ function listaMenu(modo: "inicio" | "otraVez" = "otraVez"): string {
   return `${titulo}\n\n${lineas.join("\n")}\n\n0. Por ahora nada más`;
 }
 
-function listaTurnos(): string {
+function listaTurnos(modo: "inicio" | "otraVez" = "otraVez"): string {
+  const titulo =
+    modo === "inicio"
+      ? "¿En qué te puedo ayudar con los turnos?"
+      : "¿Te puedo ayudar en algo más con los turnos?";
   return [
-    "¿Te puedo ayudar en algo más con los turnos?",
+    titulo,
     "",
     "1. Próximos turnos",
     "2. Cancelar turnos",
@@ -1005,13 +1018,18 @@ async function saludo(): Promise<string> {
   return `${texto}\n\n${avisoUrgencias}`;
 }
 
+/** Saludo y elección de sucursal. Es el arranque, también después de que el bot terminó. */
+async function empezarDeCero(conversation: WaConversation): Promise<void> {
+  await decir(conversation.id, conversation.contactId, await saludo());
+  await decir(conversation.id, conversation.contactId, listaSedes());
+  await guardar(conversation.id, vacio("sede"));
+}
+
 /** Primeros mensajes al abrir una prueba del bot de opciones. */
 export async function abrirBotMenu(conversationId: string): Promise<void> {
   const conversation = memoria?.conversation ?? (await getConversation(conversationId));
   if (!conversation?.contactId || conversation.pruebaMotor !== "menu") return;
-  await decir(conversationId, conversation.contactId, await saludo());
-  await decir(conversationId, conversation.contactId, listaSedes());
-  await guardar(conversationId, vacio("sede"));
+  await empezarDeCero(conversation);
 }
 
 function ctxDe(estado: MenuEstado, telefono: string) {
@@ -1908,14 +1926,21 @@ async function volverTurnos(
   conversation: WaConversation,
   estado: MenuEstado,
   previo = "",
+  junto = false,
 ): Promise<void> {
   const siguiente = vacio("turnos", { ...estado, pendiente: "", opciones: [], anularLuego: "", modo: "" });
   await guardar(conversation.id, siguiente);
-  // Listado / confirmación en un globo; el menú de turnos en otro.
-  if (previo.trim()) {
-    await decir(conversation.id, conversation.contactId, previo.trim());
+  const menu = listaTurnos();
+  const cuerpo = previo.trim();
+  // Próximos turnos: listado y menú en el mismo mensaje, con aire entre ambos.
+  if (junto && cuerpo) {
+    await decir(conversation.id, conversation.contactId, `${cuerpo}\n\n${menu}`);
+    return;
   }
-  await decir(conversation.id, conversation.contactId, listaTurnos());
+  if (cuerpo) {
+    await decir(conversation.id, conversation.contactId, cuerpo);
+  }
+  await decir(conversation.id, conversation.contactId, menu);
 }
 
 async function pedirDni(conversation: WaConversation, estado: MenuEstado): Promise<void> {
@@ -2723,12 +2748,12 @@ async function despuesDelDni(conversation: WaConversation, estado: MenuEstado): 
         );
         return;
       }
+      const fallo = esErrorSistema(salida.texto);
       await volverTurnos(
         conversation,
         estado,
-        esErrorSistema(salida.texto)
-          ? "No pude consultar los turnos. El sistema no respondió."
-          : salida.texto,
+        fallo ? "No pude consultar los turnos. El sistema no respondió." : salida.texto,
+        !fallo,
       );
       return;
     }
@@ -3473,7 +3498,7 @@ async function caminoTurnos(conversation: WaConversation, estado: MenuEstado, te
   const t = sinTildes(texto).trim();
   // 0 = cancelar lo que estamos haciendo y volver al menú de turnos (o al principal).
   if (quiereVolver(t) && estado.paso !== "turnos") {
-    await volverTurnos(conversation, estado, "Listo, cancelé esto.");
+    await volverTurnos(conversation, estado);
     return;
   }
 
@@ -3860,7 +3885,7 @@ async function irAMenuCaba(conversation: WaConversation, previo = ""): Promise<v
 }
 
 async function cerrarAlgoMas(conversation: WaConversation): Promise<void> {
-  await guardar(conversation.id, vacio("sede"));
+  await guardar(conversation.id, vacio("cerrado"));
   await decir(
     conversation.id,
     conversation.contactId,
@@ -4243,12 +4268,21 @@ async function recibirPrimeraVezDatos(
 }
 
 async function responderMenu(conversation: WaConversation, estado: MenuEstado, texto: string): Promise<void> {
+  if (estado.paso === "cerrado") {
+    await empezarDeCero(conversation);
+    return;
+  }
+
   if (estado.paso === "algoMas") {
     await responderAlgoMas(conversation, estado, texto);
     return;
   }
 
   if (estado.paso === "sede") {
+    if (esSaludo(texto)) {
+      await empezarDeCero(conversation);
+      return;
+    }
     const sede = sedeElegida(texto);
     if (!sede) {
       await decir(conversation.id, conversation.contactId, noValida(listaSedes()));
@@ -4326,7 +4360,7 @@ async function responderMenu(conversation: WaConversation, estado: MenuEstado, t
   if (opcion.clave === "turnos") {
     await etiquetarNombres(conversation, ["CABA"], true);
     await guardar(conversation.id, vacio("turnos", estado));
-    await decir(conversation.id, conversation.contactId, listaTurnos());
+    await decir(conversation.id, conversation.contactId, listaTurnos("inicio"));
     return;
   }
   if (opcion.clave === "pagos") {

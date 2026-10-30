@@ -129,6 +129,7 @@ function normalizeContact(id: string, raw: Record<string, unknown>): WaContact {
 function menuPasoDe(raw: unknown): MenuPaso | null {
   const paso = String(raw ?? "");
   const validos: MenuPaso[] = [
+    "cerrado",
     "sede",
     "algoMas",
     "pacienteTipo",

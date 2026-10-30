@@ -148,14 +148,14 @@ const PASOS: Paso[] = [
     id: "turnos",
     titulo: "Menú turnos",
     mensaje:
-      "¿Te puedo ayudar en algo más con los turnos?\n\n1. Próximos turnos\n2. Cancelar turnos\n3. Pedir turno\n\n0. Volver atrás",
+      "¿En qué te puedo ayudar con los turnos?\n\n1. Próximos turnos\n2. Cancelar turnos\n3. Pedir turno\n\n0. Volver atrás",
     opciones: [
       {
         clave: "1",
         titulo: "Próximos turnos",
         accion:
-          "Etiquetar turnos + proximos-turnos → listado en un mensaje → en otro el menú de turnos",
-        siguiente: "Listado (msg 1) + menú turnos (msg 2)",
+          "Etiquetar turnos + proximos-turnos → listado y menú de turnos en un solo mensaje",
+        siguiente: "Listado + menú turnos",
       },
       {
         clave: "2",

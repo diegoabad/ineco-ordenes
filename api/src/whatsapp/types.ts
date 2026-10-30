@@ -91,6 +91,7 @@ export type WaPruebaAclaracion = {
 };
 
 export type MenuPaso =
+  | "cerrado"
   | "sede"
   | "algoMas"
   | "pacienteTipo"
